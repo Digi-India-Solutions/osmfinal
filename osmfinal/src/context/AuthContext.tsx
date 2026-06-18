@@ -68,9 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const checkAuth = async () => {
       try {
         const response = await api.get('/api/v1/auth/me');
-
+        console.log("AAA===>", response.data)
         if (response.data.success) {
           const userData = response.data.data;
+           console.log("AAA===>", response.data.data)
           setCurrentUser(userData);
           localStorage.setItem('osm_user', JSON.stringify(userData));
         } else {
