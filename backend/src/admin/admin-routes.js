@@ -1,0 +1,37 @@
+// exam-admin-routes.js
+import { Router } from 'express';
+import {
+  login,
+  logout,
+  refreshToken,
+  GetSingleUser,
+  ForgotPassword,
+  ResetPassword,
+  verifyLoggedIn,
+  createUserByAdmin,
+  getAllUsers,
+  updateUserByAdmin,
+  deleteUserByAdmin,
+} from './admin-controller.js';
+import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
+
+const router = Router();
+
+// Auth routes
+router.post('/login', login);
+router.post('/logout', verifyToken, logout);
+router.post('/refresh-token', refreshToken);
+router.get('/me', verifyToken, verifyLoggedIn);
+
+// Password routes
+router.post('/forgot-password', ForgotPassword);
+router.post('/reset-password/:token', ResetPassword);
+
+// User management
+router.get('/user', verifyToken, GetSingleUser);
+router.post('/users', verifyToken, createUserByAdmin);
+router.get('/users', verifyToken, getAllUsers);
+router.patch('/users/:id', verifyToken, updateUserByAdmin);
+router.delete('/users/:id', verifyToken, deleteUserByAdmin);
+
+export default router;
