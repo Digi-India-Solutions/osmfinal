@@ -526,6 +526,74 @@ export const createUserByAdmin = async (req, res) => {
   }
 };
 
+export const changePassword = async (req, res) => {
+  const userId = req.user.id;
+  const { currentPassword, newPassword } = req.body;
+
+  try {
+    // 1. Validation
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password and new password are required',
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters',
+      });
+    }
+
+    // 2. Get user from database
+    const result = await connectDB.query(
+      `SELECT id, email, password_hash, role FROM users WHERE id = $1 AND is_active = true`,
+      [userId],
+    );
+    const user = result.rows[0];
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    // 3. Verify current password
+    const isMatch = await comparePassword(currentPassword, user.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password is incorrect',
+      });
+    }
+
+    // 4. Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // 5. Update password
+    await connectDB.query(
+      `UPDATE users 
+       SET password_hash = $1, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $2`,
+      [hashedPassword, userId],
+    );
+
+    // 6. Send success response
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully',
+    });
+  } catch (error) {
+    console.error('Change Password Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
 export const getAllUsers = async (req, res) => {
   try {
     const page = Number(req.query.page || 1);
@@ -704,8 +772,6 @@ export const updateUserByAdmin = async (req, res) => {
   }
 };
 
-// exam-admin-controller.js - DELETE FUNCTION FIXED
-
 export const deleteUserByAdmin = async (req, res) => {
   const userId = req.params.id;
 
@@ -732,16 +798,12 @@ export const deleteUserByAdmin = async (req, res) => {
 
     // 3. ✅ HARD DELETE - Permanently delete user
     // Pehle user_permissions delete karo
-    await connectDB.query(
-      `DELETE FROM user_permissions WHERE user_id = $1`,
-      [userId],
-    );
+    await connectDB.query(`DELETE FROM user_permissions WHERE user_id = $1`, [
+      userId,
+    ]);
 
     // Phir user delete karo
-    await connectDB.query(
-      `DELETE FROM users WHERE id = $1`,
-      [userId],
-    );
+    await connectDB.query(`DELETE FROM users WHERE id = $1`, [userId]);
 
     res.status(200).json({
       success: true,
@@ -792,6 +854,47 @@ export const GetSingleUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Get User Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const updateProfile = async (req, res) => {
+  const userId = req.user.id;
+  const { name } = req.body;
+
+  try {
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name is required',
+      });
+    }
+
+    const result = await connectDB.query(
+      `UPDATE users 
+       SET name = $1, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $2 AND is_active = true
+       RETURNING id, name, email, role`,
+      [name.trim(), userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Update Profile Error:', error.message);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
