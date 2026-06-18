@@ -1,5 +1,5 @@
 // pages/admin/UserManagement.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { userApi, CreateUserData } from '@/api/users';
 import { useAuth } from '@/context/AuthContext';
 import Breadcrumb from '@/components/ui/Breadcrumb';
@@ -51,15 +51,40 @@ export default function UserManagement() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
   const [apiError, setApiError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Delete Confirmation State
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const showToast = (msg: string) => {
+  // ─── REFS FOR MODAL ──────────────────────────────────────────
+
+  const modalRef = useRef<HTMLDivElement>(null);
+  const deleteModalRef = useRef<HTMLDivElement>(null);
+
+  // ─── CLOSE MODAL ON OUTSIDE CLICK ───────────────────────────
+
+  const handleModalClose = () => {
+    if (!isSaving) {
+      setShowModal(false);
+    }
+  };
+
+  const handleDeleteModalClose = () => {
+    if (!isDeleting) {
+      setShowDeleteModal(false);
+      setUserToDelete(null);
+    }
+  };
+
+  // ─── TOAST FUNCTION ──────────────────────────────────────────
+
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setSuccessMessage(msg);
+    setToastType(type);
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
   };
@@ -73,7 +98,7 @@ export default function UserManagement() {
       setUserList(data.items || []);
     } catch (error: any) {
       console.error('Failed to fetch users:', error);
-      showToast('Failed to load users');
+      showToast('Failed to load users', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -146,6 +171,9 @@ export default function UserManagement() {
   const handleSave = async () => {
     if (!isFormValid) return;
 
+    setIsSaving(true);
+    setApiError('');
+
     try {
       if (editingUser) {
         const updateData: Partial<CreateUserData & { subject?: string }> = {
@@ -163,7 +191,8 @@ export default function UserManagement() {
         setUserList((prev) =>
           prev.map((u) => (u.id === editingUser.id ? { ...u, ...updated } : u)),
         );
-        showToast('User updated successfully');
+        showToast('User updated successfully', 'success');
+        setShowModal(false);
       } else {
         const newUser = await userApi.createUser({
           name: form.name,
@@ -174,21 +203,24 @@ export default function UserManagement() {
           subject: form.subject || null,
         });
         setUserList((prev) => [...prev, newUser]);
-        showToast('User added successfully');
+        showToast('User added successfully', 'success');
+        setShowModal(false);
       }
-      setShowModal(false);
     } catch (error: any) {
       console.error('Save error:', error);
-      setApiError(error.response?.data?.message || 'Failed to save user');
+      const errorMsg = error.response?.data?.message || 'Failed to save user';
+      setApiError(errorMsg);
+      showToast(errorMsg, 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  // ─── DELETE USER (Hard Delete) ──────────────────────────────
+  // ─── DELETE USER ──────────────────────────────────────────────
 
   const openDeleteModal = (user: User) => {
-    // 🛡️ Extra safety: Admin ko delete nahi kar sakte
     if (user.role === 'admin') {
-      showToast('Cannot delete admin user');
+      showToast('Cannot delete admin user', 'error');
       return;
     }
     setUserToDelete(user);
@@ -199,15 +231,19 @@ export default function UserManagement() {
     if (!userToDelete) return;
 
     setIsDeleting(true);
+    setApiError('');
+
     try {
       await userApi.deleteUser(userToDelete.id);
       setUserList((prev) => prev.filter((u) => u.id !== userToDelete.id));
-      showToast('User deleted successfully');
+      showToast('User deleted successfully', 'success');
       setShowDeleteModal(false);
       setUserToDelete(null);
     } catch (error: any) {
       console.error('Delete error:', error);
-      setApiError(error.response?.data?.message || 'Failed to delete user');
+      const errorMsg = error.response?.data?.message || 'Failed to delete user';
+      setApiError(errorMsg);
+      showToast(errorMsg, 'error');
     } finally {
       setIsDeleting(false);
     }
@@ -224,14 +260,30 @@ export default function UserManagement() {
         items={[{ label: 'Admin', href: '/admin' }, { label: 'Users' }]}
       />
 
+      {/* ─── TOAST NOTIFICATION ───────────────────────────────── */}
+
       {showSuccess && (
-        <div className="fixed top-20 right-6 z-50 bg-gray-900 text-white text-sm px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 animate-pulse">
+        <div
+          className={`fixed top-20 right-6 z-50 text-sm px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 animate-pulse ${
+            toastType === 'error'
+              ? 'bg-red-600 text-white'
+              : 'bg-gray-900 text-white'
+          }`}
+        >
           <span className="w-4 h-4 flex items-center justify-center">
-            <i className="ri-check-line"></i>
+            <i
+              className={
+                toastType === 'error'
+                  ? 'ri-error-warning-line'
+                  : 'ri-check-line'
+              }
+            ></i>
           </span>
           {successMessage}
         </div>
       )}
+
+      {/* ─── HEADER ────────────────────────────────────────────── */}
 
       <div className="flex items-center justify-between">
         <div>
@@ -242,6 +294,7 @@ export default function UserManagement() {
             Manage all system users and their roles
           </p>
         </div>
+
         <button
           onClick={openAdd}
           className="flex items-center gap-2 bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-gray-800 transition-colors cursor-pointer whitespace-nowrap"
@@ -253,11 +306,15 @@ export default function UserManagement() {
         </button>
       </div>
 
+      {/* ─── API ERROR ──────────────────────────────────────────── */}
+
       {apiError && (
         <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-lg text-sm">
           {apiError}
         </div>
       )}
+
+      {/* ─── USER TABLE ─────────────────────────────────────────── */}
 
       <div className="bg-white rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
@@ -285,83 +342,98 @@ export default function UserManagement() {
               </tr>
             </thead>
             <tbody>
-              {userList.map((user) => (
-                <tr
-                  key={user.id}
-                  className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
-                >
-                  <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
-                    {user.name}
-                  </td>
-                  <td className="py-3 px-4 text-gray-600 text-xs whitespace-nowrap">
-                    {user.email}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${roleBadgeColors[user.role]}`}
-                    >
-                      {roleOptions.find((r) => r.value === user.role)?.label ||
-                        user.role}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
-                    {user.subject || '—'}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${
-                        user.isActive
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-gray-100 text-gray-500'
-                      }`}
-                    >
-                      {user.isActive ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {/* Edit Button - Sabke liye */}
-                      <button
-                        onClick={() => openEdit(user)}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors cursor-pointer"
-                        title="Edit User"
-                      >
-                        <i className="ri-edit-line text-sm"></i>
-                      </button>
-
-                      {/* 🛡️ Delete Button - Sirf non-admin ke liye */}
-                      {user.role !== 'admin' ? (
-                        <button
-                          onClick={() => openDeleteModal(user)}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="Delete Permanently"
-                        >
-                          <i className="ri-delete-bin-line text-sm"></i>
-                        </button>
-                      ) : (
-                        <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-2 py-1 rounded-full whitespace-nowrap">
-                        </span>
-                      )}
+              {userList.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
+                      <i className="ri-team-line text-xl text-gray-400"></i>
                     </div>
+                    <p className="text-sm text-gray-500">No users found</p>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                userList.map((user) => (
+                  <tr
+                    key={user.id}
+                    className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
+                  >
+                    <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
+                      {user.name}
+                    </td>
+                    <td className="py-3 px-4 text-gray-600 text-xs whitespace-nowrap">
+                      {user.email}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span
+                        className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${roleBadgeColors[user.role]}`}
+                      >
+                        {roleOptions.find((r) => r.value === user.role)
+                          ?.label || user.role}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      {user.subject || '—'}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span
+                        className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${
+                          user.isActive
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                      >
+                        {user.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openEdit(user)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors cursor-pointer"
+                          title="Edit User"
+                        >
+                          <i className="ri-edit-line text-sm"></i>
+                        </button>
+
+                        {user.role !== 'admin' && (
+                          <button
+                            onClick={() => openDeleteModal(user)}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="Delete Permanently"
+                          >
+                            <i className="ri-delete-bin-line text-sm"></i>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* ─── ADD/EDIT MODAL ────────────────────────────────────── */}
+      {/* ─── ADD/EDIT MODAL (WITH OUTSIDE CLICK) ──────────────── */}
+
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-lg mx-4 p-6">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={handleModalClose} // ✅ Click outside = close
+        >
+          <div
+            ref={modalRef}
+            className="bg-white rounded-2xl w-full max-w-lg mx-4 p-6"
+            onClick={(e) => e.stopPropagation()} // ✅ Prevent closing when clicking inside
+          >
             <div className="flex items-center justify-between mb-5">
               <h4 className="text-base font-semibold text-gray-900">
                 {editingUser ? 'Edit User' : 'Add New User'}
               </h4>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={handleModalClose}
                 className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors cursor-pointer"
+                disabled={isSaving}
               >
                 <i className="ri-close-line text-lg"></i>
               </button>
@@ -381,7 +453,10 @@ export default function UserManagement() {
                   }}
                   onBlur={() => validateField('name', form.name)}
                   placeholder="e.g. Mr. Sharma"
-                  className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${errors.name ? 'border-rose-400' : 'border-gray-200'}`}
+                  className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${
+                    errors.name ? 'border-rose-400' : 'border-gray-200'
+                  }`}
+                  disabled={isSaving}
                 />
                 {errors.name && (
                   <p className="text-xs text-rose-500 mt-1">{errors.name}</p>
@@ -401,7 +476,10 @@ export default function UserManagement() {
                   }}
                   onBlur={() => validateField('email', form.email)}
                   placeholder="user@osm.com"
-                  className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${errors.email ? 'border-rose-400' : 'border-gray-200'}`}
+                  className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${
+                    errors.email ? 'border-rose-400' : 'border-gray-200'
+                  }`}
+                  disabled={isSaving}
                 />
                 {errors.email && (
                   <p className="text-xs text-rose-500 mt-1">{errors.email}</p>
@@ -422,7 +500,10 @@ export default function UserManagement() {
                   }}
                   onBlur={() => validateField('password', form.password)}
                   placeholder="Enter password"
-                  className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${errors.password ? 'border-rose-400' : 'border-gray-200'}`}
+                  className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${
+                    errors.password ? 'border-rose-400' : 'border-gray-200'
+                  }`}
+                  disabled={isSaving}
                 />
                 {errors.password && (
                   <p className="text-xs text-rose-500 mt-1">
@@ -445,6 +526,7 @@ export default function UserManagement() {
                     })
                   }
                   className="w-full px-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer"
+                  disabled={isSaving}
                 >
                   {roleOptions.map((r) => (
                     <option key={r.value} value={r.value}>
@@ -467,6 +549,7 @@ export default function UserManagement() {
                     }
                     placeholder="Enter subject (e.g., Mathematics)"
                     className="w-full px-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400"
+                    disabled={isSaving}
                   />
                 </div>
               )}
@@ -474,27 +557,46 @@ export default function UserManagement() {
 
             <div className="flex items-center gap-3 mt-6 pt-5 border-t border-gray-100">
               <button
-                onClick={() => setShowModal(false)}
+                onClick={handleModalClose}
                 className="flex-1 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer whitespace-nowrap"
+                disabled={isSaving}
               >
                 Cancel
               </button>
+
               <button
                 onClick={handleSave}
-                disabled={!isFormValid}
-                className="flex-1 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+                disabled={!isFormValid || isSaving}
+                className="flex-1 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap flex items-center justify-center gap-2"
               >
-                {editingUser ? 'Save Changes' : 'Add User'}
+                {isSaving ? (
+                  <>
+                    <i className="ri-loader-4-line animate-spin"></i>
+                    {editingUser ? 'Updating...' : 'Adding...'}
+                  </>
+                ) : editingUser ? (
+                  'Save Changes'
+                ) : (
+                  'Add User'
+                )}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ─── DELETE CONFIRMATION MODAL ────────────────────────── */}
+      {/* ─── DELETE CONFIRMATION MODAL (WITH OUTSIDE CLICK) ──── */}
+
       {showDeleteModal && userToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-md mx-4 p-6">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={handleDeleteModalClose} // ✅ Click outside = close
+        >
+          <div
+            ref={deleteModalRef}
+            className="bg-white rounded-2xl w-full max-w-md mx-4 p-6"
+            onClick={(e) => e.stopPropagation()} // ✅ Prevent closing when clicking inside
+          >
             <div className="text-center">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <i className="ri-delete-bin-line text-red-600 text-2xl"></i>
@@ -532,10 +634,7 @@ export default function UserManagement() {
 
             <div className="flex items-center gap-3 mt-6 pt-5 border-t border-gray-100">
               <button
-                onClick={() => {
-                  setShowDeleteModal(false);
-                  setUserToDelete(null);
-                }}
+                onClick={handleDeleteModalClose}
                 className="flex-1 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer whitespace-nowrap"
                 disabled={isDeleting}
               >

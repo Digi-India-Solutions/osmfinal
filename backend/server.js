@@ -110,10 +110,14 @@ import productionOrderRoutes from './src/menufacturing/production/productionOrde
 import productionEntryRoutes from './src/menufacturing/Shop-floor/Production-entry-routes.js';
 import machineDowntimeRoutes from './src/menufacturing/Shop-floor/machineDowntime/machine-downtimeRoutes.js';
 import hashRouter from './src/admin/hash.routes.js'; 
+import settingRoutes from './src/setting/settingRoutes.js'; 
+import subjectRoutes from './src/Subject/subjectRoutes.js';
 
 app.use('/backups', express.static(path.join(process.cwd(), 'backups')));
 app.use("/api/v1/reports", reportsRouter);
 app.use("/api/v1/auth", adminRouter);
+app.use('/api/v1/setting', settingRoutes);
+app.use('/api/v1/auth', subjectRoutes);
 app.use('/api/v1/hash', hashRouter); 
 app.use("/api/v1/role", adminRoleRouter)
 app.use("/api/v1/categories", categoryRouter)

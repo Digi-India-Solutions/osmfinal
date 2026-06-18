@@ -12,6 +12,8 @@ import {
   getAllUsers,
   updateUserByAdmin,
   deleteUserByAdmin,
+  changePassword,
+  updateProfile,
 } from './admin-controller.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
@@ -26,6 +28,12 @@ router.get('/me', verifyToken, verifyLoggedIn);
 // Password routes
 router.post('/forgot-password', ForgotPassword);
 router.post('/reset-password/:token', ResetPassword);
+
+// Change password (protected - only admin)
+router.post('/change-password', verifyToken, changePassword);
+
+// Update profile name (protected - only admin)
+router.put('/users/profile', verifyToken, updateProfile);
 
 // User management
 router.get('/user', verifyToken, GetSingleUser);
