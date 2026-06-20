@@ -28,6 +28,8 @@ const storage = multer.diskStorage({
       folder = 'mark-scheme/model-answers';
     } else if (file.fieldname === 'question_paper_pdf') {
       folder = 'mark-scheme/question-papers';
+    } else if (file.fieldname === 'sheets' || file.fieldname === 'sheet') {
+      folder = 'sheets'; // ✅ Added for sheets upload
     }
 
     const uploadPath = path.join(process.cwd(), 'uploads', folder);
@@ -42,7 +44,9 @@ const storage = multer.diskStorage({
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const ext = path.extname(file.originalname);
 
-    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
+    // Keep original filename for barcode extraction
+    const baseName = path.parse(file.originalname).name;
+    cb(null, `${baseName}-${uniqueSuffix}${ext}`);
   },
 });
 
@@ -92,6 +96,31 @@ export const uploadPDF = multer({
       cb(null, true);
     } else {
       cb(new Error('Only PDF files are allowed'), false);
+    }
+  },
+});
+
+// ✅ For Sheets (PDF, JPG, PNG - larger limit)
+export const uploadSheets = multer({
+  storage: storage,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB per file
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/jpg',
+    ];
+    if (
+      allowedTypes.includes(file.mimetype) ||
+      file.originalname.endsWith('.pdf') ||
+      file.originalname.endsWith('.jpg') ||
+      file.originalname.endsWith('.jpeg') ||
+      file.originalname.endsWith('.png')
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF, JPG, JPEG and PNG files are allowed'), false);
     }
   },
 });
