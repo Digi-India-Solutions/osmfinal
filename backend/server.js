@@ -76,6 +76,7 @@ import examManagemantRouter from './src/exam-management/exam-management-routes.j
 import markSchemeRouter from "./src/mark-scheme/mark-scheme-routes.js"
 import settingRoutes from './src/setting/settingRoutes.js'; 
 import subjectRoutes from './src/Subject/subjectRoutes.js';
+import StudentRoutes from './src/students/studentRoutes.js';
 app.use('/backups', express.static(path.join(process.cwd(), 'backups')));
 app.use("/api/v1/reports", reportsRouter);
 app.use("/api/v1/auth", adminRouter);
@@ -86,6 +87,7 @@ app.use("/api/v1/company", companyRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
 app.use("/api/v1/exam", examManagemantRouter);
 app.use("/api/v1/mark-scheme", markSchemeRouter);
+app.use("/api/v1/Students", StudentRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running");
