@@ -1,6 +1,7 @@
-import { v2 as cloudinary } from "cloudinary";
-import fs from "fs";
-import dotenv from "dotenv";
+// src/utils/cloudinary.util.js
+import { v2 as cloudinary } from 'cloudinary';
+import fs from 'fs';
+import dotenv from 'dotenv';
 dotenv.config();
 
 cloudinary.config({
@@ -11,15 +12,19 @@ cloudinary.config({
 
 const deleteLocalFile = (filePath) => {
   fs.unlink(filePath, (err) => {
-    if (err) console.log("Local file delete error:", err);
+    if (err) console.log('Local file delete error:', err);
   });
 };
 
-// ✅ Upload Image
-export const uploadImageToCloudinary = async (filePath) => {
+// ✅ Upload to Cloudinary with dynamic folder
+export const uploadImageToCloudinary = async (
+  filePath,
+  folder = 'profiles',
+) => {
   try {
     const result = await cloudinary.uploader.upload(filePath, {
-      folder: "profiles",
+      folder: folder,
+      resource_type: 'auto', // Auto detect file type
     });
 
     deleteLocalFile(filePath);
@@ -30,7 +35,7 @@ export const uploadImageToCloudinary = async (filePath) => {
     };
   } catch (error) {
     deleteLocalFile(filePath);
-    throw new Error("Cloudinary upload failed: " + error.message);
+    throw new Error('Cloudinary upload failed: ' + error.message);
   }
 };
 
@@ -38,8 +43,8 @@ export const uploadImageToCloudinary = async (filePath) => {
 export const uploadVideoToCloudinary = async (filePath) => {
   try {
     const result = await cloudinary.uploader.upload(filePath, {
-      resource_type: "video",
-      folder: "videos",
+      resource_type: 'video',
+      folder: 'videos',
     });
 
     deleteLocalFile(filePath);
@@ -50,17 +55,17 @@ export const uploadVideoToCloudinary = async (filePath) => {
     };
   } catch (error) {
     deleteLocalFile(filePath);
-    throw new Error("Cloudinary video upload failed: " + error.message);
+    throw new Error('Cloudinary video upload failed: ' + error.message);
   }
 };
 
-// ✅ Delete from Cloudinary (CORRECT)
+// ✅ Delete from Cloudinary
 export const deleteFromCloudinary = async (publicId) => {
   try {
     if (!publicId) return;
 
     return await cloudinary.uploader.destroy(publicId);
   } catch (error) {
-    throw new Error("Cloudinary deletion failed: " + error.message);
+    throw new Error('Cloudinary deletion failed: ' + error.message);
   }
 };
