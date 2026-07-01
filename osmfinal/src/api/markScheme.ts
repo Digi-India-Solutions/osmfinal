@@ -1,4 +1,5 @@
 // src/api/markScheme.ts
+
 import axiosInstance from './axios';
 
 export interface MarkSchemeRow {
@@ -43,29 +44,20 @@ export const markSchemeApi = {
     }
   },
 
-  // ✅ Save mark scheme with PDFs (multipart/form-data)
+  // ✅ Save mark scheme - JSON body
   save: async (
     examId: string,
     schemes: SaveMarkSchemeItem[],
-    files?: { model_answer?: File; question_paper?: File },
   ): Promise<MarkSchemeResponse> => {
     try {
-      const formData = new FormData();
-      formData.append('schemes', JSON.stringify(schemes));
-
-      if (files?.model_answer) {
-        formData.append('model_answer_pdf', files.model_answer);
-      }
-      if (files?.question_paper) {
-        formData.append('question_paper_pdf', files.question_paper);
-      }
+      console.log('🔍 Saving schemes:', schemes); // Debug
 
       const response = await axiosInstance.post(
         `/api/v1/mark-scheme/exams/${examId}/mark-scheme`,
-        formData,
+        { schemes }, // ✅ Direct array as JSON
         {
           headers: {
-            'Content-Type': 'multipart/form-data',
+            'Content-Type': 'application/json',
           },
         },
       );
@@ -81,10 +73,11 @@ export const markSchemeApi = {
   },
 
   // ✅ Upload only model answer PDF
+  // ✅ Upload only model answer PDF
   uploadModelAnswer: async (examId: string, file: File): Promise<any> => {
     try {
       const formData = new FormData();
-      formData.append('model_answer_pdf', file);
+      formData.append('model_answer_pdf', file); // ✅ CHANGE: 'file' se 'model_answer_pdf'
 
       const response = await axiosInstance.post(
         `/api/v1/mark-scheme/exams/${examId}/model-answer`,
@@ -110,7 +103,7 @@ export const markSchemeApi = {
   uploadQuestionPaper: async (examId: string, file: File): Promise<any> => {
     try {
       const formData = new FormData();
-      formData.append('question_paper_pdf', file);
+      formData.append('question_paper_pdf', file); // ✅ CHANGE: 'file' se 'question_paper_pdf'
 
       const response = await axiosInstance.post(
         `/api/v1/mark-scheme/exams/${examId}/question-paper`,
@@ -131,6 +124,7 @@ export const markSchemeApi = {
       };
     }
   },
+
 
   // ✅ Delete PDF
   deletePDF: async (

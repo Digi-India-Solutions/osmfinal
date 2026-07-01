@@ -21,25 +21,101 @@ export const uploadSheets = async (req, res) => {
       });
     }
 
+    // ─── BARCODE VALIDATION FUNCTION ──────────────────────────
+    const isValidBarcode = (barcode) => {
+      // Pattern 1: BAR001, BAR002, etc.
+      const pattern1 = /^BAR\d{3}$/i;
+
+      // Pattern 2: STU001, STU002, etc.
+      const pattern2 = /^STU\d{3}$/i;
+
+      // Pattern 3: Just numbers (001, 002, etc.)
+      const pattern3 = /^\d{3}$/;
+
+      // Pattern 4: Any alphanumeric with 3+ digits (custom)
+      const pattern4 = /^[A-Z]{3}\d{3}$/i;
+
+      return (
+        pattern1.test(barcode) ||
+        pattern2.test(barcode) ||
+        pattern3.test(barcode) ||
+        pattern4.test(barcode)
+      );
+    };
+
     const uploadedSheets = [];
+    let linkedCount = 0;
+    let unlinkedCount = 0;
+    const duplicateSheets = [];
+    const invalidFiles = []; // Track invalid files
 
     for (const file of req.files) {
-      // Upload to Cloudinary
+      // ─── EXTRACT BARCODE FROM FILENAME ──────────────────
+      const fileName = path.parse(file.originalname).name;
+      const barcode = fileName.trim().toUpperCase();
+
+      // ─── VALIDATION 1: CHECK IF VALID BARCODE FORMAT ────
+      if (!isValidBarcode(barcode)) {
+        invalidFiles.push({
+          filename: file.originalname,
+          barcode: barcode,
+          message:
+            'Invalid barcode format. Expected: BAR001, STU001, or 001 format',
+        });
+        continue; // Skip this file
+      }
+
+      // ─── VALIDATION 2: BARCODE SHOULD NOT BE EMPTY ──────
+      if (!barcode) {
+        invalidFiles.push({
+          filename: file.originalname,
+          barcode: barcode,
+          message: 'Empty barcode',
+        });
+        continue;
+      }
+
+      // ─── VALIDATION 3: CHECK DUPLICATE IN CURRENT UPLOAD ──
+      const existingInCurrentUpload = uploadedSheets.find(
+        (s) => s.barcode === barcode,
+      );
+      if (existingInCurrentUpload) {
+        duplicateSheets.push({
+          barcode,
+          filename: file.originalname,
+          message: 'Duplicate barcode in current upload',
+        });
+        continue;
+      }
+
+      // ─── VALIDATION 4: CHECK DUPLICATE IN DATABASE ──────
+      const existingSheet = await pool.query(
+        `SELECT id, barcode, file_name FROM sheets WHERE exam_id = $1 AND barcode = $2`,
+        [examId, barcode],
+      );
+
+      if (existingSheet.rows.length > 0) {
+        duplicateSheets.push({
+          barcode,
+          filename: file.originalname,
+          existingFile: existingSheet.rows[0].file_name,
+          message: 'Sheet with this barcode already uploaded for this exam',
+        });
+        continue;
+      }
+
+      // ─── UPLOAD TO CLOUDINARY ────────────────────────────
       const result = await uploadImageToCloudinary(file.path);
 
-      // Extract barcode from filename (without extension)
-      const fileName = path.parse(file.originalname).name;
-      const barcode = fileName; // Assuming filename is the barcode
-
-      // Check if student exists with this barcode
+      // ─── FIND STUDENT BY BARCODE ──────────────────────────
       const studentResult = await pool.query(
-        `SELECT id, roll_no, student_name FROM student_records WHERE barcode = $1`,
+        `SELECT id, roll_no, student_name, subject FROM student_records WHERE barcode = $1`,
         [barcode],
       );
 
       const student = studentResult.rows[0];
 
-      // Insert sheet record
+      // ─── INSERT SHEET ──────────────────────────────────────
       const sheetResult = await pool.query(
         `INSERT INTO sheets (
           exam_id, student_id, roll_no, student_name, barcode,
@@ -56,27 +132,58 @@ export const uploadSheets = async (req, res) => {
           result.url,
           file.size,
           file.mimetype,
-          student ? 'uploaded' : 'unlinked',
+          student ? 'linked' : 'unlinked',
           userId,
         ],
       );
 
+      const sheet = sheetResult.rows[0];
+
+      if (student) {
+        linkedCount++;
+      } else {
+        unlinkedCount++;
+      }
+
       uploadedSheets.push({
-        ...sheetResult.rows[0],
+        ...sheet,
         matched: !!student,
         student: student || null,
       });
     }
 
+    // ─── RESPONSE WITH VALIDATION RESULTS ────────────────────
+    const responseData = {
+      sheets: uploadedSheets,
+      total: uploadedSheets.length,
+      linked: linkedCount,
+      unlinked: unlinkedCount,
+    };
+
+    // Add validation info if any issues
+    if (invalidFiles.length > 0) {
+      responseData.invalidFiles = invalidFiles;
+      responseData.invalidCount = invalidFiles.length;
+    }
+
+    if (duplicateSheets.length > 0) {
+      responseData.duplicates = duplicateSheets;
+      responseData.duplicateCount = duplicateSheets.length;
+    }
+
+    // Build message
+    let message = `${uploadedSheets.length} sheets uploaded successfully`;
+    if (invalidFiles.length > 0) {
+      message += `, ${invalidFiles.length} files skipped (invalid barcode format)`;
+    }
+    if (duplicateSheets.length > 0) {
+      message += `, ${duplicateSheets.length} files skipped (duplicates)`;
+    }
+
     return res.status(200).json({
       success: true,
-      message: `${uploadedSheets.length} sheets uploaded successfully`,
-      data: {
-        sheets: uploadedSheets,
-        total: uploadedSheets.length,
-        linked: uploadedSheets.filter((s) => s.matched).length,
-        unlinked: uploadedSheets.filter((s) => !s.matched).length,
-      },
+      message: message,
+      data: responseData,
     });
   } catch (error) {
     console.error('uploadSheets error:', error);

@@ -216,84 +216,95 @@ export default function MarkSchemeEditor() {
 
   // ─── PDF UPLOAD FUNCTIONS ──────────────────────────────────
 
-  const handleModelAnswerUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedExamId) return;
+ const handleModelAnswerUpload = async (
+   e: React.ChangeEvent<HTMLInputElement>,
+ ) => {
+   const file = e.target.files?.[0];
+   if (!file || !selectedExamId) return;
 
-    if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
-      showToast('Only PDF files are allowed', 'error');
-      return;
+    console.log('🔍 ===== UPLOAD MODEL ANSWER =====');
+    console.log('🔍 Exam ID:', selectedExamId);
+    console.log('🔍 File name:', file.name);
+    console.log('🔍 File type:', file.type);
+    console.log('🔍 File size:', file.size);
+
+
+   if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
+     showToast('Only PDF files are allowed', 'error');
+     return;
+   }
+
+   if (file.size > 10 * 1024 * 1024) {
+     showToast('File too large. Max size is 10MB', 'error');
+     return;
+   }
+
+   setUploadingModelAnswer(true);
+   try {
+     const response = await markSchemeApi.uploadModelAnswer(
+       selectedExamId,
+       file,
+     );
+
+     console.log('🔍 Response:', response);
+     if (response.success) {
+       // ✅ SIRF STATE UPDATE KAREIN - Page refresh nahi
+       setModelAnswerPdf(response.data.url);
+       showToast('Model answer uploaded successfully', 'success');
+
+       // ❌ REMOVE THIS LINE - Yeh page refresh karta hai
+       // await handleExamChange(selectedExamId);
+     } else {
+       showToast(response.message || 'Failed to upload model answer', 'error');
+     }
+   } catch (error: any) {
+     console.error('Upload model answer error:', error);
+     showToast(error.message || 'Failed to upload model answer', 'error');
+   } finally {
+     setUploadingModelAnswer(false);
+     e.target.value = '';
+   }
+ };
+const handleQuestionPaperUpload = async (
+  e: React.ChangeEvent<HTMLInputElement>,
+) => {
+  const file = e.target.files?.[0];
+  if (!file || !selectedExamId) return;
+
+  if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
+    showToast('Only PDF files are allowed', 'error');
+    return;
+  }
+
+  if (file.size > 10 * 1024 * 1024) {
+    showToast('File too large. Max size is 10MB', 'error');
+    return;
+  }
+
+  setUploadingQuestionPaper(true);
+  try {
+    const response = await markSchemeApi.uploadQuestionPaper(
+      selectedExamId,
+      file,
+    );
+    if (response.success) {
+      // ✅ SIRF STATE UPDATE KAREIN - Page refresh nahi
+      setQuestionPaperPdf(response.data.url);
+      showToast('Question paper uploaded successfully', 'success');
+
+      // ❌ REMOVE THIS LINE - Yeh page refresh karta hai
+      // await handleExamChange(selectedExamId);
+    } else {
+      showToast(response.message || 'Failed to upload question paper', 'error');
     }
-
-    if (file.size > 10 * 1024 * 1024) {
-      showToast('File too large. Max size is 10MB', 'error');
-      return;
-    }
-
-    setUploadingModelAnswer(true);
-    try {
-      const response = await markSchemeApi.uploadModelAnswer(
-        selectedExamId,
-        file,
-      );
-      if (response.success) {
-        setModelAnswerPdf(response.data.url);
-        showToast('Model answer uploaded successfully', 'success');
-        await handleExamChange(selectedExamId);
-      } else {
-        showToast(response.message || 'Failed to upload model answer', 'error');
-      }
-    } catch (error: any) {
-      console.error('Upload model answer error:', error);
-      showToast(error.message || 'Failed to upload model answer', 'error');
-    } finally {
-      setUploadingModelAnswer(false);
-      e.target.value = '';
-    }
-  };
-
-  const handleQuestionPaperUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedExamId) return;
-
-    if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
-      showToast('Only PDF files are allowed', 'error');
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      showToast('File too large. Max size is 10MB', 'error');
-      return;
-    }
-
-    setUploadingQuestionPaper(true);
-    try {
-      const response = await markSchemeApi.uploadQuestionPaper(
-        selectedExamId,
-        file,
-      );
-      if (response.success) {
-        setQuestionPaperPdf(response.data.url);
-        showToast('Question paper uploaded successfully', 'success');
-        await handleExamChange(selectedExamId);
-      } else {
-        showToast(
-          response.message || 'Failed to upload question paper',
-          'error',
-        );
-      }
-    } catch (error: any) {
-      console.error('Upload question paper error:', error);
-      showToast(error.message || 'Failed to upload question paper', 'error');
-    } finally {
-      setUploadingQuestionPaper(false);
-      e.target.value = '';
-    }
-  };
+  } catch (error: any) {
+    console.error('Upload question paper error:', error);
+    showToast(error.message || 'Failed to upload question paper', 'error');
+  } finally {
+    setUploadingQuestionPaper(false);
+    e.target.value = '';
+  }
+};
 
   const handleDeletePDF = async (type: 'model_answer' | 'question_paper') => {
     if (!selectedExamId) return;

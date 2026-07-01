@@ -243,79 +243,108 @@ export default function SheetUpload() {
 
   // ─── AUTO-LINK ────────────────────────────────────────────────
 
-  const handleAutoLink = async () => {
-    if (!selectedExam || uploadedFiles.length === 0) return;
+ const handleAutoLink = async () => {
+   if (!selectedExam || uploadedFiles.length === 0) return;
 
-    setIsLinking(true);
-    try {
-      // First upload files to get sheet IDs
-      const files = uploadedFiles
-        .map((f) => f.file!)
-        .filter((f) => f !== undefined);
-      const uploadResponse = await sheetService.uploadSheets(
-        selectedExam,
-        files,
-      );
+   setIsLinking(true);
+   try {
+     // First upload files to get sheet IDs
+     const files = uploadedFiles
+       .map((f) => f.file!)
+       .filter((f) => f !== undefined);
 
-      if (!uploadResponse.success) {
-        showToast(uploadResponse.message || 'Failed to upload files', 'error');
-        return;
-      }
+     const uploadResponse = await sheetService.uploadSheets(
+       selectedExam,
+       files,
+     );
 
-      const uploadedSheets = uploadResponse.data.sheets || [];
-      const sheetIds = uploadedSheets.map((s: any) => s.id);
+     // ─── CHECK FOR DUPLICATES ──────────────────────────────
+     if (!uploadResponse.success) {
+       showToast(uploadResponse.message || 'Failed to upload files', 'error');
+       return;
+     }
 
-      // Now auto-link
-      const linkResponse = await sheetService.autoLinkSheets(
-        selectedExam,
-        sheetIds,
-      );
+     const uploadedSheets = uploadResponse.data.sheets || [];
+     const duplicates = uploadResponse.data.duplicates || [];
+     const invalidFiles = uploadResponse.data.invalidFiles || [];
 
-      if (linkResponse.success) {
-        const results = linkResponse.data.results || [];
+     // ─── SHOW WARNING FOR DUPLICATES ────────────────────────
+     if (duplicates.length > 0) {
+       const duplicateNames = duplicates.map((d: any) => d.filename).join(', ');
+       showWarning(
+         `${duplicates.length} file${duplicates.length > 1 ? 's' : ''} skipped (already uploaded): ${duplicateNames}`,
+       );
+     }
 
-        const linkingResults: LinkingResult[] = uploadedFiles.map(
-          (file, index) => {
-            const result = results.find((r: any) => r.barcode === file.barcode);
-            return {
-              fileName: file.name,
-              barcode: file.barcode,
-              studentName: result?.student?.student_name || null,
-              studentRoll: result?.student?.roll_no || null,
-              linked: result?.matched || false,
-              sheetId: uploadedSheets[index]?.id,
-            };
-          },
-        );
+     if (invalidFiles.length > 0) {
+       const invalidNames = invalidFiles.map((d: any) => d.filename).join(', ');
+       showWarning(
+         `${invalidFiles.length} file${invalidFiles.length > 1 ? 's' : ''} skipped (invalid barcode format): ${invalidNames}`,
+       );
+     }
 
-        setLinkingResults(linkingResults);
+     // ─── IF NO SHEETS UPLOADED ─────────────────────────────
+     if (uploadedSheets.length === 0) {
+       if (duplicates.length > 0 || invalidFiles.length > 0) {
+         // Already showed warnings, just return
+         setIsLinking(false);
+         return;
+       }
+       showToast('No sheets were uploaded', 'error');
+       setIsLinking(false);
+       return;
+     }
 
-        const linkedCount = linkingResults.filter((r) => r.linked).length;
-        const unlinkedCount = linkingResults.length - linkedCount;
+     const sheetIds = uploadedSheets.map((s: any) => s.id);
 
-        if (unlinkedCount > 0) {
-          showWarning(
-            `${unlinkedCount} file${unlinkedCount > 1 ? 's' : ''} could not be linked — check barcodes`,
-          );
-        }
+     // Now auto-link
+     const linkResponse = await sheetService.autoLinkSheets(
+       selectedExam,
+       sheetIds,
+     );
 
-        // Refresh data
-        await fetchSheets(selectedExam);
-        await fetchLinkingStatus(selectedExam);
-        await fetchUnlinkedSheets(selectedExam);
-      } else {
-        showToast(
-          linkResponse.message || 'Failed to auto-link sheets',
-          'error',
-        );
-      }
-    } catch (error: any) {
-      console.error('Auto-link error:', error);
-      showToast(error.message || 'Failed to auto-link sheets', 'error');
-    } finally {
-      setIsLinking(false);
-    }
-  };
+     if (linkResponse.success) {
+       const results = linkResponse.data.results || [];
+
+       const linkingResults: LinkingResult[] = uploadedFiles.map(
+         (file, index) => {
+           const result = results.find((r: any) => r.barcode === file.barcode);
+           return {
+             fileName: file.name,
+             barcode: file.barcode,
+             studentName: result?.student?.student_name || null,
+             studentRoll: result?.student?.roll_no || null,
+             linked: result?.matched || false,
+             sheetId: uploadedSheets[index]?.id,
+           };
+         },
+       );
+
+       setLinkingResults(linkingResults);
+
+       const linkedCount = linkingResults.filter((r) => r.linked).length;
+       const unlinkedCount = linkingResults.length - linkedCount;
+
+       if (unlinkedCount > 0) {
+         showWarning(
+           `${unlinkedCount} file${unlinkedCount > 1 ? 's' : ''} could not be linked — check barcodes`,
+         );
+       }
+
+       // Refresh data
+       await fetchSheets(selectedExam);
+       await fetchLinkingStatus(selectedExam);
+       await fetchUnlinkedSheets(selectedExam);
+     } else {
+       showToast(linkResponse.message || 'Failed to auto-link sheets', 'error');
+     }
+   } catch (error: any) {
+     console.error('Auto-link error:', error);
+     showToast(error.message || 'Failed to auto-link sheets', 'error');
+   } finally {
+     setIsLinking(false);
+   }
+ };
 
   // ─── CONFIRM UPLOAD ──────────────────────────────────────────
 
