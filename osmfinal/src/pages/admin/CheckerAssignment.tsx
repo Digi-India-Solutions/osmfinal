@@ -17,6 +17,9 @@ interface AssignmentLog {
 }
 
 export default function CheckerAssignment() {
+  const { currentUser } = useAuth();
+  const role = currentUser?.role ?? "";
+  const subject = currentUser?.subject ?? "";
   const loading = usePageLoading();
   const navigate = useNavigate();
 
@@ -268,7 +271,7 @@ export default function CheckerAssignment() {
           className="w-full max-w-md px-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer"
         >
           <option value="">Choose an active exam...</option>
-          {activeExams.map((exam) => (
+          {filteredExams.map((exam) => (
             <option key={exam.id} value={exam.id}>
               {exam.name} ({exam.subject})
             </option>
