@@ -7,6 +7,7 @@ import {
   getStudentById,
   updateStudent,
   deleteStudent,
+  autoLinkStudentsToExams,
   bulkDeleteStudents,
 } from '../students/studentController.js';
 import { uploadExcel } from '../../middlewares/multer.middleware.js';
@@ -43,5 +44,6 @@ router.delete('/students/:id', verifyToken, deleteStudent);
 
 // Bulk delete students
 router.post('/students/bulk-delete', verifyToken, bulkDeleteStudents);
+router.post('/students/auto-link', verifyToken, autoLinkStudentsToExams);
 
 export default router;

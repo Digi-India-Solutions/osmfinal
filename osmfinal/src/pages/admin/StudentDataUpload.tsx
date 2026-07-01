@@ -1,4 +1,5 @@
 // src/pages/admin/StudentDataUpload.tsx
+
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { usePageLoading } from '@/hooks/usePageLoading';
@@ -146,6 +147,9 @@ export default function StudentDataUpload() {
   const [dragOver, setDragOver] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
+  // ✅ State for auto-link
+  const [isLinking, setIsLinking] = useState(false);
+
   // ─── FILTERS ──────────────────────────────────────────────────
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -233,6 +237,35 @@ export default function StudentDataUpload() {
   useEffect(() => {
     fetchStudents();
   }, [fetchStudents]);
+
+  // ─── AUTO-LINK STUDENTS ─────────────────────────────────────
+
+  const handleAutoLink = async () => {
+    if (students.length === 0) {
+      showToast('No students to link. Please import students first.', 'error');
+      return;
+    }
+
+    setIsLinking(true);
+    try {
+      const response = await studentService.autoLinkStudents();
+      if (response.success) {
+        showToast(
+          response.message || 'Students linked successfully',
+          'success',
+        );
+        await fetchStudents();
+        await fetchAllStudents();
+      } else {
+        showToast(response.message || 'Failed to link students', 'error');
+      }
+    } catch (error: any) {
+      console.error('Auto-link error:', error);
+      showToast(error.message || 'Failed to link students', 'error');
+    } finally {
+      setIsLinking(false);
+    }
+  };
 
   // ─── FILE HANDLING ───────────────────────────────────────────
 
@@ -549,66 +582,90 @@ export default function StudentDataUpload() {
 
         {/* Summary row */}
         <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Total</span>
-              <span className="text-sm font-semibold text-gray-900">
-                {stats.total}
-              </span>
+          <div className="flex flex-wrap items-center justify-between gap-y-2">
+            {/* Left side - Stats */}
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Total</span>
+                <span className="text-sm font-semibold text-gray-900">
+                  {stats.total}
+                </span>
+              </div>
+              <span className="text-gray-200">|</span>
+              {stats.subjectWise.map((item) => (
+                <React.Fragment key={item.subject}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400">
+                      {item.subject}
+                    </span>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {item.count}
+                    </span>
+                  </div>
+                  <span className="text-gray-200">|</span>
+                </React.Fragment>
+              ))}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Linked to Exam</span>
+                <span className="text-sm font-semibold text-emerald-600">
+                  {stats.linkedToExam || 0}
+                </span>
+              </div>
+              <span className="text-gray-200">|</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Uploaded</span>
+                <span className="text-sm font-semibold text-emerald-600">
+                  {stats.uploaded || 0}
+                </span>
+              </div>
+              <span className="text-gray-200">|</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Checking</span>
+                <span className="text-sm font-semibold text-amber-600">
+                  {stats.checking || 0}
+                </span>
+              </div>
+              <span className="text-gray-200">|</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Checked</span>
+                <span className="text-sm font-semibold text-blue-600">
+                  {stats.checked || 0}
+                </span>
+              </div>
+              <span className="text-gray-200">|</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Recheck</span>
+                <span className="text-sm font-semibold text-rose-600">
+                  {stats.recheck || 0}
+                </span>
+              </div>
+              <span className="text-gray-200">|</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Pending</span>
+                <span className="text-sm font-semibold text-gray-400">
+                  {stats.pending || 0}
+                </span>
+              </div>
             </div>
-            <span className="text-gray-200">|</span>
-            {stats.subjectWise.map((item) => (
-              <React.Fragment key={item.subject}>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-400">{item.subject}</span>
-                  <span className="text-sm font-semibold text-gray-900">
-                    {item.count}
-                  </span>
-                </div>
-                <span className="text-gray-200">|</span>
-              </React.Fragment>
-            ))}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Linked to Exam</span>
-              <span className="text-sm font-semibold text-emerald-600">
-                {stats.linkedToExam || 0}
-              </span>
-            </div>
-            <span className="text-gray-200">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Uploaded</span>
-              <span className="text-sm font-semibold text-emerald-600">
-                {stats.uploaded || 0}
-              </span>
-            </div>
-            <span className="text-gray-200">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Checking</span>
-              <span className="text-sm font-semibold text-amber-600">
-                {stats.checking || 0}
-              </span>
-            </div>
-            <span className="text-gray-200">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Checked</span>
-              <span className="text-sm font-semibold text-blue-600">
-                {stats.checked || 0}
-              </span>
-            </div>
-            <span className="text-gray-200">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Recheck</span>
-              <span className="text-sm font-semibold text-rose-600">
-                {stats.recheck || 0}
-              </span>
-            </div>
-            <span className="text-gray-200">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Pending</span>
-              <span className="text-sm font-semibold text-gray-400">
-                {stats.pending || 0}
-              </span>
-            </div>
+
+            {/* ✅ Right side - Auto-Link Button */}
+            <button
+              onClick={handleAutoLink}
+              disabled={isLinking || students.length === 0}
+              className="flex items-center gap-2 bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+            >
+              {isLinking ? (
+                <>
+                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  Linking...
+                </>
+              ) : (
+                <>
+                  <i className="ri-link text-sm"></i>
+                  Auto-Link to Exams
+                </>
+              )}
+            </button>
           </div>
         </div>
 

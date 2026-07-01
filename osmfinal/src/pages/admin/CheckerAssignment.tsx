@@ -7,6 +7,7 @@ import { usePageLoading } from '@/hooks/usePageLoading';
 import { examApi, type ExamResponse } from '@/api/exam';
 import assignmentService from '@/api/assignment';
 import type { IUnassignedSheet, IAvailableChecker } from '@/api/assignment';
+import { useAuth } from '@/context/AuthContext';
 
 interface AssignmentLog {
   id: number;
@@ -18,8 +19,8 @@ interface AssignmentLog {
 
 export default function CheckerAssignment() {
   const { currentUser } = useAuth();
-  const role = currentUser?.role ?? "";
-  const subject = currentUser?.subject ?? "";
+  const role = currentUser?.role ?? '';
+  const subject = currentUser?.subject ?? '';
   const loading = usePageLoading();
   const navigate = useNavigate();
 
@@ -45,6 +46,15 @@ export default function CheckerAssignment() {
 
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+
+  // ─── FILTER EXAMS ──────────────────────────────────────────
+
+  const filteredExams = useMemo(() => {
+    if (role === 'admin' || role === 'teacher_checker') {
+      return exams;
+    }
+    return exams.filter((e) => e.subject === subject);
+  }, [role, subject, exams]);
 
   // ─── FETCH EXAMS ────────────────────────────────────────────
 
@@ -150,7 +160,6 @@ export default function CheckerAssignment() {
         );
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 3000);
-        // Refresh data
         await fetchData(selectedExam);
       } else {
         setSuccessMessage(response.message || 'Failed to assign');
@@ -188,7 +197,6 @@ export default function CheckerAssignment() {
         setSuccessMessage(response.message);
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 3000);
-        // Refresh data
         await fetchData(selectedExam);
       } else {
         setSuccessMessage(response.message || 'Failed to assign randomly');
@@ -208,8 +216,6 @@ export default function CheckerAssignment() {
   // ─── LOADING ──────────────────────────────────────────────────
 
   if (loading || examsLoading) return <LoadingSpinner fullPage />;
-
-  const activeExams = exams.filter((e) => e.status === 'active');
 
   return (
     <div className="space-y-5">
@@ -271,11 +277,13 @@ export default function CheckerAssignment() {
           className="w-full max-w-md px-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer"
         >
           <option value="">Choose an active exam...</option>
-          {filteredExams.map((exam) => (
-            <option key={exam.id} value={exam.id}>
-              {exam.name} ({exam.subject})
-            </option>
-          ))}
+          {filteredExams
+            .filter((e) => e.status === 'active')
+            .map((exam) => (
+              <option key={exam.id} value={exam.id}>
+                {exam.name} ({exam.subject})
+              </option>
+            ))}
         </select>
       </div>
 

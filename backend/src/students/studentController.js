@@ -582,6 +582,60 @@ export const updateStudent = async (req, res) => {
   }
 };
 
+// src/students/studentController.js
+
+// ─── AUTO-LINK STUDENTS TO EXAMS BY SUBJECT ─────────────────────
+
+export const autoLinkStudentsToExams = async (req, res) => {
+  try {
+    const client = await connectDB.connect();
+    let linkedCount = 0;
+
+    try {
+      await client.query('BEGIN');
+
+      // Get all active exams
+      const examsResult = await client.query(
+        `SELECT id, subject FROM exams WHERE status = 'active'`
+      );
+      const exams = examsResult.rows;
+
+      for (const exam of exams) {
+        // Update students with matching subject
+        const result = await client.query(
+          `UPDATE student_records 
+           SET exam_id = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE subject = $2 AND exam_id IS NULL
+           RETURNING id`,
+          [exam.id, exam.subject]
+        );
+        linkedCount += result.rows.length;
+        console.log(`✅ Linked ${result.rows.length} students to ${exam.subject} exam`);
+      }
+
+      await client.query('COMMIT');
+
+      return res.status(200).json({
+        success: true,
+        message: `${linkedCount} students linked to exams successfully`,
+        data: { linkedCount }
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Auto-link students error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to link students to exams',
+      error: error.message
+    });
+  }
+};
+
 // ─── DELETE STUDENT ─────────────────────────────────────────────
 
 export const deleteStudent = async (req, res) => {

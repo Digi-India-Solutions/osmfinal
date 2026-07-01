@@ -167,6 +167,22 @@ class StudentService {
     }
   }
 
+    async autoLinkStudents(): Promise<any> {
+    try {
+      const response = await api.post('/api/v1/Students/students/auto-link');
+      return response.data;
+    } catch (error: any) {
+      console.error('Auto-link students error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to link students to exams',
+      };
+    }
+  }
+
+  
+  
+
   // Bulk delete students
   async bulkDeleteStudents(ids: number[]): Promise<any> {
     try {
@@ -183,5 +199,7 @@ class StudentService {
     }
   }
 }
+
+
 
 export default new StudentService();

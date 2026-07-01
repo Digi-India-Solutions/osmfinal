@@ -1,5 +1,19 @@
-// api/exams.ts
+// src/api/exam.ts
+
 import axiosInstance from './axios';
+
+export interface ExamResponse {
+  id: number;
+  name: string;
+  subject: string;
+  date: string;
+  totalQuestions: number;
+  maxMarks: number;
+  status: 'active' | 'inactive' | 'archived';
+  createdBy: number;
+  created_at?: string;
+  updated_at?: string;
+}
 
 export interface CreateExamData {
   name: string;
@@ -11,19 +25,6 @@ export interface CreateExamData {
   createdBy: number;
 }
 
-export interface ExamResponse {
-  id: number;
-  name: string;
-  subject: string;
-  date: string;
-  totalQuestions: number;
-  maxMarks: number;
-  status: 'active' | 'inactive' | 'archived';
-  createdBy: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface PaginatedExamsResponse {
   data: ExamResponse[];
   total: number;
@@ -31,9 +32,6 @@ export interface PaginatedExamsResponse {
   currentPage: number;
 }
 
-// NOTE: adjust the '/exams' prefix below to match wherever this router
-// actually gets mounted (e.g. app.use('/api/exam-admin', examRoutes) means
-// the real path is '/api/exam-admin/exams', not just '/exams').
 export const examApi = {
   createExam: async (data: CreateExamData): Promise<ExamResponse> => {
     const response = await axiosInstance.post('/api/v1/exam/exams', data);
@@ -54,8 +52,14 @@ export const examApi = {
     return response.data.data;
   },
 
-  updateExam: async (id: number, data: Partial<CreateExamData>): Promise<ExamResponse> => {
-    const response = await axiosInstance.patch(`/api/v1/exam/exams/${id}`, data);
+  updateExam: async (
+    id: number,
+    data: Partial<CreateExamData>,
+  ): Promise<ExamResponse> => {
+    const response = await axiosInstance.patch(
+      `/api/v1/exam/exams/${id}`,
+      data,
+    );
     return response.data.data;
   },
 
