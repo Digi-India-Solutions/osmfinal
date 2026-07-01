@@ -1,10 +1,12 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { exams, sheets, users } from "@/mock/mockData";
 import type { Sheet, User } from "@/mock/mockData";
 import Breadcrumb from "@/components/ui/Breadcrumb";
 import StatusBadge from "@/components/ui/StatusBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { usePageLoading } from "@/hooks/usePageLoading";
+import { useAuth } from "@/context/AuthContext";
+import { examApi , type ExamResponse } from "@/api/exam";
 
 interface AssignmentLog {
   id: number;
@@ -15,6 +17,9 @@ interface AssignmentLog {
 }
 
 export default function CheckerAssignment() {
+  const { currentUser } = useAuth();
+  const role = currentUser?.role ?? "";
+  const subject = currentUser?.subject ?? "";
   const loading = usePageLoading();
   const [selectedExam, setSelectedExam] = useState<number | "">("");
   const [selectedSheets, setSelectedSheets] = useState<Set<number>>(new Set());
@@ -120,6 +125,29 @@ export default function CheckerAssignment() {
     setTimeout(() => setShowSuccess(false), 3000);
   };
 
+  const [examList, setExamList] = useState<ExamResponse[]>([]);
+  const [examsLoading, setExamsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchExams = async () => {
+      try {
+        setExamsLoading(true);
+        const res = await examApi.getAllExams({ limit: 1000 });
+        setExamList(res.data);
+      } catch (error) {
+        console.error("Failed to fetch exams:", error);
+      } finally {
+        setExamsLoading(false);
+      }
+    };
+    fetchExams();
+  }, []);
+
+  const filteredExams = useMemo(() => {
+    if (role === "admin" || role === "teacher_checker") return examList;
+    return examList.filter((e) => e.subject === subject);
+  }, [role, subject, examList]);
+
   if (loading) return <LoadingSpinner fullPage />;
 
   return (
@@ -160,7 +188,7 @@ export default function CheckerAssignment() {
           className="w-full max-w-md px-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer"
         >
           <option value="">Choose an active exam...</option>
-          {activeExams.map((exam) => (
+          {filteredExams.map((exam) => (
             <option key={exam.id} value={exam.id}>
               {exam.name} ({exam.subject})
             </option>
@@ -206,17 +234,15 @@ export default function CheckerAssignment() {
                     unassignedSheets.map((sheet) => (
                       <tr
                         key={sheet.id}
-                        className={`border-b border-gray-50 transition-colors cursor-pointer ${
-                          selectedSheets.has(sheet.id) ? "bg-gray-50" : "hover:bg-gray-50/30"
-                        }`}
+                        className={`border-b border-gray-50 transition-colors cursor-pointer ${selectedSheets.has(sheet.id) ? "bg-gray-50" : "hover:bg-gray-50/30"
+                          }`}
                         onClick={() => toggleSheet(sheet.id)}
                       >
                         <td className="py-3 px-4">
-                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
-                            selectedSheets.has(sheet.id)
-                              ? "bg-gray-900 border-gray-900"
-                              : "border-gray-300"
-                          }`}>
+                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${selectedSheets.has(sheet.id)
+                            ? "bg-gray-900 border-gray-900"
+                            : "border-gray-300"
+                            }`}>
                             {selectedSheets.has(sheet.id) && (
                               <i className="ri-check-line text-white text-[10px]"></i>
                             )}
