@@ -40,7 +40,7 @@ export const getAllExams = async (req, res) => {
     const dataQuery = `
       SELECT * FROM exams
       WHERE name ILIKE $1 OR subject ILIKE $1
-      ORDER BY "createdAt" DESC
+      ORDER BY created_at DESC
       LIMIT $2 OFFSET $3;
     `;
     const countQuery = `
@@ -105,7 +105,7 @@ export const updateExam = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No fields provided to update' });
     }
 
-    fields.push(`"updatedAt" = NOW()`);
+    fields.push(`updated_at = NOW()`);
     values.push(id);
 
     const query = `

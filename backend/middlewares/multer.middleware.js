@@ -1,6 +1,7 @@
-import multer from "multer";
-import path from "path";
-import fs from "fs";
+// src/middlewares/multer.middleware.js
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 // ✅ Helper to create folder if not exists
 const ensureDir = (dir) => {
@@ -12,18 +13,26 @@ const ensureDir = (dir) => {
 // ✅ MAIN STORAGE (dynamic based on route)
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    console.log("file==>>>>>>", file);
+    console.log('file==>>>>>>', file);
 
     // 🔥 Decide folder dynamically
-    let folder = "others";
+    let folder = 'others';
 
-    if (file.fieldname === "logo") {
-      folder = "company";
-    } else if (file.fieldname === "profile_image") {
-      folder = "profile";
+    if (file.fieldname === 'logo') {
+      folder = 'company';
+    } else if (file.fieldname === 'profile_image') {
+      folder = 'profile';
+    } else if (file.fieldname === 'file') {
+      folder = 'students';
+    } else if (file.fieldname === 'model_answer_pdf') {
+      folder = 'mark-scheme/model-answers';
+    } else if (file.fieldname === 'question_paper_pdf') {
+      folder = 'mark-scheme/question-papers';
+    } else if (file.fieldname === 'sheets' || file.fieldname === 'sheet') {
+      folder = 'sheets'; // ✅ Added for sheets upload
     }
 
-    const uploadPath = path.join(process.cwd(), "uploads", folder);
+    const uploadPath = path.join(process.cwd(), 'uploads', folder);
 
     // ✅ Ensure folder exists
     ensureDir(uploadPath);
@@ -32,35 +41,86 @@ const storage = multer.diskStorage({
   },
 
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const ext = path.extname(file.originalname);
 
-    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
-  },
-});
-
-// ✅ SECOND STORAGE (if you still want original names)
-const ImageStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadPath = path.join(process.cwd(), "uploads", "images");
-
-    ensureDir(uploadPath);
-
-    cb(null, uploadPath);
-  },
-
-  filename: function (req, file, cb) {
-    cb(null, file.originalname);
+    // Keep original filename for barcode extraction
+    const baseName = path.parse(file.originalname).name;
+    cb(null, `${baseName}-${uniqueSuffix}${ext}`);
   },
 });
 
 // ✅ Upload middlewares
 export const upload = multer({
   storage: storage,
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
 });
 
 export const uploadImages = multer({
-  storage: ImageStorage,
-  limits: { fileSize: 2 * 1024 * 1024 },
+  storage: storage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+});
+
+// ✅ For Excel files (larger limit)
+export const uploadExcel = multer({
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/csv',
+    ];
+    if (
+      allowedTypes.includes(file.mimetype) ||
+      file.originalname.endsWith('.xlsx') ||
+      file.originalname.endsWith('.xls') ||
+      file.originalname.endsWith('.csv')
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only Excel and CSV files are allowed'), false);
+    }
+  },
+});
+
+// ✅ For PDF files (mark scheme)
+export const uploadPDF = multer({
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    if (
+      file.mimetype === 'application/pdf' ||
+      file.originalname.endsWith('.pdf')
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'), false);
+    }
+  },
+});
+
+// ✅ For Sheets (PDF, JPG, PNG - larger limit)
+export const uploadSheets = multer({
+  storage: storage,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB per file
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/jpg',
+    ];
+    if (
+      allowedTypes.includes(file.mimetype) ||
+      file.originalname.endsWith('.pdf') ||
+      file.originalname.endsWith('.jpg') ||
+      file.originalname.endsWith('.jpeg') ||
+      file.originalname.endsWith('.png')
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF, JPG, JPEG and PNG files are allowed'), false);
+    }
+  },
 });

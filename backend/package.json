@@ -20,6 +20,7 @@
     "cloudinary": "^2.6.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "csv-parser": "^3.2.1",
     "db-migrate": "^0.11.13",
     "db-migrate-pg": "^1.2.2",
     "dotenv": "^16.5.0",
@@ -31,16 +32,19 @@
     "lodash": "^4.17.21",
     "mongoose": "^8.15.0",
     "morgan": "^1.10.0",
-    "multer": "^2.1.1",
+    "multer": "^2.2.0",
     "node-cache": "^5.1.2",
     "node-fetch": "^3.3.2",
     "nodemailer": "^7.0.13",
     "nodemon": "^3.1.10",
     "pg": "^8.20.0",
     "razorpay": "^2.9.6",
-    "short-unique-id": "^5.3.2"
+    "short-unique-id": "^5.3.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6"
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
+    "@types/xlsx": "^0.0.35"
   }
 }

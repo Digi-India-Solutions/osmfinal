@@ -1,111 +1,375 @@
-import { useState, useMemo } from "react";
-import { mockMasterStudents, exams, sheets, mockSubjects } from "@/mock/mockData";
-import type { MasterStudent } from "@/mock/mockData";
-import Breadcrumb from "@/components/ui/Breadcrumb";
-import StatusBadge from "@/components/ui/StatusBadge";
-import LoadingSpinner from "@/components/ui/LoadingSpinner";
-import { usePageLoading } from "@/hooks/usePageLoading";
+// src/pages/admin/StudentDataUpload.tsx
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { usePageLoading } from '@/hooks/usePageLoading';
+import Breadcrumb from '@/components/ui/Breadcrumb';
+import StatusBadge from '@/components/ui/StatusBadge';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import studentService, { IStudentRecord } from '@/api/student';
 
+// ─────────────────────────────────────────────────────────────
+// CustomSelect — portal-based dropdown (fixes overflow clipping)
+// ─────────────────────────────────────────────────────────────
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
+interface CustomSelectProps {
+  value: string;
+  onChange: (value: string) => void;
+  options: SelectOption[];
+  className?: string;
+}
+
+function CustomSelect({
+  value,
+  onChange,
+  options,
+  className = '',
+}: CustomSelectProps) {
+  const [open, setOpen] = useState(false);
+  const [style, setStyle] = useState<React.CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const selectedLabel = options.find((o) => o.value === value)?.label ?? value;
+
+  const openDropdown = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setStyle({
+      position: 'fixed',
+      top: rect.bottom + 4,
+      left: rect.left,
+      minWidth: rect.width,
+      zIndex: 9999,
+    });
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        !triggerRef.current?.contains(e.target as Node) &&
+        !dropdownRef.current?.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const reposition = () => {
+      if (!triggerRef.current) return;
+      const rect = triggerRef.current.getBoundingClientRect();
+      setStyle((prev) => ({ ...prev, top: rect.bottom + 4, left: rect.left }));
+    };
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => (open ? setOpen(false) : openDropdown())}
+        className={`flex items-center justify-between gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 cursor-pointer select-none ${className}`}
+      >
+        <span className="whitespace-nowrap">{selectedLabel}</span>
+        <i
+          className={`ri-arrow-down-s-line text-gray-400 text-sm transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            style={style}
+            className="bg-white border border-gray-200 rounded-xl shadow-lg py-1 overflow-hidden"
+          >
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-4 py-2 text-sm transition-colors whitespace-nowrap cursor-pointer ${
+                  opt.value === value
+                    ? 'bg-gray-900 text-white font-medium'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Main Page
+// ─────────────────────────────────────────────────────────────
 export default function StudentDataUpload() {
   const loading = usePageLoading();
+  const [isLoading, setIsLoading] = useState(false);
+
+  // ─── STATE ──────────────────────────────────────────────────
 
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [fileSelected, setFileSelected] = useState(false);
-  const [fileName, setFileName] = useState("");
+  const [fileName, setFileName] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [filePath, setFilePath] = useState('');
+  const [previewData, setPreviewData] = useState<IStudentRecord[]>([]);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [imported, setImported] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error';
+  } | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [subjectFilter, setSubjectFilter] = useState("All");
-  const [semesterFilter, setSemesterFilter] = useState("All");
-  const [branchFilter, setBranchFilter] = useState("All");
+  // ─── FILTERS ──────────────────────────────────────────────────
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [subjectFilter, setSubjectFilter] = useState('All');
+  const [semesterFilter, setSemesterFilter] = useState('All');
+  const [branchFilter, setBranchFilter] = useState('All');
+
+  // ─── STUDENTS DATA ────────────────────────────────────────────
+
+  // allStudents = unfiltered full list, used only for building dropdown options
+  // so that options never shrink when a filter is active
+  const [allStudents, setAllStudents] = useState<IStudentRecord[]>([]);
+  const [students, setStudents] = useState<IStudentRecord[]>([]);
+  const [stats, setStats] = useState({
+    total: 0,
+    uploaded: 0,
+    pending: 0,
+    checking: 0,
+    checked: 0,
+    recheck: 0,
+    linkedToExam: 0,
+    subjectWise: [] as Array<{ subject: string; count: number }>,
+  });
+
+  // ─── TOAST ────────────────────────────────────────────────────
+
+  const showToast = (
+    message: string,
+    type: 'success' | 'error' = 'success',
+  ) => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
-  const handleFileSelect = () => {
-    setFileName("semester4_master_data.xlsx");
+  // ─── FETCH STUDENTS ──────────────────────────────────────────
+
+  // Fetch ALL students once (no filters) — used to build dropdown options
+  const fetchAllStudents = useCallback(async () => {
+    try {
+      const response = await studentService.getStudents({});
+      if (response.success && response.data) {
+        setAllStudents(response.data.items || []);
+      }
+    } catch (error) {
+      console.error('Fetch all students error:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAllStudents();
+  }, [fetchAllStudents]);
+
+  const fetchStudents = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const response = await studentService.getStudents({
+        search: searchQuery || undefined,
+        subject: subjectFilter !== 'All' ? subjectFilter : undefined,
+        semester: semesterFilter !== 'All' ? semesterFilter : undefined,
+        branch: branchFilter !== 'All' ? branchFilter : undefined,
+      });
+
+      if (response.success && response.data) {
+        setStudents(response.data.items || []);
+        setStats({
+          total: response.data.stats?.total || 0,
+          uploaded: response.data.stats?.uploaded || 0,
+          pending: response.data.stats?.pending || 0,
+          checking: response.data.stats?.checking || 0,
+          checked: response.data.stats?.checked || 0,
+          recheck: response.data.stats?.recheck || 0,
+          linkedToExam: response.data.stats?.linkedToExam || 0,
+          subjectWise: response.data.subjectWise || [],
+        });
+        setImported(response.data.items?.length > 0);
+      }
+    } catch (error) {
+      console.error('Fetch students error:', error);
+      showToast('Failed to load students', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [searchQuery, subjectFilter, semesterFilter, branchFilter]);
+
+  useEffect(() => {
+    fetchStudents();
+  }, [fetchStudents]);
+
+  // ─── FILE HANDLING ───────────────────────────────────────────
+
+  const handleFileSelect = async (selectedFile: File) => {
+    setFile(selectedFile);
+    setFileName(selectedFile.name);
     setFileSelected(true);
+    await handleUpload(selectedFile);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    handleFileSelect();
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile) handleFileSelect(droppedFile);
   };
 
-  const handleImport = () => {
-    setImported(true);
-    showToast("9 student records imported successfully");
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
   };
+
+  const handleDragLeave = () => setDragOver(false);
+
+  // ─── UPLOAD AND PREVIEW ─────────────────────────────────────
+
+  const handleUpload = async (selectedFile: File) => {
+    setIsLoading(true);
+    try {
+      const response = await studentService.uploadAndPreview(selectedFile);
+      if (response.success) {
+        setPreviewData(response.data.preview || []);
+        setTotalRecords(response.data.validRecords || 0);
+        setFilePath(response.filePath);
+        showToast(
+          `File uploaded: ${response.data.validRecords} valid records found`,
+          'success',
+        );
+      } else {
+        showToast(response.message || 'Failed to upload file', 'error');
+        setFileSelected(false);
+        setFileName('');
+        setFile(null);
+      }
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      showToast(error.message || 'Failed to upload file', 'error');
+      setFileSelected(false);
+      setFileName('');
+      setFile(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ─── IMPORT ──────────────────────────────────────────────────
+
+  const handleImport = async () => {
+    if (!filePath) {
+      showToast('No file to import', 'error');
+      return;
+    }
+    setIsImporting(true);
+    try {
+      const response = await studentService.importStudents(filePath);
+      if (response.success) {
+        showToast(
+          response.message || 'Students imported successfully',
+          'success',
+        );
+        setFileSelected(false);
+        setFileName('');
+        setFile(null);
+        setPreviewData([]);
+        setTotalRecords(0);
+        setFilePath('');
+        await fetchAllStudents(); // refresh dropdown options
+        await fetchStudents();
+      } else {
+        showToast(response.message || 'Failed to import students', 'error');
+      }
+    } catch (error: any) {
+      console.error('Import error:', error);
+      showToast(error.message || 'Failed to import students', 'error');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // ─── CLEAR ───────────────────────────────────────────────────
 
   const handleClear = () => {
     setFileSelected(false);
-    setFileName("");
+    setFileName('');
+    setFile(null);
+    setPreviewData([]);
+    setTotalRecords(0);
+    setFilePath('');
   };
 
-  const records: MasterStudent[] = imported ? mockMasterStudents : [];
+  // ─── FILTER OPTIONS ──────────────────────────────────────────
+  // Always derived from allStudents (unfiltered) so options never shrink
+  // when a filter is active
 
-  const uniqueSubjects = useMemo(
-    () => ["All", ...mockSubjects.map((s) => s.name)],
-    []
-  );
-  const uniqueSemesters = useMemo(
-    () => ["All", ...new Set(mockMasterStudents.map((s) => String(s.semester)))],
-    []
-  );
-  const uniqueBranches = useMemo(
-    () => ["All", ...new Set(mockMasterStudents.map((s) => s.branch))],
-    []
-  );
+  const uniqueSubjects = useMemo(() => {
+    const subjects = allStudents.map((s) => s.subject);
+    return ['All', ...new Set(subjects)];
+  }, [allStudents]);
 
-  const filteredRecords = useMemo(() => {
-    if (!imported) return [];
-    return records.filter((s) => {
-      if (subjectFilter !== "All" && s.subject !== subjectFilter) return false;
-      if (semesterFilter !== "All" && String(s.semester) !== semesterFilter) return false;
-      if (branchFilter !== "All" && s.branch !== branchFilter) return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        if (!s.name.toLowerCase().includes(q) && !s.rollNo.toLowerCase().includes(q)) return false;
-      }
-      return true;
-    });
-  }, [imported, records, subjectFilter, semesterFilter, branchFilter, searchQuery]);
+  const uniqueSemesters = useMemo(() => {
+    const semesters = allStudents.map((s) => String(s.semester));
+    return ['All', ...new Set(semesters)];
+  }, [allStudents]);
 
-  const summary = useMemo(() => {
-    const total = mockMasterStudents.length;
-    const mathCount = mockMasterStudents.filter((s) => s.subject === "Mathematics").length;
-    const physicsCount = mockMasterStudents.filter((s) => s.subject === "Physics").length;
-    const linkedCount = mockMasterStudents.filter((s) => exams.some((e) => e.id === s.examId)).length;
-    const barcodeSet = new Set(sheets.filter((sh) => sh.barcode).map((sh) => sh.barcode));
-    const uploadedCount = mockMasterStudents.filter((s) => barcodeSet.has(s.barcode)).length;
-    const pendingCount = total - uploadedCount;
-    return { total, mathCount, physicsCount, linkedCount, uploadedCount, pendingCount };
-  }, []);
+  const uniqueBranches = useMemo(() => {
+    const branches = allStudents.map((s) => s.branch);
+    return ['All', ...new Set(branches)];
+  }, [allStudents]);
 
-  const getExamName = (examId: number) => {
-    const exam = exams.find((e) => e.id === examId);
-    return exam ? exam.name : "Not linked";
-  };
+  // ─── LOADING ──────────────────────────────────────────────────
 
-  const getSheetByBarcode = (barcode: string) => {
-    return sheets.find((s) => s.barcode === barcode);
-  };
+  if (loading || isLoading) return <LoadingSpinner fullPage />;
 
-  if (loading) return <LoadingSpinner fullPage />;
+  // ─── RENDER ──────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
-      <Breadcrumb items={[{ label: "Admin", href: "/admin" }, { label: "Student Data" }]} />
+      <Breadcrumb
+        items={[{ label: 'Admin', href: '/admin' }, { label: 'Student Data' }]}
+      />
 
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Student Data</h3>
-          <p className="text-sm text-gray-500 mt-0.5">Upload university master Excel and manage student-barcode records</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Upload university master Excel and manage student-barcode records
+          </p>
         </div>
       </div>
 
@@ -113,8 +377,13 @@ export default function StudentDataUpload() {
       <div className="bg-white border border-gray-100 rounded-2xl p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h4 className="text-sm font-semibold text-gray-900">Upload Master Student Data</h4>
-            <p className="text-xs text-gray-500 mt-1">Upload the university semester Excel file containing all student-subject-barcode mappings.</p>
+            <h4 className="text-sm font-semibold text-gray-900">
+              Upload Master Student Data
+            </h4>
+            <p className="text-xs text-gray-500 mt-1">
+              Upload the university semester Excel file containing all
+              student-subject-barcode mappings.
+            </p>
           </div>
           <button
             onClick={() => setShowFormatModal(true)}
@@ -128,18 +397,30 @@ export default function StudentDataUpload() {
         </div>
 
         <div
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          onClick={() => document.getElementById('fileInput')?.click()}
           className={`border-2 border-dashed rounded-2xl p-10 text-center transition-colors cursor-pointer ${
-            dragOver ? "border-gray-900 bg-gray-50" : "border-gray-200"
+            dragOver ? 'border-gray-900 bg-gray-50' : 'border-gray-200'
           }`}
-          onClick={handleFileSelect}
         >
+          <input
+            id="fileInput"
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={(e) => {
+              const selectedFile = e.target.files?.[0];
+              if (selectedFile) handleFileSelect(selectedFile);
+            }}
+          />
           <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
             <i className="ri-file-excel-2-line text-xl text-gray-400"></i>
           </div>
-          <h4 className="text-sm font-medium text-gray-700 mb-1">Drag Excel file here or click to browse</h4>
+          <h4 className="text-sm font-medium text-gray-700 mb-1">
+            Drag Excel file here or click to browse
+          </h4>
           <p className="text-xs text-gray-400">Accepts .xlsx and .csv files</p>
         </div>
 
@@ -151,19 +432,33 @@ export default function StudentDataUpload() {
                   <i className="ri-file-excel-2-line text-lg text-emerald-600"></i>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-900">{fileName}</p>
-                  <p className="text-xs text-gray-500">9 students found across 2 subjects</p>
+                  <p className="text-sm font-medium text-gray-900">
+                    {fileName}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {totalRecords} students found
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleImport}
-                  className="flex items-center gap-1.5 bg-gray-900 text-white text-xs font-medium px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors cursor-pointer whitespace-nowrap"
+                  disabled={isImporting}
+                  className="flex items-center gap-1.5 bg-gray-900 text-white text-xs font-medium px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <span className="w-3.5 h-3.5 flex items-center justify-center">
-                    <i className="ri-download-line text-xs"></i>
-                  </span>
-                  Import
+                  {isImporting ? (
+                    <>
+                      <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      Importing...
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-3.5 h-3.5 flex items-center justify-center">
+                        <i className="ri-download-line text-xs"></i>
+                      </span>
+                      Import
+                    </>
+                  )}
                 </button>
                 <button
                   onClick={handleClear}
@@ -173,37 +468,68 @@ export default function StudentDataUpload() {
                 </button>
               </div>
             </div>
-            <div className="overflow-x-auto rounded-lg border border-gray-100">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-white border-b border-gray-100">
-                    <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Roll No</th>
-                    <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Student Name</th>
-                    <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Course</th>
-                    <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Branch</th>
-                    <th className="text-center py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Sem</th>
-                    <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Subject</th>
-                    <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Barcode</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mockMasterStudents.slice(0, 5).map((s) => (
-                    <tr key={s.id} className="border-b border-gray-50 bg-white">
-                      <td className="py-2.5 px-3 text-gray-900 font-medium whitespace-nowrap">{s.rollNo}</td>
-                      <td className="py-2.5 px-3 text-gray-700 whitespace-nowrap">{s.name}</td>
-                      <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">{s.course}</td>
-                      <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">{s.branch}</td>
-                      <td className="py-2.5 px-3 text-center text-gray-600 whitespace-nowrap">{s.semester}</td>
-                      <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{s.subject}</td>
-                      <td className="py-2.5 px-3 text-gray-500 font-mono text-[11px] whitespace-nowrap">{s.barcode}</td>
+
+            {previewData.length > 0 && (
+              <div className="overflow-x-auto rounded-lg border border-gray-100">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-white border-b border-gray-100">
+                      {[
+                        'Roll No',
+                        'Student Name',
+                        'Course',
+                        'Branch',
+                        'Sem',
+                        'Subject',
+                        'Barcode',
+                      ].map((h) => (
+                        <th
+                          key={h}
+                          className={`py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${h === 'Sem' ? 'text-center' : 'text-left'}`}
+                        >
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-gray-400 mt-2 text-center">
-              Showing first 5 of 9 records
-            </p>
+                  </thead>
+                  <tbody>
+                    {previewData.slice(0, 5).map((s, idx) => (
+                      <tr
+                        key={idx}
+                        className="border-b border-gray-50 bg-white"
+                      >
+                        <td className="py-2.5 px-3 text-gray-900 font-medium whitespace-nowrap">
+                          {s.roll_no}
+                        </td>
+                        <td className="py-2.5 px-3 text-gray-700 whitespace-nowrap">
+                          {s.student_name}
+                        </td>
+                        <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">
+                          {s.course}
+                        </td>
+                        <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">
+                          {s.branch}
+                        </td>
+                        <td className="py-2.5 px-3 text-center text-gray-600 whitespace-nowrap">
+                          {s.semester}
+                        </td>
+                        <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">
+                          {s.subject}
+                        </td>
+                        <td className="py-2.5 px-3 text-gray-500 font-mono text-[11px] whitespace-nowrap">
+                          {s.barcode}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {previewData.length > 5 && (
+                  <p className="text-xs text-gray-400 py-2 text-center">
+                    Showing first 5 of {previewData.length} records
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -213,7 +539,11 @@ export default function StudentDataUpload() {
         <div className="px-6 py-4 border-b border-gray-100">
           <h4 className="text-sm font-semibold text-gray-900">
             Imported Student Records
-            {imported && <span className="text-gray-400 font-normal ml-2">({records.length})</span>}
+            {students.length > 0 && (
+              <span className="text-gray-400 font-normal ml-2">
+                ({students.length})
+              </span>
+            )}
           </h4>
         </div>
 
@@ -222,38 +552,69 @@ export default function StudentDataUpload() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">Total</span>
-              <span className="text-sm font-semibold text-gray-900">{summary.total}</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {stats.total}
+              </span>
             </div>
             <span className="text-gray-200">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Mathematics</span>
-              <span className="text-sm font-semibold text-gray-900">{summary.mathCount}</span>
-            </div>
-            <span className="text-gray-200">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Physics</span>
-              <span className="text-sm font-semibold text-gray-900">{summary.physicsCount}</span>
-            </div>
-            <span className="text-gray-200">|</span>
+            {stats.subjectWise.map((item) => (
+              <React.Fragment key={item.subject}>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-400">{item.subject}</span>
+                  <span className="text-sm font-semibold text-gray-900">
+                    {item.count}
+                  </span>
+                </div>
+                <span className="text-gray-200">|</span>
+              </React.Fragment>
+            ))}
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">Linked to Exam</span>
-              <span className="text-sm font-semibold text-emerald-600">{summary.linkedCount}</span>
+              <span className="text-sm font-semibold text-emerald-600">
+                {stats.linkedToExam || 0}
+              </span>
             </div>
             <span className="text-gray-200">|</span>
             <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Sheet Uploaded</span>
-              <span className="text-sm font-semibold text-gray-900">{summary.uploadedCount}</span>
+              <span className="text-xs text-gray-400">Uploaded</span>
+              <span className="text-sm font-semibold text-emerald-600">
+                {stats.uploaded || 0}
+              </span>
+            </div>
+            <span className="text-gray-200">|</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">Checking</span>
+              <span className="text-sm font-semibold text-amber-600">
+                {stats.checking || 0}
+              </span>
+            </div>
+            <span className="text-gray-200">|</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">Checked</span>
+              <span className="text-sm font-semibold text-blue-600">
+                {stats.checked || 0}
+              </span>
+            </div>
+            <span className="text-gray-200">|</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">Recheck</span>
+              <span className="text-sm font-semibold text-rose-600">
+                {stats.recheck || 0}
+              </span>
             </div>
             <span className="text-gray-200">|</span>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">Pending</span>
-              <span className="text-sm font-semibold text-amber-600">{summary.pendingCount}</span>
+              <span className="text-sm font-semibold text-gray-400">
+                {stats.pending || 0}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Filter bar */}
+        {/* ─── Filter bar ─── */}
         <div className="px-6 py-3 border-b border-gray-100 flex flex-wrap items-center gap-3">
+          {/* Search */}
           <div className="relative flex-1 min-w-[180px] max-w-[260px]">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center text-gray-400">
               <i className="ri-search-line text-sm"></i>
@@ -264,97 +625,113 @@ export default function StudentDataUpload() {
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by name or roll no..."
               className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent bg-white placeholder:text-gray-400"
-              disabled={!imported}
             />
           </div>
-          <select
+
+          {/* ✅ Subject — CustomSelect (portal-based, no overflow clipping) */}
+          <CustomSelect
             value={subjectFilter}
-            onChange={(e) => setSubjectFilter(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 cursor-pointer"
-            disabled={!imported}
-          >
-            {uniqueSubjects.map((s) => (
-              <option key={s} value={s}>{s === "All" ? "All Subjects" : s}</option>
-            ))}
-          </select>
-          <select
+            onChange={setSubjectFilter}
+            options={uniqueSubjects.map((s) => ({
+              value: s,
+              label: s === 'All' ? 'All Subjects' : s,
+            }))}
+          />
+
+          {/* ✅ Semester — CustomSelect */}
+          <CustomSelect
             value={semesterFilter}
-            onChange={(e) => setSemesterFilter(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 cursor-pointer"
-            disabled={!imported}
-          >
-            {uniqueSemesters.map((s) => (
-              <option key={s} value={s}>{s === "All" ? "All Semesters" : `Semester ${s}`}</option>
-            ))}
-          </select>
-          <select
+            onChange={setSemesterFilter}
+            options={uniqueSemesters.map((s) => ({
+              value: s,
+              label: s === 'All' ? 'All Semesters' : `Semester ${s}`,
+            }))}
+          />
+
+          {/* ✅ Branch — CustomSelect */}
+          <CustomSelect
             value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 cursor-pointer"
-            disabled={!imported}
-          >
-            {uniqueBranches.map((b) => (
-              <option key={b} value={b}>{b === "All" ? "All Branches" : b}</option>
-            ))}
-          </select>
+            onChange={setBranchFilter}
+            options={uniqueBranches.map((b) => ({
+              value: b,
+              label: b === 'All' ? 'All Branches' : b,
+            }))}
+          />
         </div>
 
-        {/* Table */}
+        {/* ─── Table ─── */}
         <div className="overflow-x-auto">
-          {!imported ? (
+          {students.length === 0 ? (
             <div className="py-16 text-center">
               <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
                 <i className="ri-database-2-line text-2xl text-gray-400"></i>
               </div>
-              <h4 className="text-sm font-semibold text-gray-700 mb-1">No records imported yet</h4>
-              <p className="text-xs text-gray-400">Upload the master Excel file above to see student records here.</p>
-            </div>
-          ) : filteredRecords.length === 0 ? (
-            <div className="py-16 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                <i className="ri-file-search-line text-2xl text-gray-400"></i>
-              </div>
-              <h4 className="text-sm font-semibold text-gray-700 mb-1">No matching records</h4>
-              <p className="text-xs text-gray-400">Try adjusting the filters or search query.</p>
+              <h4 className="text-sm font-semibold text-gray-700 mb-1">
+                No records imported yet
+              </h4>
+              <p className="text-xs text-gray-400">
+                Upload the master Excel file above to see student records here.
+              </p>
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50">
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Roll No</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Student Name</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Course</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Branch</th>
-                  <th className="text-center py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Sem</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Subject</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Barcode</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Exam</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Sheet Status</th>
+                  {[
+                    { label: 'Roll No', center: false },
+                    { label: 'Student Name', center: false },
+                    { label: 'Course', center: false },
+                    { label: 'Branch', center: false },
+                    { label: 'Sem', center: true },
+                    { label: 'Subject', center: false },
+                    { label: 'Barcode', center: false },
+                    { label: 'Exam', center: false },
+                    { label: 'Sheet Status', center: false },
+                  ].map(({ label, center }) => (
+                    <th
+                      key={label}
+                      className={`py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap ${center ? 'text-center' : 'text-left'}`}
+                    >
+                      {label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredRecords.map((s, idx) => {
-                  const matchedSheet = getSheetByBarcode(s.barcode);
-                  return (
-                    <tr key={s.id} className={`border-b border-gray-50 hover:bg-gray-50/30 transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/30"}`}>
-                      <td className="py-3 px-4 text-gray-900 font-medium whitespace-nowrap">{s.rollNo}</td>
-                      <td className="py-3 px-4 text-gray-700 whitespace-nowrap">{s.name}</td>
-                      <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">{s.course}</td>
-                      <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">{s.branch}</td>
-                      <td className="py-3 px-4 text-center text-gray-600 whitespace-nowrap">{s.semester}</td>
-                      <td className="py-3 px-4 text-gray-600 whitespace-nowrap">{s.subject}</td>
-                      <td className="py-3 px-4 text-gray-500 font-mono text-xs whitespace-nowrap">{s.barcode}</td>
-                      <td className="py-3 px-4 text-gray-600 text-xs whitespace-nowrap">{getExamName(s.examId)}</td>
-                      <td className="py-3 px-4">
-                        {matchedSheet ? (
-                          <StatusBadge status={matchedSheet.status} />
-                        ) : (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Not uploaded</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {students.map((s, idx) => (
+                  <tr
+                    key={s.id}
+                    className={`border-b border-gray-50 hover:bg-gray-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}
+                  >
+                    <td className="py-3 px-4 text-gray-900 font-medium whitespace-nowrap">
+                      {s.roll_no}
+                    </td>
+                    <td className="py-3 px-4 text-gray-700 whitespace-nowrap">
+                      {s.student_name}
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      {s.course}
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      {s.branch}
+                    </td>
+                    <td className="py-3 px-4 text-center text-gray-600 whitespace-nowrap">
+                      {s.semester}
+                    </td>
+                    <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
+                      {s.subject}
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 font-mono text-xs whitespace-nowrap">
+                      {s.barcode}
+                    </td>
+                    <td className="py-3 px-4 text-gray-600 text-xs whitespace-nowrap">
+                      {(s as any).exam_name || 'Not linked'}
+                    </td>
+                    <td className="py-3 px-4">
+                      <StatusBadge status={s.sheet_status} />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
@@ -364,10 +741,15 @@ export default function StudentDataUpload() {
       {/* ─── Format Guide Modal ─── */}
       {showFormatModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setShowFormatModal(false)}></div>
+          <div
+            className="absolute inset-0 bg-black/30"
+            onClick={() => setShowFormatModal(false)}
+          ></div>
           <div className="relative bg-white rounded-2xl w-full max-w-2xl mx-4 p-6">
             <div className="flex items-center justify-between mb-5">
-              <h4 className="text-base font-semibold text-gray-900">Expected Excel Format</h4>
+              <h4 className="text-base font-semibold text-gray-900">
+                Expected Excel Format
+              </h4>
               <button
                 onClick={() => setShowFormatModal(false)}
                 className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors cursor-pointer"
@@ -380,24 +762,51 @@ export default function StudentDataUpload() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Roll No</th>
-                    <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Student Name</th>
-                    <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Course</th>
-                    <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Branch</th>
-                    <th className="text-center py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Semester</th>
-                    <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Subject</th>
-                    <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Barcode</th>
+                    {[
+                      'Roll No',
+                      'Student Name',
+                      'Course',
+                      'Branch',
+                      'Semester',
+                      'Subject',
+                      'Barcode',
+                      'Exam ID',
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className={`py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${h === 'Semester' ? 'text-center' : 'text-left'}`}
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   <tr className="border-b border-gray-50">
-                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">101</td>
-                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">Rahul Verma</td>
-                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">B.Tech</td>
-                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">CSE</td>
-                    <td className="py-3 px-4 text-center text-gray-500 text-xs whitespace-nowrap">4</td>
-                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">Mathematics</td>
-                    <td className="py-3 px-4 text-gray-500 font-mono text-xs whitespace-nowrap">BAR001</td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      101
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      Rahul Verma
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      B.Tech
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      CSE
+                    </td>
+                    <td className="py-3 px-4 text-center text-gray-500 text-xs whitespace-nowrap">
+                      4
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      Mathematics
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 font-mono text-xs whitespace-nowrap">
+                      BAR001
+                    </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                      1
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -408,7 +817,10 @@ export default function StudentDataUpload() {
                 <i className="ri-information-line text-amber-600 text-sm"></i>
               </span>
               <p className="text-xs text-amber-700">
-                Each student has one row per subject. Barcode must match the barcode printed on their answer sheet.
+                Each student has one row per subject. Barcode must match the
+                barcode printed on their answer sheet. <br />
+                <strong>Exam ID</strong> is optional - it links the student to a
+                specific exam.
               </p>
             </div>
 
@@ -424,15 +836,25 @@ export default function StudentDataUpload() {
         </div>
       )}
 
-      {/* Toast */}
+      {/* ─── Toast ─── */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white px-5 py-3 rounded-lg text-sm font-medium shadow-lg">
-          <div className="flex items-center gap-2">
-            <span className="w-4 h-4 flex items-center justify-center">
-              <i className="ri-check-line text-sm"></i>
-            </span>
-            {toast}
-          </div>
+        <div
+          className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-lg text-sm font-medium shadow-lg flex items-center gap-2 ${
+            toast.type === 'error'
+              ? 'bg-red-600 text-white'
+              : 'bg-gray-900 text-white'
+          }`}
+        >
+          <span className="w-4 h-4 flex items-center justify-center">
+            <i
+              className={
+                toast.type === 'error'
+                  ? 'ri-error-warning-line'
+                  : 'ri-check-line'
+              }
+            ></i>
+          </span>
+          {toast.message}
         </div>
       )}
     </div>
