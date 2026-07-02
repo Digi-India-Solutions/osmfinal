@@ -44,20 +44,29 @@ export const markSchemeApi = {
     }
   },
 
-  // ✅ Save mark scheme - JSON body
+  // ✅ Save mark scheme with optional PDF files (FormData)
   save: async (
     examId: string,
     schemes: SaveMarkSchemeItem[],
+    files?: { model_answer?: File; question_paper?: File },
   ): Promise<MarkSchemeResponse> => {
     try {
-      console.log('🔍 Saving schemes:', schemes); // Debug
+      const formData = new FormData();
+      formData.append('schemes', JSON.stringify(schemes));
+
+      if (files?.model_answer) {
+        formData.append('model_answer_pdf', files.model_answer);
+      }
+      if (files?.question_paper) {
+        formData.append('question_paper_pdf', files.question_paper);
+      }
 
       const response = await axiosInstance.post(
         `/api/v1/mark-scheme/exams/${examId}/mark-scheme`,
-        { schemes }, // ✅ Direct array as JSON
+        formData,
         {
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': 'multipart/form-data',
           },
         },
       );
@@ -73,11 +82,10 @@ export const markSchemeApi = {
   },
 
   // ✅ Upload only model answer PDF
-  // ✅ Upload only model answer PDF
   uploadModelAnswer: async (examId: string, file: File): Promise<any> => {
     try {
       const formData = new FormData();
-      formData.append('model_answer_pdf', file); // ✅ CHANGE: 'file' se 'model_answer_pdf'
+      formData.append('model_answer_pdf', file);
 
       const response = await axiosInstance.post(
         `/api/v1/mark-scheme/exams/${examId}/model-answer`,
@@ -103,7 +111,7 @@ export const markSchemeApi = {
   uploadQuestionPaper: async (examId: string, file: File): Promise<any> => {
     try {
       const formData = new FormData();
-      formData.append('question_paper_pdf', file); // ✅ CHANGE: 'file' se 'question_paper_pdf'
+      formData.append('question_paper_pdf', file);
 
       const response = await axiosInstance.post(
         `/api/v1/mark-scheme/exams/${examId}/question-paper`,
@@ -124,7 +132,6 @@ export const markSchemeApi = {
       };
     }
   },
-
 
   // ✅ Delete PDF
   deletePDF: async (

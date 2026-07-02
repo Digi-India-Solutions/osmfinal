@@ -233,17 +233,19 @@ export default function RightMarkPanel({
       <div className="flex border-b border-slate-700">
         {tabs.map((tab) => {
           const isActive = rightTab === tab.key;
-          const isAnswerSheet = tab.key === "answerSheet";
-          const activeBorder = isAnswerSheet ? "#639922" : "#0ea5e9";
-          const activeText = isAnswerSheet ? "#639922" : "#0ea5e9";
+          const isAnswerSheet = tab.key === 'answerSheet';
+          const activeBorder = isAnswerSheet ? '#639922' : '#0ea5e9';
+          const activeText = isAnswerSheet ? '#639922' : '#0ea5e9';
           return (
             <button
               key={tab.key}
               onClick={() => onRightTabChange(tab.key)}
               className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors cursor-pointer whitespace-nowrap"
               style={{
-                color: isActive ? activeText : "#94a3b8",
-                borderBottom: isActive ? `2px solid ${activeBorder}` : "2px solid transparent",
+                color: isActive ? activeText : '#94a3b8',
+                borderBottom: isActive
+                  ? `2px solid ${activeBorder}`
+                  : '2px solid transparent',
               }}
             >
               <i className={`${tab.icon} text-[13px]`}></i>
@@ -262,7 +264,7 @@ export default function RightMarkPanel({
         )}
         <span
           className={`text-[9px] tabular-nums transition-colors duration-300 ${
-            saveIndicatorFresh ? "text-emerald-400" : "text-slate-500"
+            saveIndicatorFresh ? 'text-emerald-400' : 'text-slate-500'
           }`}
         >
           {saveIndicatorText}
@@ -284,12 +286,14 @@ export default function RightMarkPanel({
       {/* ─── CONTENT AREA ─── */}
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {/* ─── MARKS TAB ─── */}
-        {rightTab === "marks" && (
+        {rightTab === 'marks' && (
           <div className="flex-1 flex flex-col min-h-0">
             {/* Question nav */}
             <div className="flex items-center justify-between px-2.5 py-2 border-b border-slate-700/50 shrink-0">
               <button
-                onClick={() => onQuestionPageChange(Math.max(0, questionPage - 1))}
+                onClick={() =>
+                  onQuestionPageChange(Math.max(0, questionPage - 1))
+                }
                 disabled={questionPage === 0}
                 className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
@@ -323,25 +327,27 @@ export default function RightMarkPanel({
             <div className="flex-1 overflow-y-auto">
               {visibleMarks.map((m) => {
                 const isActive = activeMarkId === m.id;
-                const awardedStr = m.awarded === 0 ? "—" : String(m.awarded);
+                const awardedStr = m.awarded === 0 ? '—' : String(m.awarded);
 
                 return (
                   <div
                     key={m.id}
                     onClick={() => !readOnly && onActiveMarkChange(m.id)}
                     className={`px-1.5 py-1.5 border-b border-slate-700/30 transition-colors ${
-                      readOnly ? "cursor-default" : "cursor-pointer"
+                      readOnly ? 'cursor-default' : 'cursor-pointer'
                     } ${
                       isActive
-                        ? "bg-sky-500/15 border-l-[3px] border-l-sky-400"
-                        : "border-l-[3px] border-l-transparent hover:bg-white/[0.03]"
+                        ? 'bg-sky-500/15 border-l-[3px] border-l-sky-400'
+                        : 'border-l-[3px] border-l-transparent hover:bg-white/[0.03]'
                     }`}
                   >
                     <div className="grid grid-cols-[38px_24px_34px_1fr] items-center gap-0.5 text-[11px]">
                       <span className="text-slate-300 font-medium truncate">
                         {m.criterion}
                       </span>
-                      <span className="text-center text-slate-500">{m.max}</span>
+                      <span className="text-center text-slate-500">
+                        {m.max}
+                      </span>
                       <span className="text-center text-white font-mono tabular-nums text-[12px]">
                         {awardedStr}
                       </span>
@@ -363,7 +369,9 @@ export default function RightMarkPanel({
             {/* ─── SHARED NUMPAD ─── */}
             <div className="border-t border-slate-700 px-2.5 py-2 shrink-0">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] text-slate-400">Entering marks for:</span>
+                <span className="text-[10px] text-slate-400">
+                  Entering marks for:
+                </span>
                 {activeMark ? (
                   <span className="text-[10px] font-semibold text-white bg-sky-600 px-2 py-0.5 rounded-full whitespace-nowrap">
                     {activeMark.criterion}
@@ -374,8 +382,10 @@ export default function RightMarkPanel({
               </div>
 
               <div className="flex items-baseline justify-between mb-2.5">
-                <span className={`text-2xl font-mono tabular-nums font-bold ${isEmpty ? "text-slate-500" : "text-white"}`}>
-                  {isEmpty ? "—" : displayValue}
+                <span
+                  className={`text-2xl font-mono tabular-nums font-bold ${isEmpty ? 'text-slate-500' : 'text-white'}`}
+                >
+                  {isEmpty ? '—' : displayValue}
                 </span>
                 <span className="text-[10px] text-slate-400">
                   max {activeMax}
@@ -447,150 +457,69 @@ export default function RightMarkPanel({
         )}
 
         {/* ─── QUESTION PAPER TAB — PDF-style scrollable white page cards ─── */}
-        {rightTab === "questions" && (
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
-            {questionPaperPages.map((questions, pageIdx) => (
-              <div
-                key={pageIdx}
-                className="bg-white rounded-sm shadow-sm overflow-hidden shrink-0"
-              >
-                {/* Page header */}
-                {pageIdx === 0 && (
-                  <div className="px-3 pt-3 pb-2 border-b border-slate-200">
-                    <div className="text-[8px] text-slate-500 font-medium tracking-wide uppercase text-center leading-relaxed">
-                      ARKA JAIN University
-                    </div>
-                    <div className="text-[9px] text-slate-700 font-semibold text-center mt-0.5 leading-relaxed">
-                      Mathematics Mid-Term 2025
-                    </div>
-                    <div className="text-[8px] text-slate-500 text-center mt-0.5">
-                      Max Marks: 100 &nbsp;|&nbsp; Duration: 3 Hours
-                    </div>
+        {rightTab === 'questions' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            {questionPaperUrl ? (
+              <iframe
+                src={questionPaperUrl}
+                title="Question Paper"
+                className="w-full h-full border-0"
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center p-4">
+                <div className="text-center">
+                  <div className="w-10 h-10 mx-auto mb-2 rounded-full bg-slate-700 flex items-center justify-center">
+                    <i className="ri-file-unknow-line text-slate-400 text-lg"></i>
                   </div>
-                )}
-                {pageIdx > 0 && (
-                  <div className="px-3 py-2 border-b border-slate-100">
-                    <span className="text-[9px] font-semibold text-slate-500">
-                      Question Paper — Page {pageIdx + 1}
-                    </span>
-                  </div>
-                )}
-
-                {/* Page content */}
-                <div className="px-3 py-2.5 space-y-3">
-                  {questions.map((item, qIdx) => (
-                    <div key={qIdx}>
-                      <p className="text-[11px] text-slate-800 font-semibold leading-relaxed">
-                        {item.q}
-                      </p>
-                      {item.sub.length > 0 && (
-                        <div className="mt-1 pl-3 space-y-0.5">
-                          {item.sub.map((sub, sIdx) => (
-                            <p key={sIdx} className="text-[10px] text-slate-600 leading-relaxed">
-                              {sub}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-
-                  {pageIdx === questionPaperPages.length - 1 && (
-                    <p className="text-[9px] text-slate-400 italic border-t border-slate-100 pt-2 mt-2">
-                      Note: All questions are compulsory. Draw neat diagrams where necessary.
-                      Figures to the right indicate full marks.
-                    </p>
-                  )}
-                </div>
-
-                {/* Page footer */}
-                <div className="px-3 py-1.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                  <span className="text-[8px] text-slate-400">Question Paper</span>
-                  <span className="text-[8px] text-slate-400">
-                    Page {pageIdx + 1} of {questionPaperPages.length}
-                  </span>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    No question paper uploaded yet.
+                  </p>
                 </div>
               </div>
-            ))}
-            <div className="h-1 shrink-0" />
+            )}
           </div>
         )}
 
         {/* ─── ANSWER SHEET TAB — PDF-style scrollable white page cards ─── */}
-        {rightTab === "answerSheet" && (
+        {rightTab === 'answerSheet' && (
           <div className="flex-1 flex flex-col min-h-0">
-            {hasModelAnswer ? (
+            {hasModelAnswer && modelAnswerUrl ? (
               <>
-                {/* Green info bar */}
-                <div className="shrink-0 px-3 py-2 flex items-center gap-2" style={{ backgroundColor: "#EAF3DE" }}>
+                <div
+                  className="shrink-0 px-3 py-2 flex items-center gap-2"
+                  style={{ backgroundColor: '#EAF3DE' }}
+                >
                   <div className="w-5 h-5 flex items-center justify-center shrink-0">
-                    <i className="ri-shield-check-line text-sm" style={{ color: "#27500A" }}></i>
+                    <i
+                      className="ri-shield-check-line text-sm"
+                      style={{ color: '#27500A' }}
+                    ></i>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[10px] font-medium" style={{ color: "#27500A" }}>
+                    <p
+                      className="text-[10px] font-medium"
+                      style={{ color: '#27500A' }}
+                    >
                       Model answer sheet — uploaded by teacher
                     </p>
                   </div>
                   <span
                     className="ml-auto text-[9px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap shrink-0"
-                    style={{ color: "#27500A", backgroundColor: "rgba(99,153,34,0.15)" }}
+                    style={{
+                      color: '#27500A',
+                      backgroundColor: 'rgba(99,153,34,0.15)',
+                    }}
                   >
                     Confidential
                   </span>
                 </div>
-
-                {/* Scrollable model answer pages */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                  {modelAnswerPages.map((items, pageIdx) => (
-                    <div
-                      key={pageIdx}
-                      className="bg-white rounded-sm shadow-sm overflow-hidden shrink-0"
-                    >
-                      {/* Page header */}
-                      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
-                        <span className="text-[10px] font-semibold text-slate-700">
-                          Model Answer — Page {pageIdx + 1}
-                        </span>
-                        <span className="text-[8px] font-medium text-slate-400">
-                          Confidential
-                        </span>
-                      </div>
-
-                      {/* Page content */}
-                      <div className="px-3 py-2.5 space-y-2">
-                        {items.map((item, itemIdx) => (
-                          <div
-                            key={itemIdx}
-                            className="text-[10px] leading-relaxed pl-2.5 py-1.5 rounded-r"
-                            style={{
-                              backgroundColor: "#f0fdf4",
-                              borderLeft: "2px solid #639922",
-                            }}
-                          >
-                            <span className="font-semibold text-slate-800">
-                              {item.label}
-                            </span>{" "}
-                            <span className="text-slate-500 text-[9px]">
-                              ({item.marks} marks):
-                            </span>{" "}
-                            <span className="text-slate-600">{item.text}</span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Page footer */}
-                      <div className="flex items-center justify-between px-3 py-1.5 border-t border-slate-100 bg-slate-50">
-                        <span className="text-[8px] text-slate-400">Model Answer</span>
-                        <span className="text-[8px] text-slate-400">Page {pageIdx + 1}</span>
-                      </div>
-                    </div>
-                  ))}
-
-                  <div className="h-1 shrink-0" />
-                </div>
+                <iframe
+                  src={modelAnswerUrl}
+                  title="Model Answer"
+                  className="flex-1 w-full border-0"
+                />
               </>
             ) : (
-              /* No model answer uploaded */
               <div className="flex-1 flex items-center justify-center p-4">
                 <div className="text-center">
                   <div className="w-10 h-10 mx-auto mb-2 rounded-full bg-slate-700 flex items-center justify-center">
