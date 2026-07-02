@@ -1,7 +1,8 @@
 // src/mark-scheme/mark-scheme-controller.js
+
 import pool from '../pool.js';
 import {
-  uploadImageToCloudinary,
+  uploadPDFToCloudinary, // ✅ Changed from uploadImageToCloudinary
   deleteFromCloudinary,
 } from '../../utils/cloudinary.util.js';
 import fs from 'fs';
@@ -34,7 +35,19 @@ export const getMarkSchemeByExam = async (req, res) => {
 
 export const saveMarkScheme = async (req, res) => {
   const { examId } = req.params;
-  const { schemes } = req.body;
+
+  // ✅ Parse schemes from body
+  let schemes = req.body.schemes;
+  if (typeof schemes === 'string') {
+    try {
+      schemes = JSON.parse(schemes);
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid schemes format',
+      });
+    }
+  }
 
   // ✅ Handle file uploads
   let modelAnswerPdf = null;
@@ -44,19 +57,21 @@ export const saveMarkScheme = async (req, res) => {
     // Upload model answer PDF to Cloudinary
     if (req.files && req.files.model_answer_pdf) {
       const file = req.files.model_answer_pdf[0];
-      const result = await uploadImageToCloudinary(file.path);
+      const result = await uploadPDFToCloudinary(
+        file.path,
+        'mark-scheme/model-answers',
+      );
       modelAnswerPdf = result.url;
-      // Delete local file after upload
-      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
     }
 
     // Upload question paper PDF to Cloudinary
     if (req.files && req.files.question_paper_pdf) {
       const file = req.files.question_paper_pdf[0];
-      const result = await uploadImageToCloudinary(file.path);
+      const result = await uploadPDFToCloudinary(
+        file.path,
+        'mark-scheme/question-papers',
+      );
       questionPaperPdf = result.url;
-      // Delete local file after upload
-      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
     }
   } catch (error) {
     console.error('Cloudinary upload error:', error);
@@ -180,8 +195,11 @@ export const uploadModelAnswer = async (req, res) => {
       });
     }
 
-    // Upload to Cloudinary
-    const result = await uploadImageToCloudinary(req.file.path);
+    // ✅ Upload to Cloudinary using PDF upload
+    const result = await uploadPDFToCloudinary(
+      req.file.path,
+      'mark-scheme/model-answers',
+    );
     const pdfUrl = result.url;
 
     // Update all mark schemes for this exam
@@ -218,8 +236,11 @@ export const uploadQuestionPaper = async (req, res) => {
       });
     }
 
-    // Upload to Cloudinary
-    const result = await uploadImageToCloudinary(req.file.path);
+    // ✅ Upload to Cloudinary using PDF upload
+    const result = await uploadPDFToCloudinary(
+      req.file.path,
+      'mark-scheme/question-papers',
+    );
     const pdfUrl = result.url;
 
     // Update all mark schemes for this exam

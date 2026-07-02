@@ -80,6 +80,7 @@ import StudentRoutes from './src/students/studentRoutes.js';
 import Sheetupload from './src/sheetupload/sheetRoutes.js';
 import assignmentRoutes from './src/assignment/assignmentRoutes.js';
 import workQueueRoutes from './src/work-queue/workRoutes.js';
+import recheckRoutes from './src/recheck-queue/recheckRoute.js';
 app.use('/backups', express.static(path.join(process.cwd(), 'backups')));
 app.use("/api/v1/reports", reportsRouter);
 app.use("/api/v1/auth", adminRouter);
@@ -94,6 +95,7 @@ app.use('/api/v1/work-queue', workQueueRoutes);
 app.use("/api/v1/Students", StudentRoutes);
 app.use('/api/v1/sheets', Sheetupload);
 app.use('/api/v1/assignments', assignmentRoutes);
+app.use('/api/v1/recheck-queue', recheckRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running");

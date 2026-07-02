@@ -28,9 +28,11 @@ interface RecheckRightPanelProps {
   totalRound2: number;
   totalMax: number;
   finalMarks: number;
-  finalMarksRule: "higher" | "recheck_marks" | "average";
+  finalMarksRule: 'higher' | 'recheck_marks' | 'average';
   rightTab: RecheckTab;
   hasModelAnswer: boolean;
+  questionPaperUrl: string | null; // ✅ NEW
+  modelAnswerUrl: string | null; // ✅ NEW
   saveIndicatorText?: string;
   saveIndicatorFresh?: boolean;
   onActiveMarkChange: (id: string) => void;
@@ -155,7 +157,9 @@ export default function RecheckRightPanel({
   finalMarksRule,
   rightTab,
   hasModelAnswer,
-  saveIndicatorText = "Auto-saves every 30s",
+  questionPaperUrl, // ✅ NEW
+  modelAnswerUrl,
+  saveIndicatorText = 'Auto-saves every 30s',
   saveIndicatorFresh = false,
   onActiveMarkChange,
   onQuestionPageChange,
@@ -167,7 +171,7 @@ export default function RecheckRightPanel({
   onSubmitRecheck,
   onEscalateFurther,
 }: RecheckRightPanelProps) {
-  const [displayValue, setDisplayValue] = useState("");
+  const [displayValue, setDisplayValue] = useState('');
 
   const activeMark = marks.find((m) => m.id === activeMarkId);
   const activeMax = activeMark?.max ?? 0;
@@ -176,9 +180,11 @@ export default function RecheckRightPanel({
 
   useEffect(() => {
     if (activeMark) {
-      setDisplayValue(activeMark.round2 !== null ? String(activeMark.round2) : "");
+      setDisplayValue(
+        activeMark.round2 !== null ? String(activeMark.round2) : '',
+      );
     } else {
-      setDisplayValue("");
+      setDisplayValue('');
     }
   }, [activeMarkId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -187,9 +193,10 @@ export default function RecheckRightPanel({
   const displayStart = startIdx + 1;
   const displayEnd = Math.min(startIdx + QUESTIONS_PER_PAGE, totalQuestions);
 
-  const displayNumeric = displayValue === "" ? 0 : parseFloat(displayValue) || 0;
-  const hasDecimal = displayValue.includes(".");
-  const isEmpty = displayValue === "";
+  const displayNumeric =
+    displayValue === '' ? 0 : parseFloat(displayValue) || 0;
+  const hasDecimal = displayValue.includes('.');
+  const isEmpty = displayValue === '';
 
   const handleDigit = useCallback(
     (digit: number) => {
@@ -205,16 +212,16 @@ export default function RecheckRightPanel({
 
   const handleDecimal = useCallback(() => {
     if (hasDecimal || isEmpty) return;
-    setDisplayValue((prev) => prev + ".");
+    setDisplayValue((prev) => prev + '.');
   }, [hasDecimal, isEmpty]);
 
   const handleHalf = useCallback(() => {
     setDisplayValue((prev) => {
-      const current = prev === "" ? 0 : parseFloat(prev) || 0;
+      const current = prev === '' ? 0 : parseFloat(prev) || 0;
       const next = current + 0.5;
       if (next > activeMax) return prev;
       const s = String(next);
-      return s.endsWith(".0") ? String(Math.floor(next)) : s;
+      return s.endsWith('.0') ? String(Math.floor(next)) : s;
     });
   }, [activeMax]);
 
@@ -223,7 +230,7 @@ export default function RecheckRightPanel({
   }, []);
 
   const handleClear = useCallback(() => {
-    setDisplayValue("");
+    setDisplayValue('');
     if (activeMarkId) {
       onClearStampValue(activeMarkId);
     }
@@ -235,16 +242,23 @@ export default function RecheckRightPanel({
     const capped = Math.min(num, activeMax);
     onRound2Update(activeMarkId, capped);
     onRequestAddMark(activeMarkId, capped);
-  }, [activeMarkId, isEmpty, displayValue, activeMax, onRound2Update, onRequestAddMark]);
+  }, [
+    activeMarkId,
+    isEmpty,
+    displayValue,
+    activeMax,
+    onRound2Update,
+    onRequestAddMark,
+  ]);
 
   const digitDisabled = (digit: number) => digit > activeMax;
   const halfDisabled = displayNumeric + 0.5 > activeMax;
   const decimalDisabled = hasDecimal || isEmpty;
 
   const tabs: { key: RecheckTab; icon: string; label: string }[] = [
-    { key: "recheckMarks", icon: "ri-list-check", label: "Recheck Marks" },
-    { key: "questions", icon: "ri-file-list-3-line", label: "Q. Paper" },
-    { key: "answerSheet", icon: "ri-check-double-line", label: "Ans. Sheet" },
+    { key: 'recheckMarks', icon: 'ri-list-check', label: 'Recheck Marks' },
+    { key: 'questions', icon: 'ri-file-list-3-line', label: 'Q. Paper' },
+    { key: 'answerSheet', icon: 'ri-check-double-line', label: 'Ans. Sheet' },
   ];
 
   const canSubmit = totalRound2 > 0;
@@ -255,15 +269,17 @@ export default function RecheckRightPanel({
       <div className="flex border-b border-slate-700">
         {tabs.map((tab) => {
           const isActive = rightTab === tab.key;
-          const activeColor = "#7C3AED";
+          const activeColor = '#7C3AED';
           return (
             <button
               key={tab.key}
               onClick={() => onRightTabChange(tab.key)}
               className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors cursor-pointer whitespace-nowrap"
               style={{
-                color: isActive ? activeColor : "#94a3b8",
-                borderBottom: isActive ? `2px solid ${activeColor}` : "2px solid transparent",
+                color: isActive ? activeColor : '#94a3b8',
+                borderBottom: isActive
+                  ? `2px solid ${activeColor}`
+                  : '2px solid transparent',
               }}
             >
               <i className={`${tab.icon} text-[13px]`}></i>
@@ -275,7 +291,9 @@ export default function RecheckRightPanel({
 
       {/* ─── SAVE INDICATOR ─── */}
       <div className="flex items-center justify-center py-1 border-b border-slate-700/50 shrink-0">
-        <span className={`text-[10px] transition-colors duration-300 ${saveIndicatorFresh ? "text-emerald-400" : "text-slate-500"}`}>
+        <span
+          className={`text-[10px] transition-colors duration-300 ${saveIndicatorFresh ? 'text-emerald-400' : 'text-slate-500'}`}
+        >
           {saveIndicatorFresh && <i className="ri-check-line mr-1"></i>}
           {saveIndicatorText}
         </span>
@@ -284,12 +302,14 @@ export default function RecheckRightPanel({
       {/* ─── CONTENT AREA ─── */}
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {/* ─── RECHECK MARKS TAB ─── */}
-        {rightTab === "recheckMarks" && (
+        {rightTab === 'recheckMarks' && (
           <div className="flex-1 flex flex-col min-h-0">
             {/* Question nav */}
             <div className="flex items-center justify-between px-2.5 py-2 border-b border-slate-700/50 shrink-0">
               <button
-                onClick={() => onQuestionPageChange(Math.max(0, questionPage - 1))}
+                onClick={() =>
+                  onQuestionPageChange(Math.max(0, questionPage - 1))
+                }
                 disabled={questionPage === 0}
                 className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
@@ -325,7 +345,7 @@ export default function RecheckRightPanel({
               {visibleMarks.map((m) => {
                 const isActive = activeMarkId === m.id;
                 const round1Str = String(m.round1);
-                const round2Str = m.round2 !== null ? String(m.round2) : "—";
+                const round2Str = m.round2 !== null ? String(m.round2) : '—';
 
                 return (
                   <div
@@ -333,21 +353,27 @@ export default function RecheckRightPanel({
                     onClick={() => onActiveMarkChange(m.id)}
                     className={`px-1.5 py-1.5 border-b border-slate-700/30 cursor-pointer transition-colors ${
                       isActive
-                        ? "bg-violet-500/15 border-l-[3px] border-l-violet-400"
-                        : "border-l-[3px] border-l-transparent hover:bg-white/[0.03]"
+                        ? 'bg-violet-500/15 border-l-[3px] border-l-violet-400'
+                        : 'border-l-[3px] border-l-transparent hover:bg-white/[0.03]'
                     }`}
                   >
                     <div className="grid grid-cols-[36px_22px_32px_32px_1fr] items-center gap-0.5 text-[11px]">
                       <span className="text-slate-300 font-medium truncate">
                         {m.criterion}
                       </span>
-                      <span className="text-center text-slate-500">{m.max}</span>
+                      <span className="text-center text-slate-500">
+                        {m.max}
+                      </span>
                       <span className="text-center text-slate-500 font-mono tabular-nums bg-slate-800 rounded px-1 py-0.5 text-[10px]">
                         {round1Str}
                       </span>
-                      <span className={`text-center font-mono tabular-nums text-[12px] ${
-                        m.round2 !== null ? "text-white font-bold" : "text-slate-500"
-                      }`}>
+                      <span
+                        className={`text-center font-mono tabular-nums text-[12px] ${
+                          m.round2 !== null
+                            ? 'text-white font-bold'
+                            : 'text-slate-500'
+                        }`}
+                      >
                         {round2Str}
                       </span>
                       <input
@@ -367,7 +393,9 @@ export default function RecheckRightPanel({
             {/* ─── SHARED NUMPAD ─── */}
             <div className="border-t border-slate-700 px-2.5 py-2 shrink-0">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] text-slate-400">Entering marks for:</span>
+                <span className="text-[10px] text-slate-400">
+                  Entering marks for:
+                </span>
                 {activeMark ? (
                   <span className="text-[10px] font-semibold text-white bg-violet-600 px-2 py-0.5 rounded-full whitespace-nowrap">
                     {activeMark.criterion}
@@ -378,8 +406,10 @@ export default function RecheckRightPanel({
               </div>
 
               <div className="flex items-baseline justify-between mb-2.5">
-                <span className={`text-2xl font-mono tabular-nums font-bold ${isEmpty ? "text-slate-500" : "text-white"}`}>
-                  {isEmpty ? "—" : displayValue}
+                <span
+                  className={`text-2xl font-mono tabular-nums font-bold ${isEmpty ? 'text-slate-500' : 'text-white'}`}
+                >
+                  {isEmpty ? '—' : displayValue}
                 </span>
                 <span className="text-[10px] text-slate-400">
                   max {activeMax}
@@ -449,133 +479,54 @@ export default function RecheckRightPanel({
             </div>
           </div>
         )}
-
         {/* ─── QUESTION PAPER TAB ─── */}
-        {rightTab === "questions" && (
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
-            {questionPaperPages.map((questions, pageIdx) => (
-              <div
-                key={pageIdx}
-                className="bg-white rounded-sm shadow-sm overflow-hidden shrink-0"
-              >
-                {pageIdx === 0 && (
-                  <div className="px-3 pt-3 pb-2 border-b border-slate-200">
-                    <div className="text-[8px] text-slate-500 font-medium tracking-wide uppercase text-center leading-relaxed">
-                      ARKA JAIN University
-                    </div>
-                    <div className="text-[9px] text-slate-700 font-semibold text-center mt-0.5 leading-relaxed">
-                      Mathematics Mid-Term 2025
-                    </div>
-                    <div className="text-[8px] text-slate-500 text-center mt-0.5">
-                      Max Marks: 100 &nbsp;|&nbsp; Duration: 3 Hours
-                    </div>
-                  </div>
-                )}
-                {pageIdx > 0 && (
-                  <div className="px-3 py-2 border-b border-slate-100">
-                    <span className="text-[9px] font-semibold text-slate-500">
-                      Question Paper — Page {pageIdx + 1}
-                    </span>
-                  </div>
-                )}
-                <div className="px-3 py-2.5 space-y-3">
-                  {questions.map((item, qIdx) => (
-                    <div key={qIdx}>
-                      <p className="text-[11px] text-slate-800 font-semibold leading-relaxed">
-                        {item.q}
-                      </p>
-                      {item.sub.length > 0 && (
-                        <div className="mt-1 pl-3 space-y-0.5">
-                          {item.sub.map((sub, sIdx) => (
-                            <p key={sIdx} className="text-[10px] text-slate-600 leading-relaxed">
-                              {sub}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {pageIdx === questionPaperPages.length - 1 && (
-                    <p className="text-[9px] text-slate-400 italic border-t border-slate-100 pt-2 mt-2">
-                      Note: All questions are compulsory. Draw neat diagrams where necessary.
-                      Figures to the right indicate full marks.
-                    </p>
-                  )}
-                </div>
-                <div className="px-3 py-1.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                  <span className="text-[8px] text-slate-400">Question Paper</span>
-                  <span className="text-[8px] text-slate-400">
-                    Page {pageIdx + 1} of {questionPaperPages.length}
-                  </span>
-                </div>
-              </div>
-            ))}
-            <div className="h-1 shrink-0" />
-          </div>
-        )}
-
-        {/* ─── ANSWER SHEET TAB ─── */}
-        {rightTab === "answerSheet" && (
+     
+        {rightTab === 'questions' && (
           <div className="flex-1 flex flex-col min-h-0">
-            {hasModelAnswer ? (
+            {questionPaperUrl ? (
               <>
-                <div className="shrink-0 px-3 py-2 flex items-center gap-2" style={{ backgroundColor: "#EAF3DE" }}>
+                <div
+                  className="shrink-0 px-3 py-2 flex items-center gap-2"
+                  style={{ backgroundColor: '#E0F2FE' }}
+                >
                   <div className="w-5 h-5 flex items-center justify-center shrink-0">
-                    <i className="ri-shield-check-line text-sm" style={{ color: "#27500A" }}></i>
+                    <i
+                      className="ri-file-pdf-line text-sm"
+                      style={{ color: '#0369A1' }}
+                    ></i>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[10px] font-medium" style={{ color: "#27500A" }}>
-                      Model answer sheet — uploaded by teacher
+                    <p
+                      className="text-[10px] font-medium"
+                      style={{ color: '#0369A1' }}
+                    >
+                      Question Paper
+                    </p>
+                    <p className="text-[8px] text-slate-500 truncate">
+                      {questionPaperUrl.split('/').pop() || 'PDF'}
                     </p>
                   </div>
-                  <span
-                    className="ml-auto text-[9px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap shrink-0"
-                    style={{ color: "#27500A", backgroundColor: "rgba(99,153,34,0.15)" }}
+                  <a
+                    href={questionPaperUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-[9px] font-semibold px-2 py-1 rounded whitespace-nowrap shrink-0"
+                    style={{
+                      color: '#0369A1',
+                      backgroundColor: 'rgba(3,105,161,0.1)',
+                    }}
                   >
-                    Confidential
-                  </span>
+                    <i className="ri-external-link-line mr-1"></i>
+                    Open PDF
+                  </a>
                 </div>
-                <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                  {modelAnswerPages.map((items, pageIdx) => (
-                    <div
-                      key={pageIdx}
-                      className="bg-white rounded-sm shadow-sm overflow-hidden shrink-0"
-                    >
-                      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
-                        <span className="text-[10px] font-semibold text-slate-700">
-                          Model Answer — Page {pageIdx + 1}
-                        </span>
-                        <span className="text-[8px] font-medium text-slate-400">
-                          Confidential
-                        </span>
-                      </div>
-                      <div className="px-3 py-2.5 space-y-2">
-                        {items.map((item, itemIdx) => (
-                          <div
-                            key={itemIdx}
-                            className="text-[10px] leading-relaxed pl-2.5 py-1.5 rounded-r"
-                            style={{
-                              backgroundColor: "#f0fdf4",
-                              borderLeft: "2px solid #639922",
-                            }}
-                          >
-                            <span className="font-semibold text-slate-800">
-                              {item.label}
-                            </span>{" "}
-                            <span className="text-slate-500 text-[9px]">
-                              ({item.marks} marks):
-                            </span>{" "}
-                            <span className="text-slate-600">{item.text}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-between px-3 py-1.5 border-t border-slate-100 bg-slate-50">
-                        <span className="text-[8px] text-slate-400">Model Answer</span>
-                        <span className="text-[8px] text-slate-400">Page {pageIdx + 1}</span>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="h-1 shrink-0" />
+                <div className="flex-1 overflow-hidden bg-[#0f172a]">
+                  <iframe
+                    src={questionPaperUrl}
+                    className="w-full h-full"
+                    style={{ border: 'none' }}
+                    title="Question Paper PDF"
+                  />
                 </div>
               </>
             ) : (
@@ -585,7 +536,7 @@ export default function RecheckRightPanel({
                     <i className="ri-file-unknow-line text-slate-400 text-lg"></i>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    No model answer sheet uploaded yet.
+                    No question paper uploaded yet.
                   </p>
                   <p className="text-[10px] text-slate-500 mt-1">
                     Contact the teacher.
@@ -596,13 +547,128 @@ export default function RecheckRightPanel({
           </div>
         )}
 
+
+        {rightTab === 'answerSheet' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            {modelAnswerUrl ? (
+              <>
+                <div
+                  className="shrink-0 px-3 py-2 flex items-center gap-2"
+                  style={{ backgroundColor: '#EAF3DE' }}
+                >
+                  <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                    <i
+                      className="ri-shield-check-line text-sm"
+                      style={{ color: '#27500A' }}
+                    ></i>
+                  </div>
+                  <div className="min-w-0">
+                    <p
+                      className="text-[10px] font-medium"
+                      style={{ color: '#27500A' }}
+                    >
+                      Model Answer Sheet
+                    </p>
+                    <p className="text-[8px] text-slate-500 truncate">
+                      {modelAnswerUrl.split('/').pop() || 'PDF'}
+                    </p>
+                  </div>
+                  <a
+                    href={modelAnswerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-[9px] font-semibold px-2 py-1 rounded whitespace-nowrap shrink-0"
+                    style={{
+                      color: '#27500A',
+                      backgroundColor: 'rgba(99,153,34,0.15)',
+                    }}
+                  >
+                    <i className="ri-external-link-line mr-1"></i>
+                    Open PDF
+                  </a>
+                </div>
+                <div className="flex-1 overflow-hidden bg-[#0f172a]">
+                  <iframe
+                    src={modelAnswerUrl}
+                    className="w-full h-full"
+                    style={{ border: 'none' }}
+                    title="Model Answer PDF"
+                  />
+                </div>
+              </>
+            ) : questionPaperUrl ? (
+              <>
+                <div
+                  className="shrink-0 px-3 py-2 flex items-center gap-2"
+                  style={{ backgroundColor: '#E0F2FE' }}
+                >
+                  <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                    <i
+                      className="ri-file-pdf-line text-sm"
+                      style={{ color: '#0369A1' }}
+                    ></i>
+                  </div>
+                  <div className="min-w-0">
+                    <p
+                      className="text-[10px] font-medium"
+                      style={{ color: '#0369A1' }}
+                    >
+                      Question Paper
+                    </p>
+                    <p className="text-[8px] text-slate-500 truncate">
+                      {questionPaperUrl.split('/').pop() || 'PDF'}
+                    </p>
+                  </div>
+                  <a
+                    href={questionPaperUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-[9px] font-semibold px-2 py-1 rounded whitespace-nowrap shrink-0"
+                    style={{
+                      color: '#0369A1',
+                      backgroundColor: 'rgba(3,105,161,0.1)',
+                    }}
+                  >
+                    <i className="ri-external-link-line mr-1"></i>
+                    Open PDF
+                  </a>
+                </div>
+                <div className="flex-1 overflow-hidden bg-[#0f172a]">
+                  <iframe
+                    src={questionPaperUrl}
+                    className="w-full h-full"
+                    style={{ border: 'none' }}
+                    title="Question Paper PDF"
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center p-4">
+                <div className="text-center">
+                  <div className="w-10 h-10 mx-auto mb-2 rounded-full bg-slate-700 flex items-center justify-center">
+                    <i className="ri-file-unknow-line text-slate-400 text-lg"></i>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    No PDF uploaded yet.
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Contact the teacher.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {/* ─── TOTAL & FINAL PREVIEW ─── */}
         <div className="border-t border-slate-700 px-3 py-2 space-y-1.5 shrink-0">
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-slate-400">Round 2 Total:</span>
             <span className="text-xs font-bold text-white tabular-nums">
               {totalRound2}
-              <span className="text-[10px] font-normal text-slate-500"> / {totalMax}</span>
+              <span className="text-[10px] font-normal text-slate-500">
+                {' '}
+                / {totalMax}
+              </span>
             </span>
           </div>
           <div className="flex items-center justify-between bg-violet-500/10 rounded px-2 py-1.5">
@@ -614,7 +680,6 @@ export default function RecheckRightPanel({
             </span>
           </div>
         </div>
-
         {/* ─── ACTION BUTTONS ─── */}
         <div className="px-2.5 pb-3 space-y-1.5 pt-1 shrink-0">
           <button

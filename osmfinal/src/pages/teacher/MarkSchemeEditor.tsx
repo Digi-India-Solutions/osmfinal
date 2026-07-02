@@ -119,6 +119,9 @@ export default function MarkSchemeEditor() {
   const subject = currentUser?.subject ?? '';
   const isAdminRoute = location.pathname.startsWith('/admin');
 
+  const [modelAnswerFile, setModelAnswerFile] = useState<File | null>(null);
+  const [questionPaperFile, setQuestionPaperFile] = useState<File | null>(null);
+
   const [examList, setExamList] = useState<ExamResponse[]>([]);
   const [examsLoading, setExamsLoading] = useState(true);
 
@@ -222,12 +225,11 @@ export default function MarkSchemeEditor() {
    const file = e.target.files?.[0];
    if (!file || !selectedExamId) return;
 
-    console.log('🔍 ===== UPLOAD MODEL ANSWER =====');
-    console.log('🔍 Exam ID:', selectedExamId);
-    console.log('🔍 File name:', file.name);
-    console.log('🔍 File type:', file.type);
-    console.log('🔍 File size:', file.size);
-
+   console.log('🔍 ===== UPLOAD MODEL ANSWER =====');
+   console.log('🔍 Exam ID:', selectedExamId);
+   console.log('🔍 File name:', file.name);
+   console.log('🔍 File type:', file.type);
+   console.log('🔍 File size:', file.size);
 
    if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
      showToast('Only PDF files are allowed', 'error');
@@ -248,12 +250,10 @@ export default function MarkSchemeEditor() {
 
      console.log('🔍 Response:', response);
      if (response.success) {
-       // ✅ SIRF STATE UPDATE KAREIN - Page refresh nahi
        setModelAnswerPdf(response.data.url);
+       // ✅ Also save file for later save with mark scheme
+       setModelAnswerFile(file);
        showToast('Model answer uploaded successfully', 'success');
-
-       // ❌ REMOVE THIS LINE - Yeh page refresh karta hai
-       // await handleExamChange(selectedExamId);
      } else {
        showToast(response.message || 'Failed to upload model answer', 'error');
      }
@@ -265,46 +265,47 @@ export default function MarkSchemeEditor() {
      e.target.value = '';
    }
  };
-const handleQuestionPaperUpload = async (
-  e: React.ChangeEvent<HTMLInputElement>,
-) => {
-  const file = e.target.files?.[0];
-  if (!file || !selectedExamId) return;
+ const handleQuestionPaperUpload = async (
+   e: React.ChangeEvent<HTMLInputElement>,
+ ) => {
+   const file = e.target.files?.[0];
+   if (!file || !selectedExamId) return;
 
-  if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
-    showToast('Only PDF files are allowed', 'error');
-    return;
-  }
+   if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
+     showToast('Only PDF files are allowed', 'error');
+     return;
+   }
 
-  if (file.size > 10 * 1024 * 1024) {
-    showToast('File too large. Max size is 10MB', 'error');
-    return;
-  }
+   if (file.size > 10 * 1024 * 1024) {
+     showToast('File too large. Max size is 10MB', 'error');
+     return;
+   }
 
-  setUploadingQuestionPaper(true);
-  try {
-    const response = await markSchemeApi.uploadQuestionPaper(
-      selectedExamId,
-      file,
-    );
-    if (response.success) {
-      // ✅ SIRF STATE UPDATE KAREIN - Page refresh nahi
-      setQuestionPaperPdf(response.data.url);
-      showToast('Question paper uploaded successfully', 'success');
-
-      // ❌ REMOVE THIS LINE - Yeh page refresh karta hai
-      // await handleExamChange(selectedExamId);
-    } else {
-      showToast(response.message || 'Failed to upload question paper', 'error');
-    }
-  } catch (error: any) {
-    console.error('Upload question paper error:', error);
-    showToast(error.message || 'Failed to upload question paper', 'error');
-  } finally {
-    setUploadingQuestionPaper(false);
-    e.target.value = '';
-  }
-};
+   setUploadingQuestionPaper(true);
+   try {
+     const response = await markSchemeApi.uploadQuestionPaper(
+       selectedExamId,
+       file,
+     );
+     if (response.success) {
+       setQuestionPaperPdf(response.data.url);
+       // ✅ Also save file for later save with mark scheme
+       setQuestionPaperFile(file);
+       showToast('Question paper uploaded successfully', 'success');
+     } else {
+       showToast(
+         response.message || 'Failed to upload question paper',
+         'error',
+       );
+     }
+   } catch (error: any) {
+     console.error('Upload question paper error:', error);
+     showToast(error.message || 'Failed to upload question paper', 'error');
+   } finally {
+     setUploadingQuestionPaper(false);
+     e.target.value = '';
+   }
+ };
 
   const handleDeletePDF = async (type: 'model_answer' | 'question_paper') => {
     if (!selectedExamId) return;
@@ -496,6 +497,7 @@ const handleQuestionPaperUpload = async (
     return schemeQuestions.reduce((sum, q) => sum + q.subParts.length, 0);
   }, [schemeQuestions]);
 
+
   const handleSaveScheme = async () => {
     if (!selectedExamId) return;
 
@@ -520,10 +522,21 @@ const handleQuestionPaperUpload = async (
 
     setSchemeSaving(true);
     try {
-      // Save mark scheme without PDF files (they are already uploaded separately)
-      const response = await markSchemeApi.save(selectedExamId, flattened);
+      // ✅ Save mark scheme with PDF files
+      const response = await markSchemeApi.save(selectedExamId, flattened, {
+        model_answer: modelAnswerFile || undefined,
+        question_paper: questionPaperFile || undefined,
+      });
+
       if (response.success) {
         showToast('Mark scheme saved successfully', 'success');
+
+        // ✅ Clear file states after successful save
+        setModelAnswerFile(null);
+        setQuestionPaperFile(null);
+
+        // ✅ Refresh to get updated PDF URLs
+        await handleExamChange(selectedExamId);
       } else {
         showToast(response.message || 'Failed to save mark scheme', 'error');
       }

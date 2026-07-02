@@ -1,64 +1,49 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import ThumbnailPanel from "@/pages/checker/components/ThumbnailPanel";
-import SheetViewer from "@/pages/checker/components/SheetViewer";
-import EscalateModal from "@/pages/checker/components/EscalateModal";
-import RecheckRightPanel from "./components/RecheckRightPanel";
-import RecheckConfirmModal from "./components/RecheckConfirmModal";
-import type { RecheckTab, RecheckMarkEntry, RecheckStamp } from "./components/RecheckRightPanel";
-import { mockRecheckRequests, mockRecheckMarks, sheets, exams, modelAnswerSheets } from "@/mock/mockData";
-import type { AnnotationTool, Annotation, MarksStamp } from "@/pages/checker/MarkingView";
+// src/pages/recheck/RecheckMarkingView.tsx
 
-type RecheckModalType = "escalate" | "submit" | null;
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import ThumbnailPanel from '@/pages/checker/components/ThumbnailPanel';
+import SheetViewer from '@/pages/checker/components/SheetViewer';
+import EscalateModal from '@/pages/checker/components/EscalateModal';
+import RecheckRightPanel from './components/RecheckRightPanel';
+import RecheckConfirmModal from './components/RecheckConfirmModal';
+import type {
+  RecheckTab,
+  RecheckMarkEntry,
+  RecheckStamp,
+} from './components/RecheckRightPanel';
+import type {
+  AnnotationTool,
+  Annotation,
+  MarksStamp,
+} from '@/pages/checker/MarkingView';
+import recheckQueueService from '@/api/recheckQueue';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
+
+// ❌ REMOVE THESE IMPORTS
+// import { mockRecheckRequests, mockRecheckMarks, sheets, exams, modelAnswerSheets } from "@/mock/mockData";
+
+type RecheckModalType = 'escalate' | 'submit' | null;
 
 const TOTAL_PAGES = 18;
 let annotationIdCounter = 1;
 const QUESTIONS_PER_PAGE = 4;
-const STAMP_COLOR = "#7C3AED";
-const PULSE_ANIM = "recheckStampPulse";
+const STAMP_COLOR = '#7C3AED';
+const PULSE_ANIM = 'recheckStampPulse';
 
-function buildInitialMarks(sheetId: number): RecheckMarkEntry[] {
-  const sheetMarks = mockRecheckMarks.filter((m) => m.sheetId === sheetId);
-  if (sheetMarks.length > 0) {
-    return sheetMarks.map((m) => ({
-      id: m.questionName,
-      criterion: m.questionName.replace("Qn", "").replace("_", ""),
-      max: m.max,
-      round1: m.originalMarks,
-      round2: m.recheckMarks,
-      remark: "",
-    }));
-  }
-  return [
-    { id: "Qn1_i", criterion: "1(i)", max: 3, round1: 2, round2: null, remark: "" },
-    { id: "Qn1_ii", criterion: "1(ii)", max: 3, round1: 1, round2: null, remark: "" },
-    { id: "Qn1_iii", criterion: "1(iii)", max: 3, round1: 2, round2: null, remark: "" },
-    { id: "Qn1_iv", criterion: "1(iv)", max: 3, round1: 3, round2: null, remark: "" },
-  ];
-}
-
-function buildInitialStamps(marks: RecheckMarkEntry[]): RecheckStamp[] {
-  return marks.map((m) => ({
-    markId: m.id,
-    placed: false,
-    x: 0,
-    y: 0,
-    page: 0,
-    value: null,
-  }));
-}
+// ─── Helper functions ───
 
 function computeFinalMarks(
   round1Total: number,
   round2Total: number,
-  rule: "higher" | "recheck_marks" | "average",
+  rule: 'higher' | 'recheck_marks' | 'average',
 ): number {
   switch (rule) {
-    case "higher":
+    case 'higher':
       return Math.max(round1Total, round2Total);
-    case "recheck_marks":
+    case 'recheck_marks':
       return round2Total;
-    case "average":
+    case 'average':
       return Math.round((round1Total + round2Total) / 2);
     default:
       return round2Total;
@@ -69,10 +54,10 @@ function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-type ActionType = "pencil" | "annotation";
+type ActionType = 'pencil' | 'annotation';
 
 // ─── Recheck draft storage interface ───
 interface RecheckDraftStorageData {
@@ -94,40 +79,99 @@ export default function RecheckMarkingView() {
   const { requestId } = useParams<{ requestId: string }>();
   const requestIdNum = requestId ? parseInt(requestId, 10) : 0;
 
-  // ─── Load recheck request & sheet data ───
-  const request = useMemo(() => {
-    if (!requestId) return null;
-    return mockRecheckRequests.find((r) => r.id === parseInt(requestId, 10)) || null;
-  }, [requestId]);
+  // ─── API DATA STATE ──────────────────────────────────────────
 
-  const sheet = useMemo(() => {
-    if (!request?.sheetId) return null;
-    return sheets.find((s) => s.id === request.sheetId) || null;
-  }, [request]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [requestData, setRequestData] = useState<any>(null);
+  const [sheetData, setSheetData] = useState<any>(null);
+  const [examData, setExamData] = useState<any>(null);
+  const [markSchemeData, setMarkSchemeData] = useState<
+    Record<string, { maxMarks: number; guidelines: string }>
+  >({});
+  const [pdfsData, setPdfsData] = useState<{
+    model_answer: string | null;
+    question_paper: string | null;
+  }>({
+    model_answer: null,
+    question_paper: null,
+  });
 
-  const exam = useMemo(() => {
-    if (!request) return null;
-    return exams.find((e) => e.id === request.examId) || null;
-  }, [request]);
+  // ─── FETCH DATA ──────────────────────────────────────────────
+
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!requestIdNum) {
+        setLoading(false);
+        setError('Invalid request ID');
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await recheckQueueService.startMarking(requestIdNum);
+
+        if (response.success) {
+          const data = response.data;
+          setRequestData(data.request);
+          setSheetData(data.sheet);
+          setExamData(data.exam);
+          setMarkSchemeData(data.markScheme || {});
+          setPdfsData(
+            data.pdfs || { model_answer: null, question_paper: null },
+          );
+        } else {
+          setError(response.message || 'Failed to load recheck data');
+        }
+      } catch (err: any) {
+        console.error('Fetch recheck data error:', err);
+        setError(err.message || 'Failed to load recheck data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [requestIdNum]);
+
+  // ─── BUILD MARKS FROM MARK SCHEME ────────────────────────────
+
+  const initialMarks = useMemo((): RecheckMarkEntry[] => {
+    // ✅ If markScheme is empty, show empty state
+    if (!markSchemeData || Object.keys(markSchemeData).length === 0) {
+      return [];
+    }
+
+    return Object.entries(markSchemeData).map(([questionName, details]) => {
+      const displayName = questionName.replace('Qn', '').replace('_', '');
+      return {
+        id: questionName,
+        criterion: displayName,
+        max: details.maxMarks || 0,
+        round1: sheetData?.current_marks ? Number(sheetData.current_marks) : 0,
+        round2: null,
+        remark: '',
+      };
+    });
+  }, [markSchemeData, sheetData]);
 
   // ─── State ───
   const [currentPage, setCurrentPage] = useState(1);
-  const [activeTool, setActiveTool] = useState<AnnotationTool>("tick");
+  const [activeTool, setActiveTool] = useState<AnnotationTool>('tick');
   const [thumbnailOpen, setThumbnailOpen] = useState(true);
-  const [blankPages, setBlankPages] = useState<Set<number>>(new Set([1, 2, 3]));
-  const [selectedThumbnails, setSelectedThumbnails] = useState<Set<number>>(new Set());
-  const [elapsed, setElapsed] = useState(0);
-
-  const initialMarks = useMemo(
-    () => buildInitialMarks(request?.sheetId || 3),
-    [request?.sheetId],
+  const [blankPages, setBlankPages] = useState<Set<number>>(new Set([]));
+  const [selectedThumbnails, setSelectedThumbnails] = useState<Set<number>>(
+    new Set(),
   );
+  const [elapsed, setElapsed] = useState(0);
 
   const [marks, setMarks] = useState<RecheckMarkEntry[]>(initialMarks);
 
   useEffect(() => {
-    setMarks(buildInitialMarks(request?.sheetId || 3));
-  }, [request?.sheetId]);
+    setMarks(initialMarks);
+  }, [initialMarks]);
 
   // Refs for auto-save
   const marksRef = useRef(marks);
@@ -140,23 +184,39 @@ export default function RecheckMarkingView() {
 
   // ─── Click-to-place stamp state ───
   const [stamps, setStamps] = useState<RecheckStamp[]>(() =>
-    buildInitialStamps(initialMarks),
+    initialMarks.map((m) => ({
+      markId: m.id,
+      placed: false,
+      x: 0,
+      y: 0,
+      page: 0,
+      value: null,
+    })),
   );
+
   useEffect(() => {
-    setStamps(buildInitialStamps(buildInitialMarks(request?.sheetId || 3)));
-  }, [request?.sheetId]);
+    setStamps(
+      initialMarks.map((m) => ({
+        markId: m.id,
+        placed: false,
+        x: 0,
+        y: 0,
+        page: 0,
+        value: null,
+      })),
+    );
+  }, [initialMarks]);
 
   const [placingMarkId, setPlacingMarkId] = useState<string | null>(null);
-  const [instructionBanner, setInstructionBanner] = useState<string | null>(null);
+  const [instructionBanner, setInstructionBanner] = useState<string | null>(
+    null,
+  );
   const stampsRef = useRef(stamps);
   useEffect(() => {
     stampsRef.current = stamps;
   }, [stamps]);
 
-  const visibleStamps = useMemo(
-    () => stamps.filter((s) => s.placed),
-    [stamps],
-  );
+  const visibleStamps = useMemo(() => stamps.filter((s) => s.placed), [stamps]);
 
   const sheetViewerStamps: MarksStamp[] = useMemo(
     () =>
@@ -174,7 +234,7 @@ export default function RecheckMarkingView() {
   const [modalType, setModalType] = useState<RecheckModalType>(null);
   const [questionPage, setQuestionPage] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [rightTab, setRightTab] = useState<RecheckTab>("recheckMarks");
+  const [rightTab, setRightTab] = useState<RecheckTab>('recheckMarks');
   const [activeMarkId, setActiveMarkId] = useState<string | null>(
     initialMarks.length > 0 ? initialMarks[0].id : null,
   );
@@ -183,11 +243,9 @@ export default function RecheckMarkingView() {
 
   const [zoom, setZoom] = useState(100);
 
-  const [annotations, setAnnotations] = useState<Annotation[]>([
-    { id: 1, tool: "cross", x: 420, y: 240, page: 4 },
-  ]);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
 
-  const actionHistoryRef = useRef<ActionType[]>(["annotation"]);
+  const actionHistoryRef = useRef<ActionType[]>([]);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const sheetViewerRef = useRef<{
     undoPencil: () => void;
@@ -196,12 +254,16 @@ export default function RecheckMarkingView() {
   } | null>(null);
 
   // ─── AUTO-SAVE: save indicator ───
-  const [saveIndicatorText, setSaveIndicatorText] = useState("Auto-saves every 30s");
+  const [saveIndicatorText, setSaveIndicatorText] = useState(
+    'Auto-saves every 30s',
+  );
   const [saveIndicatorFresh, setSaveIndicatorFresh] = useState(false);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ─── RESUME: banner state ───
-  const [resumeBanner, setResumeBanner] = useState<{ savedAt: string } | null>(null);
+  const [resumeBanner, setResumeBanner] = useState<{ savedAt: string } | null>(
+    null,
+  );
 
   // ─── INCOMPLETE SUBMISSION WARNING ───
   const [incompleteWarning, setIncompleteWarning] = useState<{
@@ -215,7 +277,7 @@ export default function RecheckMarkingView() {
   const finalMarks = computeFinalMarks(
     round1Total,
     round2Total,
-    request?.finalMarksRule || "higher",
+    requestData?.finalMarksRule || 'higher',
   );
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -231,7 +293,7 @@ export default function RecheckMarkingView() {
   const scrollToPage = useCallback((page: number) => {
     const el = pageRefs.current[page];
     if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, []);
 
@@ -245,7 +307,7 @@ export default function RecheckMarkingView() {
       manualSet: Set<string>,
     ) => {
       const now = new Date();
-      const timeStr = now.toLocaleTimeString("en-US", { hour12: false });
+      const timeStr = now.toLocaleTimeString('en-US', { hour12: false });
       const draftData: RecheckDraftStorageData = {
         requestId: rid,
         sheetId: sid,
@@ -262,7 +324,10 @@ export default function RecheckMarkingView() {
         }),
         savedAt: now.toISOString(),
       };
-      localStorage.setItem(`osm_recheck_draft_request_${rid}`, JSON.stringify(draftData));
+      localStorage.setItem(
+        `osm_recheck_draft_request_${rid}`,
+        JSON.stringify(draftData),
+      );
 
       setSaveIndicatorText(`Saved at ${timeStr}`);
       setSaveIndicatorFresh(true);
@@ -270,7 +335,7 @@ export default function RecheckMarkingView() {
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
       fadeTimerRef.current = setTimeout(() => {
         setSaveIndicatorFresh(false);
-        setSaveIndicatorText("Auto-saves every 30s");
+        setSaveIndicatorText('Auto-saves every 30s');
       }, 3000);
     },
     [],
@@ -282,10 +347,10 @@ export default function RecheckMarkingView() {
       marksRef.current,
       stampsRef.current,
       requestIdNum,
-      request?.sheetId || 0,
+      sheetData?.id || 0,
       manuallySetMarksRef.current,
     );
-  }, [requestIdNum, request?.sheetId, persistDraft]);
+  }, [requestIdNum, sheetData?.id, persistDraft]);
 
   const saveDraftRef = useRef(saveDraft);
   useEffect(() => {
@@ -305,11 +370,11 @@ export default function RecheckMarkingView() {
       }
     };
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 
@@ -322,15 +387,14 @@ export default function RecheckMarkingView() {
       const draft: RecheckDraftStorageData = JSON.parse(raw);
       if (draft.marks && draft.marks.length > 0) {
         const savedTime = new Date(draft.savedAt);
-        const timeLabel = savedTime.toLocaleTimeString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
+        const timeLabel = savedTime.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
           hour12: true,
         });
         setResumeBanner({ savedAt: timeLabel });
-        // Also show proactive toast
-        setToastMessage("You have an unsaved draft — use Resume to continue");
+        setToastMessage('You have an unsaved draft — use Resume to continue');
         setTimeout(() => setToastMessage(null), 4000);
       }
     } catch {
@@ -353,7 +417,12 @@ export default function RecheckMarkingView() {
       });
       const restoredStamps = stamps.map((s) => {
         const d = draft.marks.find((dm) => dm.questionName === s.markId);
-        if (d && d.stampX !== null && d.stampY !== null && d.stampPage !== null) {
+        if (
+          d &&
+          d.stampX !== null &&
+          d.stampY !== null &&
+          d.stampPage !== null
+        ) {
           return {
             ...s,
             placed: true,
@@ -377,10 +446,10 @@ export default function RecheckMarkingView() {
       setResumeBanner(null);
 
       const savedTime = new Date(draft.savedAt);
-      const timeLabel = savedTime.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
+      const timeLabel = savedTime.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
         hour12: true,
       });
       setToastMessage(`Resumed from last save at ${timeLabel}`);
@@ -414,50 +483,54 @@ export default function RecheckMarkingView() {
   }, []);
 
   const handlePencilStroke = useCallback(() => {
-    actionHistoryRef.current.push("pencil");
+    actionHistoryRef.current.push('pencil');
     setHasPencilMarks(true);
     setTotalActions((prev) => prev + 1);
   }, []);
 
   const handleAnnotationAdd = useCallback(
-    (tool: AnnotationTool, x: number, y: number, page: number, width?: number, height?: number) => {
+    (
+      tool: AnnotationTool,
+      x: number,
+      y: number,
+      page: number,
+      width?: number,
+      height?: number,
+    ) => {
       annotationIdCounter += 1;
       const ann: Annotation = { id: annotationIdCounter, tool, x, y, page };
       if (width !== undefined) ann.width = width;
       if (height !== undefined) ann.height = height;
       setAnnotations((prev) => [...prev, ann]);
-      actionHistoryRef.current.push("annotation");
+      actionHistoryRef.current.push('annotation');
       setTotalActions((prev) => prev + 1);
     },
     [],
   );
 
-  const handleAnnotationDelete = useCallback(
-    (id: number) => {
-      setAnnotations((prev) => prev.filter((a) => a.id !== id));
-      setToastMessage("Annotation removed");
-      setTimeout(() => setToastMessage(null), 2500);
-    },
-    [],
-  );
+  const handleAnnotationDelete = useCallback((id: number) => {
+    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+    setToastMessage('Annotation removed');
+    setTimeout(() => setToastMessage(null), 2500);
+  }, []);
 
   const handleEraserNoHit = useCallback(() => {
-    setToastMessage("Nothing to erase here");
+    setToastMessage('Nothing to erase here');
     setTimeout(() => setToastMessage(null), 2500);
   }, []);
 
   const handleUndoAnnotation = useCallback(() => {
     const lastAction = actionHistoryRef.current.pop();
-    if (lastAction === "pencil" && sheetViewerRef.current) {
+    if (lastAction === 'pencil' && sheetViewerRef.current) {
       sheetViewerRef.current.undoPencil();
       setTotalActions((prev) => Math.max(0, prev - 1));
       if (!sheetViewerRef.current.hasPencilMarks()) {
         setHasPencilMarks(false);
       }
-    } else if (lastAction === "annotation") {
+    } else if (lastAction === 'annotation') {
       setAnnotations((prev) => {
         if (prev.length === 0) {
-          actionHistoryRef.current.push("annotation");
+          actionHistoryRef.current.push('annotation');
           return prev;
         }
         return prev.slice(0, -1);
@@ -500,7 +573,7 @@ export default function RecheckMarkingView() {
     });
     const count = selectedThumbnails.size;
     setSelectedThumbnails(new Set());
-    setToastMessage(`Marked ${count} page${count > 1 ? "s" : ""} as blank`);
+    setToastMessage(`Marked ${count} page${count > 1 ? 's' : ''} as blank`);
     setTimeout(() => setToastMessage(null), 2500);
   }, [selectedThumbnails]);
 
@@ -524,7 +597,14 @@ export default function RecheckMarkingView() {
       setStamps((prev) =>
         prev.map((s) =>
           s.markId === placingMarkId
-            ? { ...s, placed: true, x: xPercent, y: yPercent, page, value: null }
+            ? {
+                ...s,
+                placed: true,
+                x: xPercent,
+                y: yPercent,
+                page,
+                value: null,
+              }
             : s,
         ),
       );
@@ -563,7 +643,12 @@ export default function RecheckMarkingView() {
 
   // ─── Round 2 update (from numpad Add Mark) ───
   const handleRound2Update = useCallback((id: string, value: number | null) => {
-    setMarks((prev) => prev.map((m) => (m.id === id ? { ...m, round2: value } : m)));
+    setMarks((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, round2: value } : m)),
+    );
+    if (value !== null) {
+      manuallySetMarksRef.current.add(id);
+    }
   }, []);
 
   // ─── Request add mark ───
@@ -571,7 +656,7 @@ export default function RecheckMarkingView() {
     (markId: string, value: number) => {
       const stamp = stampsRef.current.find((s) => s.markId === markId);
       if (!stamp || !stamp.placed) {
-        setToastMessage("Please click on sheet to place position first");
+        setToastMessage('Please click on sheet to place position first');
         setTimeout(() => setToastMessage(null), 2500);
         return;
       }
@@ -580,10 +665,8 @@ export default function RecheckMarkingView() {
         prev.map((s) => (s.markId === markId ? { ...s, value } : s)),
       );
 
-      // Track this mark as manually entered
       manuallySetMarksRef.current.add(markId);
 
-      // Auto-save after mark entry
       setTimeout(() => {
         saveDraftRef.current();
       }, 100);
@@ -629,7 +712,7 @@ export default function RecheckMarkingView() {
       setIncompleteWarning({ questions: incomplete });
       return;
     }
-    setModalType("submit");
+    setModalType('submit');
   }, [checkIncomplete]);
 
   const handleIncompleteGoBack = useCallback(() => {
@@ -638,39 +721,120 @@ export default function RecheckMarkingView() {
 
   const handleIncompleteSubmitAnyway = useCallback(() => {
     setIncompleteWarning(null);
-    setModalType("submit");
+    setModalType('submit');
   }, []);
 
-  const handleSubmitConfirm = useCallback(() => {
+  const handleSubmitConfirm = useCallback(async () => {
     setModalType(null);
-    // Clear draft on successful submit
-    localStorage.removeItem(`osm_recheck_draft_request_${requestIdNum}`);
-    setToastMessage("Recheck submitted successfully");
-    setTimeout(() => {
-      navigate("/recheck/queue");
-    }, 1500);
-  }, [navigate, requestIdNum]);
+    try {
+      const response = await recheckQueueService.completeRecheck(requestIdNum, {
+        marks: finalMarks,
+        remarks: 'Recheck completed',
+      });
 
-  const handleEscalateConfirm = useCallback(() => {
+      if (response.success) {
+        localStorage.removeItem(`osm_recheck_draft_request_${requestIdNum}`);
+        setToastMessage('Recheck submitted successfully');
+        setTimeout(() => {
+          navigate('/recheck/queue');
+        }, 1500);
+      } else {
+        setToastMessage(response.message || 'Failed to submit recheck');
+        setTimeout(() => setToastMessage(null), 3000);
+      }
+    } catch (error: any) {
+      console.error('Submit recheck error:', error);
+      setToastMessage(error.message || 'Failed to submit recheck');
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+  }, [requestIdNum, finalMarks, navigate]);
+
+  const handleEscalateConfirm = useCallback(async () => {
     setModalType(null);
-    setToastMessage("Sheet escalated successfully");
-    setTimeout(() => setToastMessage(null), 2500);
-  }, []);
+    try {
+      const response = await recheckQueueService.updateStatus(
+        requestIdNum,
+        'escalated',
+        'Escalated for further review',
+      );
+      if (response.success) {
+        setToastMessage('Sheet escalated successfully');
+        setTimeout(() => {
+          navigate('/recheck/queue');
+        }, 1500);
+      } else {
+        setToastMessage(response.message || 'Failed to escalate');
+        setTimeout(() => setToastMessage(null), 2500);
+      }
+    } catch (error: any) {
+      console.error('Escalate error:', error);
+      setToastMessage(error.message || 'Failed to escalate');
+      setTimeout(() => setToastMessage(null), 2500);
+    }
+  }, [requestIdNum, navigate]);
 
-  const hasModelAnswer = modelAnswerSheets.some((m) => m.examId === (request?.examId || 1));
+  // ✅ PDFs from API
+  const hasModelAnswer = !!pdfsData.model_answer;
 
-  const toolbarTools: { tool: AnnotationTool; icon: string; label: string }[] = [
-    { tool: "tick", icon: "ri-check-line", label: "Tick" },
-    { tool: "cross", icon: "ri-close-line", label: "Cross" },
-    { tool: "pencil", icon: "ri-pencil-line", label: "Pencil" },
-    { tool: "highlight", icon: "ri-mark-pen-line", label: "Highlight" },
-    { tool: "eraser", icon: "ri-eraser-line", label: "Eraser" },
-  ];
+  const toolbarTools: { tool: AnnotationTool; icon: string; label: string }[] =
+    [
+      { tool: 'tick', icon: 'ri-check-line', label: 'Tick' },
+      { tool: 'cross', icon: 'ri-close-line', label: 'Cross' },
+      { tool: 'pencil', icon: 'ri-pencil-line', label: 'Pencil' },
+      { tool: 'highlight', icon: 'ri-mark-pen-line', label: 'Highlight' },
+      { tool: 'eraser', icon: 'ri-eraser-line', label: 'Eraser' },
+    ];
 
-  const examName = exam ? `${exam.name} — ${exam.subject}` : "Mathematics Mid-Term";
-  const studentName = sheet?.studentName || "Amit Kumar";
-  const studentRoll = sheet?.rollNo || "103";
-  const sheetIdDisplay = sheet ? `#${String(sheet.id).padStart(3, "0")}` : "#003";
+  // ─── LOADING STATE ──────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#0f172a]">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-slate-400 mt-4 text-sm">Loading recheck data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#0f172a]">
+        <div className="text-center">
+          <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-4">
+            <i className="ri-error-warning-line text-red-400 text-3xl"></i>
+          </div>
+          <p className="text-red-400 text-sm">{error}</p>
+          <button
+            onClick={() => navigate('/recheck/queue')}
+            className="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-500 transition-colors"
+          >
+            Back to Queue
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!requestData || !sheetData) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#0f172a]">
+        <p className="text-slate-400">No data available</p>
+      </div>
+    );
+  }
+
+  // ─── RENDER ──────────────────────────────────────────────────
+
+  const examName = examData
+    ? `${examData.name} — ${examData.subject}`
+    : 'Recheck';
+  const studentName = sheetData?.student_name || 'Unknown';
+  const studentRoll = sheetData?.roll_no || '—';
+  const sheetIdDisplay = sheetData
+    ? `#${String(sheetData.id).padStart(3, '0')}`
+    : '#---';
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-[#0f172a]">
@@ -682,7 +846,8 @@ export default function RecheckMarkingView() {
             RECHECK MODE
           </span>
           <span className="text-slate-400">
-            Page <span className="text-white font-medium">{currentPage}</span> of {TOTAL_PAGES}
+            Page <span className="text-white font-medium">{currentPage}</span>{' '}
+            of {TOTAL_PAGES}
           </span>
         </div>
         <div className="flex items-center gap-6">
@@ -690,13 +855,17 @@ export default function RecheckMarkingView() {
             <span className="w-3 h-3 flex items-center justify-center text-emerald-400">
               <i className="ri-timer-line text-xs"></i>
             </span>
-            <span className="font-mono text-emerald-400 tabular-nums">{formatTime(elapsed)}</span>
+            <span className="font-mono text-emerald-400 tabular-nums">
+              {formatTime(elapsed)}
+            </span>
           </div>
           <span className="text-slate-400">
-            Student: <span className="text-white font-semibold">{studentName}</span>
+            Student:{' '}
+            <span className="text-white font-semibold">{studentName}</span>
           </span>
           <span className="text-slate-400">
-            Roll: <span className="text-white font-semibold">{studentRoll}</span>
+            Roll:{' '}
+            <span className="text-white font-semibold">{studentRoll}</span>
           </span>
         </div>
       </header>
@@ -709,8 +878,8 @@ export default function RecheckMarkingView() {
             onClick={() => setThumbnailOpen(!thumbnailOpen)}
             className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
               thumbnailOpen
-                ? "bg-amber-500/25 text-amber-400"
-                : "text-slate-400 hover:text-white hover:bg-white/10"
+                ? 'bg-amber-500/25 text-amber-400'
+                : 'text-slate-400 hover:text-white hover:bg-white/10'
             }`}
             title="Toggle thumbnails"
           >
@@ -753,10 +922,10 @@ export default function RecheckMarkingView() {
               onClick={() => handleToolSelect(tool)}
               className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
                 activeTool === tool
-                  ? tool === "eraser"
-                    ? "bg-rose-500/25 text-rose-400"
-                    : "bg-violet-500/25 text-violet-400"
-                  : "text-slate-400 hover:text-white hover:bg-white/10"
+                  ? tool === 'eraser'
+                    ? 'bg-rose-500/25 text-rose-400'
+                    : 'bg-violet-500/25 text-violet-400'
+                  : 'text-slate-400 hover:text-white hover:bg-white/10'
               }`}
               title={label}
             >
@@ -822,6 +991,7 @@ export default function RecheckMarkingView() {
           onDismissBanner={handleDismissBanner}
           pageRefs={pageRefs}
           scrollToPage={scrollToPage}
+          pdfUrl={sheetData?.file_url || null} // ✅ ADD THIS
         />
 
         {/* ─── RIGHT SIDE: Resume banner + Recheck Right Panel ─── */}
@@ -830,7 +1000,8 @@ export default function RecheckMarkingView() {
           {resumeBanner && (
             <div className="shrink-0 bg-amber-500/15 border-b border-amber-500/30 px-3 py-2.5">
               <p className="text-[11px] text-amber-300 leading-relaxed mb-2">
-                You have unsaved progress from {resumeBanner.savedAt}. Resume from where you left off?
+                You have unsaved progress from {resumeBanner.savedAt}. Resume
+                from where you left off?
               </p>
               <div className="flex gap-2">
                 <button
@@ -858,9 +1029,11 @@ export default function RecheckMarkingView() {
             totalRound2={round2Total}
             totalMax={totalMax}
             finalMarks={finalMarks}
-            finalMarksRule={request?.finalMarksRule || "higher"}
+            finalMarksRule={requestData?.finalMarksRule || 'higher'}
             rightTab={rightTab}
             hasModelAnswer={hasModelAnswer}
+            questionPaperUrl={pdfsData.question_paper}
+            modelAnswerUrl={pdfsData.model_answer}
             saveIndicatorText={saveIndicatorText}
             saveIndicatorFresh={saveIndicatorFresh}
             onActiveMarkChange={handleActiveMarkChange}
@@ -871,7 +1044,7 @@ export default function RecheckMarkingView() {
             onClearStampValue={handleClearStampValue}
             onRightTabChange={setRightTab}
             onSubmitRecheck={handleSubmitRecheck}
-            onEscalateFurther={() => setModalType("escalate")}
+            onEscalateFurther={() => setModalType('escalate')}
           />
         </div>
       </div>
@@ -892,14 +1065,17 @@ export default function RecheckMarkingView() {
                 <div className="w-9 h-9 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
                   <i className="ri-error-warning-line text-amber-400 text-lg"></i>
                 </div>
-                <h3 className="text-base font-semibold text-white">Incomplete recheck evaluation</h3>
+                <h3 className="text-base font-semibold text-white">
+                  Incomplete recheck evaluation
+                </h3>
               </div>
               <p className="text-sm text-slate-300 mb-3">
-                You have not entered marks for all questions. Questions without marks:
+                You have not entered marks for all questions. Questions without
+                marks:
               </p>
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mb-4">
                 <p className="text-sm text-amber-300 font-mono">
-                  {incompleteWarning.questions.join(", ")}
+                  {incompleteWarning.questions.join(', ')}
                 </p>
               </div>
               <div className="flex gap-3 justify-end">
@@ -922,12 +1098,12 @@ export default function RecheckMarkingView() {
       )}
 
       {/* ─── SUBMIT CONFIRM MODAL ─── */}
-      {modalType === "submit" && (
+      {modalType === 'submit' && (
         <RecheckConfirmModal
           round1Total={round1Total}
           round2Total={round2Total}
           finalMarks={finalMarks}
-          finalMarksRule={request?.finalMarksRule || "higher"}
+          finalMarksRule={requestData?.finalMarksRule || 'higher'}
           totalMax={totalMax}
           studentName={studentName}
           rollNo={studentRoll}
@@ -937,7 +1113,7 @@ export default function RecheckMarkingView() {
       )}
 
       {/* ─── ESCALATE MODAL ─── */}
-      {modalType === "escalate" && (
+      {modalType === 'escalate' && (
         <EscalateModal
           totalAwarded={round2Total}
           totalMax={totalMax}
