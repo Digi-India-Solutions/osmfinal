@@ -1,5 +1,8 @@
 // src/api/assignment.ts
+
 import api from './axios';
+
+// ─── EXISTING INTERFACES ──────────────────────────────────────
 
 export interface IUnassignedSheet {
   id: number;
@@ -46,7 +49,56 @@ export interface IAssignment {
   assigned_by_name: string;
 }
 
+// ─── ✅ NEW INTERFACES FOR CHECKER WORK QUEUE ─────────────────
+
+export interface IAssignedSheet {
+  id: number;
+  exam_id: number;
+  student_id: number | null;
+  roll_no: string | null;
+  student_name: string | null;
+  barcode: string | null;
+  file_name: string;
+  file_url: string;
+  status:
+    | 'assigned'
+    | 'checking'
+    | 'checked'
+    | 'recheck'
+    | 'rechecked'
+    | 'uploaded';
+  marks: number;
+  assigned_to: number | null;
+  checked_by: number | null;
+  created_at: string;
+  updated_at: string;
+  exam_name: string;
+  exam_subject: string;
+  assigned_to_name: string | null;
+  pending_recheck_count: number;
+}
+
+export interface ICheckerStats {
+  pending: number;
+  checking: number;
+  completed: number;
+  recheck: number;
+}
+
+export interface ICheckerSheetsResponse {
+  success: boolean;
+  message: string;
+  data: {
+    items: IAssignedSheet[];
+    stats: ICheckerStats;
+  };
+}
+
+// ─── SERVICE CLASS ─────────────────────────────────────────────
+
 class AssignmentService {
+  // ─── ADMIN ASSIGNMENT METHODS ───────────────────────────────
+
   // Get unassigned sheets
   async getUnassignedSheets(examId: string): Promise<any> {
     try {
@@ -149,6 +201,87 @@ class AssignmentService {
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to unassign sheet',
+      };
+    }
+  }
+
+  // ─── ✅ CHECKER WORK QUEUE METHODS ───────────────────────────
+
+  // Get my assigned sheets (for current checker)
+  async getMyAssignedSheets(status?: string): Promise<ICheckerSheetsResponse> {
+    try {
+      const response = await api.get('/api/v1/assignments/my-sheets', {
+        params: { status },
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Get my assigned sheets error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get assigned sheets',
+        data: {
+          items: [],
+          stats: {
+            pending: 0,
+            checking: 0,
+            completed: 0,
+            recheck: 0,
+          },
+        },
+      };
+    }
+  }
+
+  // Get sheet for marking with mark scheme
+  async getSheetForMarking(sheetId: number): Promise<any> {
+    try {
+      const response = await api.get(`/api/v1/assignments/sheet/${sheetId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Get sheet for marking error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get sheet for marking',
+      };
+    }
+  }
+
+  // Update sheet status (start marking, complete)
+  async updateCheckerSheetStatus(
+    sheetId: number,
+    data: { status: string; marks?: number },
+  ): Promise<any> {
+    try {
+      const response = await api.patch(
+        `/api/v1/assignments/sheet/${sheetId}/status`,
+        data,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Update sheet status error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to update sheet status',
+      };
+    }
+  }
+
+  // Save draft marks
+  async saveDraftMarks(sheetId: number, data: { marks: number }): Promise<any> {
+    try {
+      const response = await api.post(
+        `/api/v1/assignments/sheet/${sheetId}/draft`,
+        data,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Save draft error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to save draft',
       };
     }
   }

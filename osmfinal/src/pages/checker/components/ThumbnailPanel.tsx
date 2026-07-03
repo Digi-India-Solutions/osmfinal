@@ -1,3 +1,5 @@
+// src/pages/checker/components/ThumbnailPanel.tsx
+
 interface ThumbnailPanelProps {
   currentPage: number;
   blankPages: Set<number>;
@@ -6,6 +8,9 @@ interface ThumbnailPanelProps {
   onBlankToggle: (page: number) => void;
   onApplyBlank: () => void;
   totalPages: number;
+  pdfPageImages?: Record<number, string>;
+  pdfPageCount?: number;
+  isPdfMode?: boolean;
 }
 
 const pageLines: Record<number, number[]> = {};
@@ -22,8 +27,12 @@ export default function ThumbnailPanel({
   onBlankToggle,
   onApplyBlank,
   totalPages,
+  pdfPageImages = {},
+  pdfPageCount = 0,
+  isPdfMode = false,
 }: ThumbnailPanelProps) {
   const selectedCount = selectedThumbnails.size;
+  const actualTotalPages = isPdfMode ? pdfPageCount : totalPages;
 
   return (
     <aside className="w-[130px] shrink-0 bg-[#1e293b] flex flex-col border-r border-slate-700">
@@ -33,40 +42,54 @@ export default function ThumbnailPanel({
           disabled={selectedCount === 0}
           className="w-full py-1.5 text-xs font-medium rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors whitespace-nowrap"
         >
-          {selectedCount > 0 ? `Apply Blank Mark (${selectedCount})` : "Apply Blank Mark"}
+          {selectedCount > 0
+            ? `Apply Blank Mark (${selectedCount})`
+            : 'Apply Blank Mark'}
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5">
-        {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+        {Array.from(
+          { length: actualTotalPages || totalPages },
+          (_, i) => i + 1,
+        ).map((page) => {
           const isCurrent = page === currentPage;
           const isBlank = blankPages.has(page);
           const isSelected = selectedThumbnails.has(page);
+          const hasImage = !!pdfPageImages[page];
 
-          let borderColor = "border-transparent";
-          if (isCurrent) borderColor = "border-sky-500";
-          else if (isSelected) borderColor = "border-amber-500";
+          let borderColor = 'border-transparent';
+          if (isCurrent) borderColor = 'border-sky-500';
+          else if (isSelected) borderColor = 'border-amber-500';
 
           return (
             <div
               key={page}
               className={`relative border-2 ${borderColor} rounded cursor-pointer transition-colors ${
-                isBlank ? "opacity-50" : ""
+                isBlank ? 'opacity-50' : ''
               }`}
             >
               <div
                 onClick={() => onThumbnailClick(page)}
                 className="bg-white/90 p-1 rounded-sm"
               >
-                <div className="space-y-[2px] py-0.5">
-                  {pageLines[page].map((w, j) => (
-                    <div
-                      key={j}
-                      className="h-[3px] bg-slate-300 rounded-full"
-                      style={{ width: `${w}%` }}
-                    />
-                  ))}
-                </div>
+                {isPdfMode && hasImage ? (
+                  <img
+                    src={pdfPageImages[page]}
+                    alt={`Page ${page}`}
+                    className="w-full h-auto rounded-sm"
+                  />
+                ) : (
+                  <div className="space-y-[2px] py-0.5">
+                    {pageLines[page]?.map((w, j) => (
+                      <div
+                        key={j}
+                        className="h-[3px] bg-slate-300 rounded-full"
+                        style={{ width: `${w}%` }}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               <label
