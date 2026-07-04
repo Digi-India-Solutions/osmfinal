@@ -25,6 +25,9 @@ export interface RecheckRequest {
   exam_subject?: string;
   requested_by_name?: string;
   resolved_by_name?: string;
+  marks_data?: Record<string, number>;
+  finalMarksRule?: string;
+  completed_at?: string;
 }
 
 export interface RecheckMarkingData {
@@ -34,6 +37,8 @@ export interface RecheckMarkingData {
     exam_id: number;
     reason: string;
     status: string;
+    finalMarksRule: 'higher' | 'recheck_marks' | 'average';
+    isReadOnly?: boolean;
     created_at: string;
   };
   sheet: {
@@ -52,6 +57,10 @@ export interface RecheckMarkingData {
     subject: string;
   };
   markScheme: Record<string, { maxMarks: number; guidelines: string }>;
+  previousMarks: Record<string, number>;
+  recheckMarks?: Record<string, number>;
+  recheckAnnotations?: any[];
+  recheckStamps?: any[];
   pdfs: {
     model_answer: string | null;
     question_paper: string | null;
@@ -129,10 +138,60 @@ class RecheckQueueService {
     }
   }
 
+  // Save recheck draft
+  async saveDraft(
+    id: number,
+    data: {
+      marksData: Record<string, number>;
+      annotationsData: any[];
+      stampsData: any[];
+      totalMarks: number;
+      remarks?: string;
+    },
+  ): Promise<any> {
+    try {
+      const response = await api.post(
+        `/api/v1/recheck-queue/requests/${id}/draft`,
+        data,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Save recheck draft error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to save draft',
+      };
+    }
+  }
+
+  // Get recheck draft
+  async getDraft(id: number): Promise<any> {
+    try {
+      const response = await api.get(
+        `/api/v1/recheck-queue/requests/${id}/draft`,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Get recheck draft error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to get draft',
+        data: null as any,
+      };
+    }
+  }
+
   // Complete recheck
   async completeRecheck(
     id: number,
-    data: { marks?: number; remarks?: string },
+    data: {
+      marks?: number;
+      remarks?: string;
+      marksData?: Record<string, number>;
+      annotationsData?: any[];
+      stampsData?: any[];
+      finalMarksRule?: string;
+    },
   ): Promise<any> {
     try {
       const response = await api.post(

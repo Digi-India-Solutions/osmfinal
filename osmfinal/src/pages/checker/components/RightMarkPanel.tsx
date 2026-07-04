@@ -12,6 +12,8 @@ interface RightMarkPanelProps {
   readOnly?: boolean;
   saveIndicatorText?: string;
   saveIndicatorFresh?: boolean;
+  questionPaperUrl?: string | null;
+  modelAnswerUrl?: string | null;
   onActiveMarkChange: (id: string) => void;
   onQuestionPageChange: (page: number) => void;
   onMarkUpdate: (id: string, awarded: number) => void;
@@ -134,8 +136,10 @@ export default function RightMarkPanel({
   rightTab,
   hasModelAnswer,
   readOnly = false,
-  saveIndicatorText = "Auto-saves every 30s",
+  saveIndicatorText = 'Auto-saves every 30s',
   saveIndicatorFresh = false,
+  questionPaperUrl = null, // ✅ ADD
+  modelAnswerUrl = null,
   onActiveMarkChange,
   onQuestionPageChange,
   onMarkUpdate,
@@ -148,16 +152,16 @@ export default function RightMarkPanel({
   onSubmitExit,
 }: RightMarkPanelProps) {
   // ─── Shared numpad state ───
-  const [displayValue, setDisplayValue] = useState("");
+  const [displayValue, setDisplayValue] = useState('');
 
   const activeMark = marks.find((m) => m.id === activeMarkId);
   const activeMax = activeMark?.max ?? 0;
 
   useEffect(() => {
     if (activeMark) {
-      setDisplayValue(activeMark.awarded > 0 ? String(activeMark.awarded) : "");
+      setDisplayValue(activeMark.awarded > 0 ? String(activeMark.awarded) : '');
     } else {
-      setDisplayValue("");
+      setDisplayValue('');
     }
   }, [activeMarkId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -166,9 +170,10 @@ export default function RightMarkPanel({
   const displayStart = startIdx + 1;
   const displayEnd = Math.min(startIdx + QUESTIONS_PER_PAGE, totalQuestions);
 
-  const displayNumeric = displayValue === "" ? 0 : parseFloat(displayValue) || 0;
-  const hasDecimal = displayValue.includes(".");
-  const isEmpty = displayValue === "";
+  const displayNumeric =
+    displayValue === '' ? 0 : parseFloat(displayValue) || 0;
+  const hasDecimal = displayValue.includes('.');
+  const isEmpty = displayValue === '';
 
   // ─── Numpad handlers ───
   const handleDigit = useCallback(
@@ -185,16 +190,16 @@ export default function RightMarkPanel({
 
   const handleDecimal = useCallback(() => {
     if (hasDecimal || isEmpty) return;
-    setDisplayValue((prev) => prev + ".");
+    setDisplayValue((prev) => prev + '.');
   }, [hasDecimal, isEmpty]);
 
   const handleHalf = useCallback(() => {
     setDisplayValue((prev) => {
-      const current = prev === "" ? 0 : parseFloat(prev) || 0;
+      const current = prev === '' ? 0 : parseFloat(prev) || 0;
       const next = current + 0.5;
       if (next > activeMax) return prev;
       const s = String(next);
-      return s.endsWith(".0") ? String(Math.floor(next)) : s;
+      return s.endsWith('.0') ? String(Math.floor(next)) : s;
     });
   }, [activeMax]);
 
@@ -203,17 +208,19 @@ export default function RightMarkPanel({
   }, []);
 
   const handleClear = useCallback(() => {
-    setDisplayValue("");
+    setDisplayValue('');
     if (activeMarkId) {
       onClearStampValue(activeMarkId);
     }
   }, [activeMarkId, onClearStampValue]);
 
+  // RightMarkPanel.tsx
+
   const handleAddMark = useCallback(() => {
     if (!activeMarkId || isEmpty) return;
     const num = parseFloat(displayValue) || 0;
     const capped = Math.min(num, activeMax);
-    onRequestAddMark(activeMarkId, capped);
+    onRequestAddMark(activeMarkId, capped); // ✅ Ye call ho raha hai
   }, [activeMarkId, isEmpty, displayValue, activeMax, onRequestAddMark]);
 
   const digitDisabled = (digit: number) => digit > activeMax;
@@ -222,9 +229,9 @@ export default function RightMarkPanel({
 
   // ─── Tab config ───
   const tabs: { key: RightTab; icon: string; label: string }[] = [
-    { key: "marks", icon: "ri-list-check", label: "Marks" },
-    { key: "questions", icon: "ri-file-list-3-line", label: "Q. Paper" },
-    { key: "answerSheet", icon: "ri-check-double-line", label: "Ans. Sheet" },
+    { key: 'marks', icon: 'ri-list-check', label: 'Marks' },
+    { key: 'questions', icon: 'ri-file-list-3-line', label: 'Q. Paper' },
+    { key: 'answerSheet', icon: 'ri-check-double-line', label: 'Ans. Sheet' },
   ];
 
   return (
@@ -483,7 +490,7 @@ export default function RightMarkPanel({
         {/* ─── ANSWER SHEET TAB — PDF-style scrollable white page cards ─── */}
         {rightTab === 'answerSheet' && (
           <div className="flex-1 flex flex-col min-h-0">
-            {hasModelAnswer && modelAnswerUrl ? (
+            {modelAnswerUrl ? (
               <>
                 <div
                   className="shrink-0 px-3 py-2 flex items-center gap-2"

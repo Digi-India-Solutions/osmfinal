@@ -1,4 +1,133 @@
+// // src/middlewares/multer.middleware.js
+// import multer from 'multer';
+// import path from 'path';
+// import fs from 'fs';
+
+// // ✅ Helper to create folder if not exists
+// const ensureDir = (dir) => {
+//   if (!fs.existsSync(dir)) {
+//     fs.mkdirSync(dir, { recursive: true });
+//   }
+// };
+
+// // ✅ MAIN STORAGE (dynamic based on route)
+// const storage = multer.diskStorage({
+//   destination: function (req, file, cb) {
+//     console.log('file==>>>>>>', file);
+
+//     // 🔥 Decide folder dynamically
+//     let folder = 'others';
+
+//     if (file.fieldname === 'logo') {
+//       folder = 'company';
+//     } else if (file.fieldname === 'profile_image') {
+//       folder = 'profile';
+//     } else if (file.fieldname === 'file') {
+//       folder = 'students';
+//     } else if (file.fieldname === 'model_answer_pdf') {
+//       folder = 'mark-scheme/model-answers';
+//     } else if (file.fieldname === 'question_paper_pdf') {
+//       folder = 'mark-scheme/question-papers';
+//     } else if (file.fieldname === 'sheets' || file.fieldname === 'sheet') {
+//       folder = 'sheets'; // ✅ Added for sheets upload
+//     }
+
+//     const uploadPath = path.join(process.cwd(), 'uploads', folder);
+
+//     // ✅ Ensure folder exists
+//     ensureDir(uploadPath);
+
+//     cb(null, uploadPath);
+//   },
+
+//   filename: function (req, file, cb) {
+//     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+//     const ext = path.extname(file.originalname);
+
+//     // Keep original filename for barcode extraction
+//     const baseName = path.parse(file.originalname).name;
+//     cb(null, `${baseName}-${uniqueSuffix}${ext}`);
+//   },
+// });
+
+// // ✅ Upload middlewares
+// export const upload = multer({
+//   storage: storage,
+//   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+// });
+
+// export const uploadImages = multer({
+//   storage: storage,
+//   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+// });
+
+// // ✅ For Excel files (larger limit)
+// export const uploadExcel = multer({
+//   storage: storage,
+//   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+//   fileFilter: (req, file, cb) => {
+//     const allowedTypes = [
+//       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+//       'application/vnd.ms-excel',
+//       'text/csv',
+//     ];
+//     if (
+//       allowedTypes.includes(file.mimetype) ||
+//       file.originalname.endsWith('.xlsx') ||
+//       file.originalname.endsWith('.xls') ||
+//       file.originalname.endsWith('.csv')
+//     ) {
+//       cb(null, true);
+//     } else {
+//       cb(new Error('Only Excel and CSV files are allowed'), false);
+//     }
+//   },
+// });
+
+// // ✅ For PDF files (mark scheme)
+// export const uploadPDF = multer({
+//   storage: storage,
+//   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+//   fileFilter: (req, file, cb) => {
+//     if (
+//       file.mimetype === 'application/pdf' ||
+//       file.originalname.endsWith('.pdf')
+//     ) {
+//       cb(null, true);
+//     } else {
+//       cb(new Error('Only PDF files are allowed'), false);
+//     }
+//   },
+// });
+
+// // ✅ For Sheets (PDF, JPG, PNG - larger limit)
+// export const uploadSheets = multer({
+//   storage: storage,
+//   limits: { fileSize: 25 * 1024 * 1024 }, // 25MB per file
+//   fileFilter: (req, file, cb) => {
+//     const allowedTypes = [
+//       'application/pdf',
+//       'image/jpeg',
+//       'image/png',
+//       'image/jpg',
+//     ];
+//     if (
+//       allowedTypes.includes(file.mimetype) ||
+//       file.originalname.endsWith('.pdf') ||
+//       file.originalname.endsWith('.jpg') ||
+//       file.originalname.endsWith('.jpeg') ||
+//       file.originalname.endsWith('.png')
+//     ) {
+//       cb(null, true);
+//     } else {
+//       cb(new Error('Only PDF, JPG, JPEG and PNG files are allowed'), false);
+//     }
+//   },
+// });
+
+
 // src/middlewares/multer.middleware.js
+
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -13,9 +142,8 @@ const ensureDir = (dir) => {
 // ✅ MAIN STORAGE (dynamic based on route)
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    console.log('file==>>>>>>', file);
+    console.log('📁 File upload:', file.fieldname, file.originalname);
 
-    // 🔥 Decide folder dynamically
     let folder = 'others';
 
     if (file.fieldname === 'logo') {
@@ -29,23 +157,35 @@ const storage = multer.diskStorage({
     } else if (file.fieldname === 'question_paper_pdf') {
       folder = 'mark-scheme/question-papers';
     } else if (file.fieldname === 'sheets' || file.fieldname === 'sheet') {
-      folder = 'sheets'; // ✅ Added for sheets upload
+      folder = 'sheets';
     }
 
     const uploadPath = path.join(process.cwd(), 'uploads', folder);
-
-    // ✅ Ensure folder exists
     ensureDir(uploadPath);
-
     cb(null, uploadPath);
   },
 
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const ext = path.extname(file.originalname);
-
-    // Keep original filename for barcode extraction
     const baseName = path.parse(file.originalname).name;
+
+    // ✅ Sheets - keep original filename (for barcode matching)
+    if (file.fieldname === 'sheets' || file.fieldname === 'sheet') {
+      // Clean filename - remove special chars
+      const cleanName = baseName.replace(/[^a-zA-Z0-9]/g, '');
+      cb(null, `${cleanName}${ext}`);
+      return;
+    }
+
+    // ✅ PDFs - keep original filename with timestamp
+    if (file.fieldname === 'model_answer_pdf' || file.fieldname === 'question_paper_pdf') {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+      cb(null, `${baseName}-${uniqueSuffix}${ext}`);
+      return;
+    }
+
+    // ✅ Other files - unique name
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     cb(null, `${baseName}-${uniqueSuffix}${ext}`);
   },
 });
@@ -61,7 +201,7 @@ export const uploadImages = multer({
   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
 });
 
-// ✅ For Excel files (larger limit)
+// ✅ For Excel files
 export const uploadExcel = multer({
   storage: storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB

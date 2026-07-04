@@ -1,9 +1,6 @@
 // src/assignments/assignment-controller.js
+
 import pool from '../pool.js';
-
-// ─── GET UNASSIGNED SHEETS ──────────────────────────────────────
-
-// src/assignments/assignment-controller.js
 
 // ─── GET UNASSIGNED SHEETS ──────────────────────────────────────
 
@@ -19,32 +16,32 @@ export const getUnassignedSheets = async (req, res) => {
       LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
       WHERE s.exam_id = $1 
         AND (a.id IS NULL OR a.status != 'assigned')
-        AND (s.status = 'uploaded' OR s.status = 'linked')  -- ✅ Added 'linked'
+        AND (s.status = 'uploaded' OR s.status = 'linked')
       ORDER BY s.id ASC`,
-      [examId]
+      [examId],
     );
 
     return res.status(200).json({
       success: true,
       message: 'Unassigned sheets retrieved successfully',
-      data: result.rows
+      data: result.rows,
     });
   } catch (error) {
     console.error('getUnassignedSheets error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to get unassigned sheets',
-      error: error.message
+      error: error.message,
     });
   }
 };
+
 // ─── GET AVAILABLE CHECKERS ─────────────────────────────────────
 
 export const getAvailableCheckers = async (req, res) => {
   try {
     const { examId } = req.params;
 
-    // Get exam subject
     const examResult = await pool.query(
       `SELECT subject FROM exams WHERE id = $1`,
       [examId],
@@ -52,7 +49,6 @@ export const getAvailableCheckers = async (req, res) => {
 
     const examSubject = examResult.rows[0]?.subject || null;
 
-    // Get available checkers (checker or teacher_checker)
     const result = await pool.query(
       `SELECT 
         u.id, u.name, u.email, u.role, u.subject,
@@ -67,7 +63,6 @@ export const getAvailableCheckers = async (req, res) => {
     );
 
     const checkers = result.rows.map((checker) => {
-      // Check for subject conflict
       let hasConflict = false;
       let conflictReason = null;
 
@@ -121,7 +116,6 @@ export const assignSheets = async (req, res) => {
       });
     }
 
-    // Validate checker
     const checkerResult = await pool.query(
       `SELECT id, role, subject FROM users 
        WHERE id = $1 AND is_active = true 
@@ -138,7 +132,6 @@ export const assignSheets = async (req, res) => {
 
     const checker = checkerResult.rows[0];
 
-    // Get exam subject
     const examResult = await pool.query(
       `SELECT subject FROM exams WHERE id = $1`,
       [examId],
@@ -146,7 +139,6 @@ export const assignSheets = async (req, res) => {
 
     const examSubject = examResult.rows[0]?.subject || null;
 
-    // Check subject conflict
     if (checker.role === 'teacher_checker' && checker.subject && examSubject) {
       if (checker.subject !== examSubject) {
         return res.status(400).json({
@@ -165,14 +157,13 @@ export const assignSheets = async (req, res) => {
 
       for (const sheetId of sheetIds) {
         try {
-          // Check if sheet exists and is unassigned
           const sheetCheck = await client.query(
             `SELECT s.id, s.status 
              FROM sheets s
              LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
              WHERE s.id = $1 AND s.exam_id = $2 
              AND (a.id IS NULL OR a.status != 'assigned')
-             AND s.status IN ('uploaded', 'linked')`, // ✅ Both statuses allowed
+             AND s.status IN ('uploaded', 'linked')`,
             [sheetId, examId],
           );
 
@@ -184,7 +175,6 @@ export const assignSheets = async (req, res) => {
             continue;
           }
 
-          // Insert assignment
           await client.query(
             `INSERT INTO assignments (
               exam_id, sheet_id, checker_id, assigned_by, status
@@ -192,7 +182,6 @@ export const assignSheets = async (req, res) => {
             [examId, sheetId, checkerId, userId],
           );
 
-          // Update sheet status to 'assigned'
           await client.query(
             `UPDATE sheets SET status = 'assigned' WHERE id = $1`,
             [sheetId],
@@ -234,7 +223,6 @@ export const assignSheets = async (req, res) => {
   }
 };
 
-
 // ─── RANDOM ASSIGNMENT ──────────────────────────────────────────
 
 export const randomAssignment = async (req, res) => {
@@ -242,7 +230,6 @@ export const randomAssignment = async (req, res) => {
     const { examId } = req.params;
     const userId = req.user.id;
 
-    // Get exam subject
     const examResult = await pool.query(
       `SELECT subject FROM exams WHERE id = $1`,
       [examId],
@@ -250,14 +237,13 @@ export const randomAssignment = async (req, res) => {
 
     const examSubject = examResult.rows[0]?.subject || null;
 
-    // Get unassigned sheets (both uploaded and linked)
     const sheetsResult = await pool.query(
       `SELECT s.id 
        FROM sheets s
        LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
        WHERE s.exam_id = $1 
          AND (a.id IS NULL OR a.status != 'assigned')
-         AND s.status IN ('uploaded', 'linked')`, // ✅ Both statuses allowed
+         AND s.status IN ('uploaded', 'linked')`,
       [examId],
     );
 
@@ -270,7 +256,6 @@ export const randomAssignment = async (req, res) => {
       });
     }
 
-    // Get eligible checkers
     const checkersResult = await pool.query(
       `SELECT u.id, u.name, u.role, u.subject
        FROM users u
@@ -371,7 +356,6 @@ export const randomAssignment = async (req, res) => {
   }
 };
 
-
 // ─── GET ASSIGNMENTS BY EXAM ────────────────────────────────────
 
 export const getAssignmentsByExam = async (req, res) => {
@@ -463,7 +447,6 @@ export const unassignSheet = async (req, res) => {
       });
     }
 
-    // Update sheet status back to uploaded
     await pool.query(`UPDATE sheets SET status = 'uploaded' WHERE id = $1`, [
       result.rows[0].sheet_id,
     ]);
@@ -477,6 +460,336 @@ export const unassignSheet = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to unassign sheet',
+      error: error.message,
+    });
+  }
+};
+
+// ─── ✅ NEW: GET MY ASSIGNED SHEETS (CHECKER WORK QUEUE) ──────
+
+// src/assignment/assignmentController.js
+
+// ─── GET MY ASSIGNED SHEETS (COMPLETE) ─────────────────────────
+
+// src/assignment/assignmentController.js
+
+// ─── GET MY ASSIGNED SHEETS (FIXED) ───────────────────────────
+
+// src/assignment/assignmentController.js
+
+export const getMyAssignedSheets = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { status } = req.query;
+
+    let conditions = ['a.checker_id = $1 AND a.status = \'assigned\''];
+    const params = [userId];
+    let paramCount = 2;
+
+    if (status) {
+      conditions.push(`s.status = $${paramCount}`);
+      params.push(status);
+      paramCount++;
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    const { rows } = await pool.query(
+      `SELECT 
+        s.id,
+        s.exam_id,
+        s.student_id,
+        s.roll_no,
+        s.student_name,
+        s.barcode,
+        s.file_name,
+        s.file_url,
+        s.status,
+        s.marks,
+        s.created_at,
+        s.updated_at,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        u.name AS checker_name,
+        (
+          SELECT COUNT(*) 
+          FROM recheck_requests rr 
+          WHERE rr.sheet_id = s.id AND rr.status IN ('pending', 'assigned')
+        ) AS pending_recheck_count
+      FROM sheets s
+      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN users u ON a.checker_id = u.id
+      WHERE ${whereClause}
+      ORDER BY s.created_at DESC
+      `,
+      params
+    );
+
+    const countResult = await pool.query(
+      `SELECT 
+        COUNT(*) FILTER (WHERE s.status IN ('assigned', 'uploaded')) AS pending_count,
+        COUNT(*) FILTER (WHERE s.status = 'checking') AS checking_count,
+        COUNT(*) FILTER (WHERE s.status = 'checked') AS completed_count,
+        COUNT(*) FILTER (WHERE s.status = 'recheck') AS recheck_count
+      FROM sheets s
+      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
+      WHERE a.checker_id = $1`,
+      [userId]
+    );
+
+    const counts = countResult.rows[0] || {};
+
+    return res.status(200).json({
+      success: true,
+      message: 'Assigned sheets retrieved successfully',
+      data: {
+        items: rows,
+        stats: {
+          pending: parseInt(counts.pending_count || 0),
+          checking: parseInt(counts.checking_count || 0),
+          completed: parseInt(counts.completed_count || 0),
+          recheck: parseInt(counts.recheck_count || 0),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('getMyAssignedSheets error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get assigned sheets',
+      error: error.message,
+    });
+  }
+};
+
+// ─── ✅ NEW: GET SHEET FOR MARKING ─────────────────────────────
+
+// ─── GET SHEET FOR MARKING (FIXED) ─────────────────────────────
+
+// src/assignment/assignmentController.js
+
+export const getSheetForMarking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // ✅ Sahi column name: "totalQuestions" (camelCase)
+    const { rows } = await pool.query(
+      `SELECT 
+        s.id,
+        s.exam_id,
+        s.student_id,
+        s.roll_no,
+        s.student_name,
+        s.barcode,
+        s.file_name,
+        s.file_url,
+        s.status,
+        s.marks,
+        s.created_at,
+        s.updated_at,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        e."totalQuestions",  -- ✅ CamelCase with double quotes
+        e."maxMarks",        -- ✅ CamelCase with double quotes
+        ms."questionName",
+        ms."maxMarks" AS questionMaxMarks,
+        ms.guidelines,
+        ms.model_answer_pdf,
+        ms.question_paper_pdf
+      FROM sheets s
+      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN mark_schemes ms ON ms."examId" = e.id
+      WHERE s.id = $1 AND a.checker_id = $2`,
+      [id, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sheet not found or not assigned to you',
+      });
+    }
+
+    // Group mark scheme by question
+    const markScheme = {};
+    rows.forEach((row) => {
+      if (row.questionName) {
+        markScheme[row.questionName] = {
+          maxMarks: row.questionmaxmarks || row.questionMaxMarks,
+          guidelines: row.guidelines,
+        };
+      }
+    });
+
+    const sheet = rows[0];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Sheet retrieved successfully',
+      data: {
+        sheet: {
+          id: sheet.id,
+          exam_id: sheet.exam_id,
+          student_id: sheet.student_id,
+          roll_no: sheet.roll_no,
+          student_name: sheet.student_name,
+          barcode: sheet.barcode,
+          file_name: sheet.file_name,
+          file_url: sheet.file_url,
+          status: sheet.status,
+          marks: sheet.marks,
+        },
+        exam: {
+          id: sheet.exam_id,
+          name: sheet.exam_name,
+          subject: sheet.exam_subject,
+          totalQuestions: sheet.totalQuestions,
+          maxMarks: sheet.maxMarks,
+        },
+        markScheme: markScheme,
+        pdfs: {
+          model_answer: sheet.model_answer_pdf,
+          question_paper: sheet.question_paper_pdf,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('getSheetForMarking error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get sheet for marking',
+      error: error.message,
+    });
+  }
+};
+// ─── ✅ NEW: UPDATE CHECKER SHEET STATUS ───────────────────────
+
+// ─── UPDATE CHECKER SHEET STATUS (FIXED) ───────────────────────
+
+export const updateCheckerSheetStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, marks } = req.body;
+    const userId = req.user.id;
+
+    const validStatuses = ['assigned', 'checking', 'checked'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Allowed: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    // Check via assignments table
+    const checkResult = await pool.query(
+      `SELECT a.sheet_id 
+       FROM assignments a
+       WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
+      [id, userId]
+    );
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sheet not found or not assigned to you',
+      });
+    }
+
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (status) {
+      updates.push(`status = $${paramCount}`);
+      values.push(status);
+      paramCount++;
+      // ✅ Removed checked_by
+    }
+
+    if (marks !== undefined && marks !== null) {
+      updates.push(`marks = $${paramCount}`);
+      values.push(marks);
+      paramCount++;
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fields to update',
+      });
+    }
+
+    updates.push(`updated_at = NOW()`);
+    values.push(id);
+
+    const { rows } = await pool.query(
+      `UPDATE sheets 
+       SET ${updates.join(', ')}
+       WHERE id = $${paramCount}
+       RETURNING *`,
+      values
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Sheet updated successfully',
+      data: rows[0],
+    });
+  } catch (error) {
+    console.error('updateCheckerSheetStatus error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update sheet',
+      error: error.message,
+    });
+  }
+};
+
+// ─── ✅ NEW: SAVE DRAFT MARKS ──────────────────────────────────
+
+// ─── SAVE DRAFT MARKS (FIXED) ──────────────────────────────────
+
+export const saveDraftMarks = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { marks } = req.body;
+    const userId = req.user.id;
+
+    // ✅ Check via assignments table
+    const checkResult = await pool.query(
+      `SELECT a.sheet_id 
+       FROM assignments a
+       WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
+      [id, userId]
+    );
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sheet not found or not assigned to you',
+      });
+    }
+
+    // ✅ Update marks
+    await pool.query(
+      `UPDATE sheets 
+       SET marks = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [marks, id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Draft saved successfully',
+    });
+  } catch (error) {
+    console.error('saveDraftMarks error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to save draft',
       error: error.message,
     });
   }
