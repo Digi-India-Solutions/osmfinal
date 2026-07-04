@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+// src/pages/recheck/components/RecheckRightPanel.tsx
 
-export type RecheckTab = "recheckMarks" | "questions" | "answerSheet";
+import { useState, useEffect, useCallback } from 'react';
+
+export type RecheckTab = 'recheckMarks' | 'questions' | 'answerSheet';
 
 export interface RecheckMarkEntry {
   id: string;
@@ -25,14 +27,15 @@ interface RecheckRightPanelProps {
   stamps: RecheckStamp[];
   activeMarkId: string | null;
   questionPage: number;
+  readOnly?: boolean;
   totalRound2: number;
   totalMax: number;
   finalMarks: number;
   finalMarksRule: 'higher' | 'recheck_marks' | 'average';
   rightTab: RecheckTab;
   hasModelAnswer: boolean;
-  questionPaperUrl: string | null; // ✅ NEW
-  modelAnswerUrl: string | null; // ✅ NEW
+  questionPaperUrl: string | null;
+  modelAnswerUrl: string | null;
   saveIndicatorText?: string;
   saveIndicatorFresh?: boolean;
   onActiveMarkChange: (id: string) => void;
@@ -48,99 +51,10 @@ interface RecheckRightPanelProps {
 
 const QUESTIONS_PER_PAGE = 4;
 
-interface QPaperQuestion {
-  q: string;
-  sub: string[];
-}
-
-const questionPaperPages: QPaperQuestion[][] = [
-  [
-    {
-      q: "Q1. Define input and output devices. Give two examples each. (12 marks)",
-      sub: [
-        "(a) Define input device with example (3 marks)",
-        "(b) Define output device with example (3 marks)",
-        "(c) Difference between input and output (3 marks)",
-        "(d) Give 4 examples of each (3 marks)",
-      ],
-    },
-    {
-      q: "Q2. Explain basic functions of a computer with diagram. (12 marks)",
-      sub: [],
-    },
-  ],
-  [
-    {
-      q: "Q3. Differentiate between RAM and ROM. (11 marks)",
-      sub: [],
-    },
-    {
-      q: "Q4. What is an operating system? List its functions. (15 marks)",
-      sub: [],
-    },
-    {
-      q: "Q5. Explain number systems used in computers. (8 marks)",
-      sub: [],
-    },
-  ],
-  [
-    {
-      q: "Q6. Write short notes on CPU, ALU, Control Unit. (12 marks)",
-      sub: [],
-    },
-    {
-      q: "Q7. Explain primary and secondary memory. (10 marks)",
-      sub: [],
-    },
-  ],
-];
-
-interface ModelAnswerItem {
-  label: string;
-  marks: number;
-  text: string;
-}
-
-const modelAnswerPages: ModelAnswerItem[][] = [
-  [
-    { label: "Q1(i)", marks: 3, text: "Award 1 mark per correct point. Max 3." },
-    { label: "Q1(ii)", marks: 3, text: "Input→Processing→Output→Storage. 1 mark per function." },
-    { label: "Q1(iii)", marks: 3, text: "Any 2 input devices with explanation. 1.5 marks each." },
-    { label: "Q1(iv)", marks: 3, text: "Any 2 output devices with explanation. 1.5 marks each." },
-  ],
-  [
-    { label: "Q2(i)", marks: 4, text: "Input vs Output difference. 2 marks per side." },
-    { label: "Q2(ii)", marks: 4, text: "RAM=volatile+r/w, ROM=non-volatile+read only. 2 marks per side." },
-    { label: "Q2(iii)", marks: 4, text: "Valid explanation. Award marks for correct concept." },
-  ],
-  [
-    { label: "Q3(i)", marks: 3, text: "Define each function clearly. 1 mark per function with proper naming." },
-    { label: "Q3(ii)", marks: 3, text: "Diagram carries 2 marks, explanation carries 1 mark." },
-    { label: "Q3(iii)", marks: 3, text: "Award marks for correct steps shown. Method carries weight." },
-    { label: "Q3(iv)", marks: 3, text: "Short answer expected. Key concept = full marks." },
-  ],
-  [
-    { label: "Q4(i)", marks: 5, text: "Full definition with examples = 5 marks. Partial = 3 marks." },
-    { label: "Q4(ii)", marks: 5, text: "List all 5 functions. 1 mark each. Missing = deduct 1." },
-    { label: "Q4(iii)", marks: 5, text: "Explain each function with an example. No example = max 3." },
-  ],
-  [
-    { label: "Q5(i)", marks: 2, text: "Name all 4 number systems. 0.5 marks each." },
-    { label: "Q5(ii)", marks: 2, text: "Binary to decimal conversion steps must be shown." },
-    { label: "Q5(iii)", marks: 2, text: "Octal and hexadecimal explained with base values." },
-    { label: "Q5(iv)", marks: 2, text: "One application of each number system." },
-    { label: "Q6(i)", marks: 4, text: "CPU definition and block diagram. Diagram = 1.5 marks." },
-    { label: "Q6(ii)", marks: 4, text: "ALU explanation with all arithmetic and logic functions." },
-    { label: "Q6(iii)", marks: 4, text: "Control Unit with timing and control signals diagram." },
-    { label: "Q7(i)", marks: 3, text: "Primary memory types (RAM/ROM). 1.5 marks with characteristics." },
-    { label: "Q7(ii)", marks: 3, text: "Secondary memory with comparison table. 3 devices = full." },
-  ],
-];
-
 const RULE_LABELS: Record<string, string> = {
-  higher: "Higher of two",
-  recheck_marks: "Recheck Marks",
-  average: "Average of two",
+  higher: 'Higher of two',
+  recheck_marks: 'Recheck Marks',
+  average: 'Average of two',
 };
 
 function computeVisibleCount(marks: RecheckMarkEntry[]): number {
@@ -156,8 +70,8 @@ export default function RecheckRightPanel({
   finalMarks,
   finalMarksRule,
   rightTab,
-  hasModelAnswer,
-  questionPaperUrl, // ✅ NEW
+  readOnly = false,
+  questionPaperUrl,
   modelAnswerUrl,
   saveIndicatorText = 'Auto-saves every 30s',
   saveIndicatorFresh = false,
@@ -186,7 +100,7 @@ export default function RecheckRightPanel({
     } else {
       setDisplayValue('');
     }
-  }, [activeMarkId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeMarkId]);
 
   const startIdx = questionPage * QUESTIONS_PER_PAGE;
   const visibleMarks = marks.slice(startIdx, startIdx + QUESTIONS_PER_PAGE);
@@ -237,7 +151,7 @@ export default function RecheckRightPanel({
   }, [activeMarkId, onClearStampValue]);
 
   const handleAddMark = useCallback(() => {
-    if (!activeMarkId || isEmpty) return;
+    if (!activeMarkId || isEmpty || readOnly) return;
     const num = parseFloat(displayValue) || 0;
     const capped = Math.min(num, activeMax);
     onRound2Update(activeMarkId, capped);
@@ -247,13 +161,14 @@ export default function RecheckRightPanel({
     isEmpty,
     displayValue,
     activeMax,
+    readOnly,
     onRound2Update,
     onRequestAddMark,
   ]);
 
-  const digitDisabled = (digit: number) => digit > activeMax;
-  const halfDisabled = displayNumeric + 0.5 > activeMax;
-  const decimalDisabled = hasDecimal || isEmpty;
+  const digitDisabled = (digit: number) => digit > activeMax || readOnly;
+  const halfDisabled = displayNumeric + 0.5 > activeMax || readOnly;
+  const decimalDisabled = hasDecimal || isEmpty || readOnly;
 
   const tabs: { key: RecheckTab; icon: string; label: string }[] = [
     { key: 'recheckMarks', icon: 'ri-list-check', label: 'Recheck Marks' },
@@ -261,7 +176,7 @@ export default function RecheckRightPanel({
     { key: 'answerSheet', icon: 'ri-check-double-line', label: 'Ans. Sheet' },
   ];
 
-  const canSubmit = totalRound2 > 0;
+  const canSubmit = totalRound2 > 0 && !readOnly;
 
   return (
     <aside className="flex-1 min-h-0 bg-[#1e293b] flex flex-col border-l border-slate-700">
@@ -299,6 +214,18 @@ export default function RecheckRightPanel({
         </span>
       </div>
 
+      {/* ─── READ ONLY BANNER ─── */}
+      {readOnly && (
+        <div className="shrink-0 bg-slate-600/50 border-b border-slate-600 px-3 py-2 flex items-center gap-2">
+          <div className="w-4 h-4 flex items-center justify-center shrink-0">
+            <i className="ri-lock-line text-slate-300 text-xs"></i>
+          </div>
+          <p className="text-[10px] text-slate-300 italic">
+            Read Only — Viewing completed recheck
+          </p>
+        </div>
+      )}
+
       {/* ─── CONTENT AREA ─── */}
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {/* ─── RECHECK MARKS TAB ─── */}
@@ -310,7 +237,7 @@ export default function RecheckRightPanel({
                 onClick={() =>
                   onQuestionPageChange(Math.max(0, questionPage - 1))
                 }
-                disabled={questionPage === 0}
+                disabled={questionPage === 0 || readOnly}
                 className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
                 <i className="ri-arrow-left-s-line text-xs"></i>
@@ -324,7 +251,7 @@ export default function RecheckRightPanel({
                     Math.min(totalQuestionPages - 1, questionPage + 1),
                   )
                 }
-                disabled={questionPage >= totalQuestionPages - 1}
+                disabled={questionPage >= totalQuestionPages - 1 || readOnly}
                 className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
                 <i className="ri-arrow-right-s-line text-xs"></i>
@@ -350,9 +277,11 @@ export default function RecheckRightPanel({
                 return (
                   <div
                     key={m.id}
-                    onClick={() => onActiveMarkChange(m.id)}
-                    className={`px-1.5 py-1.5 border-b border-slate-700/30 cursor-pointer transition-colors ${
-                      isActive
+                    onClick={() => !readOnly && onActiveMarkChange(m.id)}
+                    className={`px-1.5 py-1.5 border-b border-slate-700/30 transition-colors ${
+                      readOnly ? 'cursor-default' : 'cursor-pointer'
+                    } ${
+                      isActive && !readOnly
                         ? 'bg-violet-500/15 border-l-[3px] border-l-violet-400'
                         : 'border-l-[3px] border-l-transparent hover:bg-white/[0.03]'
                     }`}
@@ -382,7 +311,8 @@ export default function RecheckRightPanel({
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => onRemarkUpdate(m.id, e.target.value)}
                         placeholder="—"
-                        className="w-full h-5 px-1 text-[10px] rounded border border-slate-600 bg-slate-800 text-slate-300 outline-none focus:ring-1 focus:ring-violet-500 focus:border-violet-500 placeholder:text-slate-600"
+                        disabled={readOnly}
+                        className="w-full h-5 px-1 text-[10px] rounded border border-slate-600 bg-slate-800 text-slate-300 outline-none focus:ring-1 focus:ring-violet-500 focus:border-violet-500 placeholder:text-slate-600 disabled:opacity-60 disabled:cursor-default"
                       />
                     </div>
                   </div>
@@ -416,71 +346,80 @@ export default function RecheckRightPanel({
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-1 mb-1">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+              {readOnly ? (
+                <div className="text-center text-slate-500 text-xs py-4 bg-slate-800/50 rounded-lg">
+                  <i className="ri-lock-line mr-1"></i>
+                  Read-only mode
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-1 mb-1">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => handleDigit(n)}
+                        disabled={digitDisabled(n)}
+                        className="h-8 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center active:bg-slate-500"
+                      >
+                        {n}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => handleDigit(0)}
+                      disabled={digitDisabled(0)}
+                      className="h-8 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center active:bg-slate-500"
+                    >
+                      0
+                    </button>
+                    <button
+                      onClick={handleHalf}
+                      disabled={halfDisabled}
+                      className="h-8 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center active:bg-slate-500"
+                    >
+                      ½
+                    </button>
+                    <button
+                      onClick={handleDecimal}
+                      disabled={decimalDisabled}
+                      className="h-8 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center active:bg-slate-500"
+                    >
+                      .
+                    </button>
+                  </div>
+
                   <button
-                    key={n}
-                    onClick={() => handleDigit(n)}
-                    disabled={digitDisabled(n)}
-                    className="h-8 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center active:bg-slate-500"
+                    onClick={handleBackspace}
+                    disabled={isEmpty}
+                    className="w-full h-7 rounded bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center gap-1 mb-1.5 active:bg-slate-500"
                   >
-                    {n}
+                    <i className="ri-delete-back-2-line text-[11px]"></i>
+                    backspace
                   </button>
-                ))}
-                <button
-                  onClick={() => handleDigit(0)}
-                  disabled={digitDisabled(0)}
-                  className="h-8 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center active:bg-slate-500"
-                >
-                  0
-                </button>
-                <button
-                  onClick={handleHalf}
-                  disabled={halfDisabled}
-                  className="h-8 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center active:bg-slate-500"
-                >
-                  ½
-                </button>
-                <button
-                  onClick={handleDecimal}
-                  disabled={decimalDisabled}
-                  className="h-8 rounded bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center active:bg-slate-500"
-                >
-                  .
-                </button>
-              </div>
 
-              <button
-                onClick={handleBackspace}
-                disabled={isEmpty}
-                className="w-full h-7 rounded bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center gap-1 mb-1.5 active:bg-slate-500"
-              >
-                <i className="ri-delete-back-2-line text-[11px]"></i>
-                backspace
-              </button>
-
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  onClick={handleClear}
-                  disabled={isEmpty}
-                  className="h-7 rounded bg-slate-600 hover:bg-slate-500 text-white text-[10px] font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap active:bg-slate-400"
-                >
-                  Clear
-                </button>
-                <button
-                  onClick={handleAddMark}
-                  disabled={!activeMarkId || isEmpty}
-                  className="h-7 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-semibold cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center gap-0.5 active:bg-emerald-400"
-                >
-                  Add Mark
-                  <i className="ri-check-line text-[11px]"></i>
-                </button>
-              </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      onClick={handleClear}
+                      disabled={isEmpty}
+                      className="h-7 rounded bg-slate-600 hover:bg-slate-500 text-white text-[10px] font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap active:bg-slate-400"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={handleAddMark}
+                      disabled={!activeMarkId || isEmpty}
+                      className="h-7 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-semibold cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center gap-0.5 active:bg-emerald-400"
+                    >
+                      Add Mark
+                      <i className="ri-check-line text-[11px]"></i>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
+
         {/* ─── QUESTION PAPER TAB ─── */}
-     
         {rightTab === 'questions' && (
           <div className="flex-1 flex flex-col min-h-0">
             {questionPaperUrl ? (
@@ -547,7 +486,7 @@ export default function RecheckRightPanel({
           </div>
         )}
 
-
+        {/* ─── ANSWER SHEET TAB ─── */}
         {rightTab === 'answerSheet' && (
           <div className="flex-1 flex flex-col min-h-0">
             {modelAnswerUrl ? (
@@ -659,6 +598,7 @@ export default function RecheckRightPanel({
             )}
           </div>
         )}
+
         {/* ─── TOTAL & FINAL PREVIEW ─── */}
         <div className="border-t border-slate-700 px-3 py-2 space-y-1.5 shrink-0">
           <div className="flex items-center justify-between">
@@ -680,22 +620,25 @@ export default function RecheckRightPanel({
             </span>
           </div>
         </div>
+
         {/* ─── ACTION BUTTONS ─── */}
-        <div className="px-2.5 pb-3 space-y-1.5 pt-1 shrink-0">
-          <button
-            onClick={onSubmitRecheck}
-            disabled={!canSubmit}
-            className="w-full py-2 text-xs font-semibold rounded bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Submit Recheck
-          </button>
-          <button
-            onClick={onEscalateFurther}
-            className="w-full py-2 text-xs font-semibold rounded bg-violet-600 text-white hover:bg-violet-500 cursor-pointer transition-colors whitespace-nowrap"
-          >
-            Escalate Further
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="px-2.5 pb-3 space-y-1.5 pt-1 shrink-0">
+            <button
+              onClick={onSubmitRecheck}
+              disabled={!canSubmit}
+              className="w-full py-2 text-xs font-semibold rounded bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Submit Recheck
+            </button>
+            <button
+              onClick={onEscalateFurther}
+              className="w-full py-2 text-xs font-semibold rounded bg-violet-600 text-white hover:bg-violet-500 cursor-pointer transition-colors whitespace-nowrap"
+            >
+              Escalate Further
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );

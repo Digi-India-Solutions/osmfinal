@@ -95,6 +95,7 @@ import assignmentRoutes from './src/assignment/assignmentRoutes.js';
 import workQueueRoutes from './src/work-queue/workRoutes.js';
 import recheckRoutes from './src/recheck-queue/recheckRoute.js';
 import MarkscheckerRoutes from './src/checker-marking-controller/checkerMarkingRoutes.js';
+import TeacherRoutes from './src/teacherController/teacherRoutes.js';
 
 app.use('/api/v1/reports', reportsRouter);
 app.use('/api/v1/auth', adminRouter);
@@ -111,6 +112,7 @@ app.use('/api/v1/sheets', Sheetupload);
 app.use('/api/v1/assignments', assignmentRoutes);
 app.use('/api/v1/recheck-queue', recheckRoutes);
 app.use('/api/v1/checker', MarkscheckerRoutes);
+app.use('/api/v1/teacher', TeacherRoutes);
 
 // ===== Root Routes =====
 app.get('/', (req, res) => {

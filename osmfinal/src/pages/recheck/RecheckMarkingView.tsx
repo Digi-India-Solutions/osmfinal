@@ -18,10 +18,8 @@ import type {
   MarksStamp,
 } from '@/pages/checker/MarkingView';
 import recheckQueueService from '@/api/recheckQueue';
+import { API_URL } from '@/api/axios';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
-
-// ❌ REMOVE THESE IMPORTS
-// import { mockRecheckRequests, mockRecheckMarks, sheets, exams, modelAnswerSheets } from "@/mock/mockData";
 
 type RecheckModalType = 'escalate' | 'submit' | null;
 
@@ -57,9 +55,15 @@ function formatTime(seconds: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+function toFullUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (path.startsWith('/uploads')) return `${API_URL}${path}`;
+  return `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
 type ActionType = 'pencil' | 'annotation';
 
-// ─── Recheck draft storage interface ───
 interface RecheckDraftStorageData {
   requestId: number;
   sheetId: number;
@@ -86,6 +90,9 @@ export default function RecheckMarkingView() {
   const [requestData, setRequestData] = useState<any>(null);
   const [sheetData, setSheetData] = useState<any>(null);
   const [examData, setExamData] = useState<any>(null);
+  const [previousMarksData, setPreviousMarksData] = useState<
+    Record<string, number>
+  >({});
   const [markSchemeData, setMarkSchemeData] = useState<
     Record<string, { maxMarks: number; guidelines: string }>
   >({});
@@ -96,6 +103,22 @@ export default function RecheckMarkingView() {
     model_answer: null,
     question_paper: null,
   });
+  const [recheckMarksData, setRecheckMarksData] = useState<
+    Record<string, number>
+  >({});
+  const [recheckAnnotationsData, setRecheckAnnotationsData] = useState<
+    Annotation[]
+  >([]);
+  const [recheckStampsData, setRecheckStampsData] = useState<RecheckStamp[]>(
+    [],
+  );
+
+  // ─── PDF PAGE STATE ──────────────────────────────────────────
+
+  const [pdfPageImages, setPdfPageImages] = useState<Record<number, string>>(
+    {},
+  );
+  const [pdfPageCount, setPdfPageCount] = useState(0);
 
   // ─── FETCH DATA ──────────────────────────────────────────────
 
@@ -113,15 +136,34 @@ export default function RecheckMarkingView() {
       try {
         const response = await recheckQueueService.startMarking(requestIdNum);
 
+        console.log('📥 API Response:', response);
+
         if (response.success) {
           const data = response.data;
-          setRequestData(data.request);
-          setSheetData(data.sheet);
+
+          setRequestData({
+            ...data.request,
+            isReadOnly: data.request?.isReadOnly || false,
+          });
+
+          setSheetData({
+            ...data.sheet,
+            file_url: toFullUrl(data.sheet?.file_url),
+          });
+
           setExamData(data.exam);
           setMarkSchemeData(data.markScheme || {});
-          setPdfsData(
-            data.pdfs || { model_answer: null, question_paper: null },
-          );
+          setPreviousMarksData(data.previousMarks || {});
+          setPdfsData({
+            model_answer: toFullUrl(data.pdfs?.model_answer),
+            question_paper: toFullUrl(data.pdfs?.question_paper),
+          });
+
+          if (data.request?.isReadOnly && data.recheckMarks) {
+            setRecheckMarksData(data.recheckMarks || {});
+            setRecheckAnnotationsData(data.recheckAnnotations || []);
+            setRecheckStampsData(data.recheckStamps || []);
+          }
         } else {
           setError(response.message || 'Failed to load recheck data');
         }
@@ -139,7 +181,6 @@ export default function RecheckMarkingView() {
   // ─── BUILD MARKS FROM MARK SCHEME ────────────────────────────
 
   const initialMarks = useMemo((): RecheckMarkEntry[] => {
-    // ✅ If markScheme is empty, show empty state
     if (!markSchemeData || Object.keys(markSchemeData).length === 0) {
       return [];
     }
@@ -150,12 +191,12 @@ export default function RecheckMarkingView() {
         id: questionName,
         criterion: displayName,
         max: details.maxMarks || 0,
-        round1: sheetData?.current_marks ? Number(sheetData.current_marks) : 0,
+        round1: previousMarksData[questionName] ?? 0,
         round2: null,
         remark: '',
       };
     });
-  }, [markSchemeData, sheetData]);
+  }, [markSchemeData, previousMarksData]);
 
   // ─── State ───
   const [currentPage, setCurrentPage] = useState(1);
@@ -167,11 +208,41 @@ export default function RecheckMarkingView() {
   );
   const [elapsed, setElapsed] = useState(0);
 
-  const [marks, setMarks] = useState<RecheckMarkEntry[]>(initialMarks);
+  const [marks, setMarks] = useState<RecheckMarkEntry[]>([]);
+
+  // ─── Initialize marks when data loads ────────────────────────
 
   useEffect(() => {
-    setMarks(initialMarks);
-  }, [initialMarks]);
+    if (initialMarks.length > 0) {
+      let updatedMarks = initialMarks.map((m) => ({
+        ...m,
+        round1: previousMarksData[m.id] || 0,
+      }));
+
+      if (requestData?.isReadOnly && recheckMarksData) {
+        updatedMarks = updatedMarks.map((m) => ({
+          ...m,
+          round2:
+            recheckMarksData[m.id] !== undefined
+              ? recheckMarksData[m.id]
+              : null,
+        }));
+
+        updatedMarks.forEach((m) => {
+          if (m.round2 !== null) {
+            manuallySetMarksRef.current.add(m.id);
+          }
+        });
+      }
+
+      setMarks(updatedMarks);
+    }
+  }, [
+    initialMarks,
+    previousMarksData,
+    requestData?.isReadOnly,
+    recheckMarksData,
+  ]);
 
   // Refs for auto-save
   const marksRef = useRef(marks);
@@ -179,33 +250,84 @@ export default function RecheckMarkingView() {
     marksRef.current = marks;
   }, [marks]);
 
-  // Track which marks have been explicitly entered (for incomplete check + beforeunload)
+  // Track which marks have been explicitly entered
   const manuallySetMarksRef = useRef<Set<string>>(new Set());
 
-  // ─── Click-to-place stamp state ───
-  const [stamps, setStamps] = useState<RecheckStamp[]>(() =>
-    initialMarks.map((m) => ({
-      markId: m.id,
-      placed: false,
-      x: 0,
-      y: 0,
-      page: 0,
-      value: null,
-    })),
-  );
+  // ─── LOAD RECHECK DRAFT FROM API ─────────────────────────────
 
   useEffect(() => {
-    setStamps(
-      initialMarks.map((m) => ({
+    const loadDraft = async () => {
+      if (!requestIdNum || marks.length === 0 || requestData?.isReadOnly)
+        return;
+
+      try {
+        const response = await recheckQueueService.getDraft(requestIdNum);
+        if (response.success && response.data) {
+          const data = response.data;
+
+          if (data.marks_data && Object.keys(data.marks_data).length > 0) {
+            const restoredMarks = marks.map((m) => {
+              const draftValue = data.marks_data[m.id];
+              return {
+                ...m,
+                round2: draftValue !== undefined ? draftValue : null,
+              };
+            });
+            setMarks(restoredMarks);
+
+            Object.keys(data.marks_data).forEach((id) => {
+              if (
+                data.marks_data[id] !== undefined &&
+                data.marks_data[id] !== null
+              ) {
+                manuallySetMarksRef.current.add(id);
+              }
+            });
+          }
+
+          if (data.stamps_data && data.stamps_data.length > 0) {
+            setStamps(data.stamps_data);
+          }
+
+          if (data.annotations_data && data.annotations_data.length > 0) {
+            setAnnotations(data.annotations_data);
+            const maxId = Math.max(
+              ...data.annotations_data.map((a: Annotation) => a.id),
+              0,
+            );
+            annotationIdCounter = maxId + 1;
+          }
+        }
+      } catch (error) {
+        console.error('Load recheck draft error:', error);
+      }
+    };
+
+    loadDraft();
+  }, [requestIdNum, marks.length, requestData?.isReadOnly]);
+
+  // ─── Click-to-place stamp state ───
+
+  const [stamps, setStamps] = useState<RecheckStamp[]>([]);
+
+  useEffect(() => {
+    if (marks.length > 0) {
+      let initialStamps = marks.map((m) => ({
         markId: m.id,
         placed: false,
         x: 0,
         y: 0,
         page: 0,
         value: null,
-      })),
-    );
-  }, [initialMarks]);
+      }));
+
+      if (requestData?.isReadOnly && recheckStampsData.length > 0) {
+        initialStamps = recheckStampsData;
+      }
+
+      setStamps(initialStamps);
+    }
+  }, [marks, requestData?.isReadOnly, recheckStampsData]);
 
   const [placingMarkId, setPlacingMarkId] = useState<string | null>(null);
   const [instructionBanner, setInstructionBanner] = useState<string | null>(
@@ -236,7 +358,7 @@ export default function RecheckMarkingView() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<RecheckTab>('recheckMarks');
   const [activeMarkId, setActiveMarkId] = useState<string | null>(
-    initialMarks.length > 0 ? initialMarks[0].id : null,
+    marks.length > 0 ? marks[0].id : null,
   );
   const [hasPencilMarks, setHasPencilMarks] = useState(false);
   const [totalActions, setTotalActions] = useState(1);
@@ -244,6 +366,17 @@ export default function RecheckMarkingView() {
   const [zoom, setZoom] = useState(100);
 
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+
+  useEffect(() => {
+    if (requestData?.isReadOnly && recheckAnnotationsData.length > 0) {
+      setAnnotations(recheckAnnotationsData);
+      const maxId = Math.max(
+        ...recheckAnnotationsData.map((a: Annotation) => a.id),
+        0,
+      );
+      annotationIdCounter = maxId + 1;
+    }
+  }, [requestData?.isReadOnly, recheckAnnotationsData]);
 
   const actionHistoryRef = useRef<ActionType[]>([]);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -298,6 +431,7 @@ export default function RecheckMarkingView() {
   }, []);
 
   // ─── INTERNAL: persist draft to localStorage ───
+
   const persistDraft = useCallback(
     (
       mks: RecheckMarkEntry[],
@@ -342,7 +476,7 @@ export default function RecheckMarkingView() {
   );
 
   const saveDraft = useCallback(() => {
-    if (!requestIdNum) return;
+    if (!requestIdNum || requestData?.isReadOnly) return;
     persistDraft(
       marksRef.current,
       stampsRef.current,
@@ -350,22 +484,83 @@ export default function RecheckMarkingView() {
       sheetData?.id || 0,
       manuallySetMarksRef.current,
     );
-  }, [requestIdNum, sheetData?.id, persistDraft]);
+  }, [requestIdNum, sheetData?.id, requestData?.isReadOnly, persistDraft]);
 
   const saveDraftRef = useRef(saveDraft);
   useEffect(() => {
     saveDraftRef.current = saveDraft;
   }, [saveDraft]);
 
-  // ─── AUTO-SAVE: 30-second interval + beforeunload ───
+  // ─── SAVE RECHECK DRAFT TO API ────────────────────────────────
+
+  const handleSaveDraft = useCallback(async () => {
+    if (!requestIdNum || requestData?.isReadOnly) return;
+
+    const marksData: Record<string, number> = {};
+    marks.forEach((m) => {
+      if (m.round2 !== null) marksData[m.id] = m.round2;
+    });
+
+    const stampsData = stamps.map((s) => ({
+      markId: s.markId,
+      placed: s.placed,
+      x: s.x,
+      y: s.y,
+      page: s.page,
+      value: s.value,
+    }));
+
+    const annotationsData = annotations.map((a) => ({
+      id: a.id,
+      tool: a.tool,
+      x: a.x,
+      y: a.y,
+      page: a.page,
+      width: a.width,
+      height: a.height,
+    }));
+
+    const payload = {
+      marksData,
+      annotationsData,
+      stampsData,
+      totalMarks: round2Total,
+      remarks: '',
+    };
+
+    try {
+      await recheckQueueService.saveDraft(requestIdNum, payload);
+    } catch (error) {
+      console.error('Save recheck draft error:', error);
+    }
+  }, [
+    requestIdNum,
+    requestData?.isReadOnly,
+    marks,
+    stamps,
+    annotations,
+    round2Total,
+  ]);
+
+  const handleSaveDraftRef = useRef(handleSaveDraft);
   useEffect(() => {
+    handleSaveDraftRef.current = handleSaveDraft;
+  }, [handleSaveDraft]);
+
+  // ─── AUTO-SAVE: 30-second interval + beforeunload ───
+
+  useEffect(() => {
+    if (requestData?.isReadOnly) return;
+
     const interval = setInterval(() => {
       saveDraftRef.current();
+      handleSaveDraftRef.current();
     }, 30000);
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (manuallySetMarksRef.current.size > 0) {
         saveDraftRef.current();
+        handleSaveDraftRef.current();
         e.preventDefault();
       }
     };
@@ -376,9 +571,10 @@ export default function RecheckMarkingView() {
       clearInterval(interval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, []);
+  }, [requestData?.isReadOnly]);
 
   // ─── RESUME: check localStorage on mount ───
+
   useEffect(() => {
     const key = `osm_recheck_draft_request_${requestIdNum}`;
     const raw = localStorage.getItem(key);
@@ -466,6 +662,7 @@ export default function RecheckMarkingView() {
   }, [requestIdNum]);
 
   // ─── Toolbar handlers ───
+
   const handleToolSelect = useCallback((tool: AnnotationTool) => {
     setActiveTool(tool);
   }, []);
@@ -577,7 +774,8 @@ export default function RecheckMarkingView() {
     setTimeout(() => setToastMessage(null), 2500);
   }, [selectedThumbnails]);
 
-  // ─── Active mark change — enters placing mode if stamp not placed ───
+  // ─── Active mark change ───
+
   const handleActiveMarkChange = useCallback((id: string) => {
     setActiveMarkId(id);
     const stamp = stampsRef.current.find((s) => s.markId === id);
@@ -591,9 +789,10 @@ export default function RecheckMarkingView() {
   }, []);
 
   // ─── Sheet click for stamp placement ───
+
   const handleSheetClickForPlacement = useCallback(
     (page: number, xPercent: number, yPercent: number) => {
-      if (!placingMarkId) return;
+      if (!placingMarkId || requestData?.isReadOnly) return;
       setStamps((prev) =>
         prev.map((s) =>
           s.markId === placingMarkId
@@ -611,7 +810,7 @@ export default function RecheckMarkingView() {
       setPlacingMarkId(null);
       setInstructionBanner(null);
     },
-    [placingMarkId],
+    [placingMarkId, requestData?.isReadOnly],
   );
 
   const handleDismissBanner = useCallback(() => {
@@ -619,41 +818,55 @@ export default function RecheckMarkingView() {
     setInstructionBanner(null);
   }, []);
 
-  // ─── Stamp reposition via drag ───
+  // ─── Stamp reposition ───
+
   const handleStampReposition = useCallback(
     (markId: string, page: number, xPercent: number, yPercent: number) => {
+      if (requestData?.isReadOnly) return;
       setStamps((prev) =>
         prev.map((s) =>
           s.markId === markId ? { ...s, page, x: xPercent, y: yPercent } : s,
         ),
       );
     },
-    [],
+    [requestData?.isReadOnly],
   );
 
   // ─── Clear stamp value ───
-  const handleClearStampValue = useCallback((markId: string) => {
-    setStamps((prev) =>
-      prev.map((s) => (s.markId === markId ? { ...s, value: null } : s)),
-    );
-    setMarks((prev) =>
-      prev.map((m) => (m.id === markId ? { ...m, round2: null } : m)),
-    );
-  }, []);
 
-  // ─── Round 2 update (from numpad Add Mark) ───
-  const handleRound2Update = useCallback((id: string, value: number | null) => {
-    setMarks((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, round2: value } : m)),
-    );
-    if (value !== null) {
-      manuallySetMarksRef.current.add(id);
-    }
-  }, []);
+  const handleClearStampValue = useCallback(
+    (markId: string) => {
+      if (requestData?.isReadOnly) return;
+      setStamps((prev) =>
+        prev.map((s) => (s.markId === markId ? { ...s, value: null } : s)),
+      );
+      setMarks((prev) =>
+        prev.map((m) => (m.id === markId ? { ...m, round2: null } : m)),
+      );
+    },
+    [requestData?.isReadOnly],
+  );
+
+  // ─── Round 2 update ───
+
+  const handleRound2Update = useCallback(
+    (id: string, value: number | null) => {
+      if (requestData?.isReadOnly) return;
+      setMarks((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, round2: value } : m)),
+      );
+      if (value !== null) {
+        manuallySetMarksRef.current.add(id);
+      }
+    },
+    [requestData?.isReadOnly],
+  );
 
   // ─── Request add mark ───
+
   const handleRequestAddMark = useCallback(
     (markId: string, value: number) => {
+      if (requestData?.isReadOnly) return;
       const stamp = stampsRef.current.find((s) => s.markId === markId);
       if (!stamp || !stamp.placed) {
         setToastMessage('Please click on sheet to place position first');
@@ -669,6 +882,7 @@ export default function RecheckMarkingView() {
 
       setTimeout(() => {
         saveDraftRef.current();
+        handleSaveDraftRef.current();
       }, 100);
 
       const idx = marks.findIndex((m) => m.id === markId);
@@ -691,29 +905,36 @@ export default function RecheckMarkingView() {
         }
       }
     },
-    [marks],
+    [marks, requestData?.isReadOnly],
   );
 
-  const handleRemarkUpdate = useCallback((id: string, remark: string) => {
-    setMarks((prev) => prev.map((m) => (m.id === id ? { ...m, remark } : m)));
-  }, []);
+  const handleRemarkUpdate = useCallback(
+    (id: string, remark: string) => {
+      if (requestData?.isReadOnly) return;
+      setMarks((prev) => prev.map((m) => (m.id === id ? { ...m, remark } : m)));
+    },
+    [requestData?.isReadOnly],
+  );
 
   // ─── INCOMPLETE CHECK ───
+
   const checkIncomplete = useCallback((): string[] => {
     return marks
       .filter((m) => !manuallySetMarksRef.current.has(m.id))
       .map((m) => m.criterion);
   }, [marks]);
 
-  // ─── Modal handlers ───
+  // ─── Submit recheck ───
+
   const handleSubmitRecheck = useCallback(() => {
+    if (requestData?.isReadOnly) return;
     const incomplete = checkIncomplete();
     if (incomplete.length > 0) {
       setIncompleteWarning({ questions: incomplete });
       return;
     }
     setModalType('submit');
-  }, [checkIncomplete]);
+  }, [checkIncomplete, requestData?.isReadOnly]);
 
   const handleIncompleteGoBack = useCallback(() => {
     setIncompleteWarning(null);
@@ -727,9 +948,36 @@ export default function RecheckMarkingView() {
   const handleSubmitConfirm = useCallback(async () => {
     setModalType(null);
     try {
+      const marksData: Record<string, number> = {};
+      marks.forEach((m) => {
+        if (m.round2 !== null) marksData[m.id] = m.round2;
+      });
+
+      const stampsData = stamps.map((s) => ({
+        markId: s.markId,
+        placed: s.placed,
+        x: s.x,
+        y: s.y,
+        page: s.page,
+        value: s.value,
+      }));
+
+      const annotationsData = annotations.map((a) => ({
+        id: a.id,
+        tool: a.tool,
+        x: a.x,
+        y: a.y,
+        page: a.page,
+        width: a.width,
+        height: a.height,
+      }));
+
       const response = await recheckQueueService.completeRecheck(requestIdNum, {
         marks: finalMarks,
         remarks: 'Recheck completed',
+        marksData,
+        annotationsData,
+        stampsData,
       });
 
       if (response.success) {
@@ -747,7 +995,7 @@ export default function RecheckMarkingView() {
       setToastMessage(error.message || 'Failed to submit recheck');
       setTimeout(() => setToastMessage(null), 3000);
     }
-  }, [requestIdNum, finalMarks, navigate]);
+  }, [requestIdNum, finalMarks, marks, stamps, annotations, navigate]);
 
   const handleEscalateConfirm = useCallback(async () => {
     setModalType(null);
@@ -773,7 +1021,6 @@ export default function RecheckMarkingView() {
     }
   }, [requestIdNum, navigate]);
 
-  // ✅ PDFs from API
   const hasModelAnswer = !!pdfsData.model_answer;
 
   const toolbarTools: { tool: AnnotationTool; icon: string; label: string }[] =
@@ -832,9 +1079,7 @@ export default function RecheckMarkingView() {
     : 'Recheck';
   const studentName = sheetData?.student_name || 'Unknown';
   const studentRoll = sheetData?.roll_no || '—';
-  const sheetIdDisplay = sheetData
-    ? `#${String(sheetData.id).padStart(3, '0')}`
-    : '#---';
+  const isReadOnly = requestData?.isReadOnly || false;
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-[#0f172a]">
@@ -845,6 +1090,11 @@ export default function RecheckMarkingView() {
           <span className="text-[10px] font-bold text-white bg-violet-600 px-2 py-0.5 rounded whitespace-nowrap">
             RECHECK MODE
           </span>
+          {isReadOnly && (
+            <span className="text-[10px] font-bold text-white bg-slate-600 px-2 py-0.5 rounded whitespace-nowrap">
+              READ ONLY
+            </span>
+          )}
           <span className="text-slate-400">
             Page <span className="text-white font-medium">{currentPage}</span>{' '}
             of {TOTAL_PAGES}
@@ -914,43 +1164,47 @@ export default function RecheckMarkingView() {
             {zoom}%
           </span>
 
-          <div className="w-5 h-px bg-slate-600 my-1.5" />
+          {!isReadOnly && (
+            <>
+              <div className="w-5 h-px bg-slate-600 my-1.5" />
 
-          {toolbarTools.map(({ tool, icon, label }) => (
-            <button
-              key={tool}
-              onClick={() => handleToolSelect(tool)}
-              className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
-                activeTool === tool
-                  ? tool === 'eraser'
-                    ? 'bg-rose-500/25 text-rose-400'
-                    : 'bg-violet-500/25 text-violet-400'
-                  : 'text-slate-400 hover:text-white hover:bg-white/10'
-              }`}
-              title={label}
-            >
-              <i className={`${icon} text-sm`}></i>
-            </button>
-          ))}
+              {toolbarTools.map(({ tool, icon, label }) => (
+                <button
+                  key={tool}
+                  onClick={() => handleToolSelect(tool)}
+                  className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
+                    activeTool === tool
+                      ? tool === 'eraser'
+                        ? 'bg-rose-500/25 text-rose-400'
+                        : 'bg-violet-500/25 text-violet-400'
+                      : 'text-slate-400 hover:text-white hover:bg-white/10'
+                  }`}
+                  title={label}
+                >
+                  <i className={`${icon} text-sm`}></i>
+                </button>
+              ))}
 
-          <div className="w-5 h-px bg-slate-600 my-1.5" />
+              <div className="w-5 h-px bg-slate-600 my-1.5" />
 
-          <button
-            onClick={handleUndoAnnotation}
-            disabled={totalActions === 0}
-            className="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-            title="Undo"
-          >
-            <i className="ri-arrow-go-back-line text-sm"></i>
-          </button>
-          <button
-            onClick={handleDeleteAnnotations}
-            disabled={annotations.length === 0 && !hasPencilMarks}
-            className="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-            title="Delete All"
-          >
-            <i className="ri-delete-bin-line text-sm"></i>
-          </button>
+              <button
+                onClick={handleUndoAnnotation}
+                disabled={totalActions === 0}
+                className="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Undo"
+              >
+                <i className="ri-arrow-go-back-line text-sm"></i>
+              </button>
+              <button
+                onClick={handleDeleteAnnotations}
+                disabled={annotations.length === 0 && !hasPencilMarks}
+                className="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Delete All"
+              >
+                <i className="ri-delete-bin-line text-sm"></i>
+              </button>
+            </>
+          )}
         </aside>
 
         {/* ─── THUMBNAIL PANEL ─── */}
@@ -963,6 +1217,9 @@ export default function RecheckMarkingView() {
             onBlankToggle={handleBlankToggle}
             onApplyBlank={handleApplyBlank}
             totalPages={TOTAL_PAGES}
+            pdfPageImages={pdfPageImages}
+            pdfPageCount={pdfPageCount}
+            isPdfMode={!!sheetData?.file_url}
           />
         )}
 
@@ -991,13 +1248,19 @@ export default function RecheckMarkingView() {
           onDismissBanner={handleDismissBanner}
           pageRefs={pageRefs}
           scrollToPage={scrollToPage}
-          pdfUrl={sheetData?.file_url || null} // ✅ ADD THIS
+          pdfUrl={sheetData?.file_url || pdfsData.question_paper || null}
+          onPageRender={(pageNum: number, imageData: string) => {
+            setPdfPageImages((prev) => ({ ...prev, [pageNum]: imageData }));
+          }}
+          onPageCount={(count: number) => {
+            setPdfPageCount(count);
+          }}
         />
 
-        {/* ─── RIGHT SIDE: Resume banner + Recheck Right Panel ─── */}
+        {/* ─── RIGHT SIDE ─── */}
         <div className="w-[255px] shrink-0 flex flex-col">
           {/* ─── RESUME BANNER ─── */}
-          {resumeBanner && (
+          {resumeBanner && !isReadOnly && (
             <div className="shrink-0 bg-amber-500/15 border-b border-amber-500/30 px-3 py-2.5">
               <p className="text-[11px] text-amber-300 leading-relaxed mb-2">
                 You have unsaved progress from {resumeBanner.savedAt}. Resume
@@ -1026,14 +1289,15 @@ export default function RecheckMarkingView() {
             stamps={stamps}
             activeMarkId={activeMarkId}
             questionPage={questionPage}
+            readOnly={isReadOnly}
             totalRound2={round2Total}
             totalMax={totalMax}
             finalMarks={finalMarks}
             finalMarksRule={requestData?.finalMarksRule || 'higher'}
             rightTab={rightTab}
             hasModelAnswer={hasModelAnswer}
-            questionPaperUrl={pdfsData.question_paper}
-            modelAnswerUrl={pdfsData.model_answer}
+            questionPaperUrl={pdfsData.question_paper || null}
+            modelAnswerUrl={pdfsData.model_answer || null}
             saveIndicatorText={saveIndicatorText}
             saveIndicatorFresh={saveIndicatorFresh}
             onActiveMarkChange={handleActiveMarkChange}
