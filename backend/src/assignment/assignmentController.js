@@ -2,6 +2,14 @@
 
 import pool from '../pool.js';
 
+// ─── HELPER: Case-insensitive subject compare ──────────────────
+
+const isSubjectMatch = (subject1, subject2) => {
+  if (!subject1 && !subject2) return true;
+  if (!subject1 || !subject2) return false;
+  return subject1.trim().toLowerCase() === subject2.trim().toLowerCase();
+};
+
 // ─── GET UNASSIGNED SHEETS ──────────────────────────────────────
 
 export const getUnassignedSheets = async (req, res) => {
@@ -66,8 +74,9 @@ export const getAvailableCheckers = async (req, res) => {
       let hasConflict = false;
       let conflictReason = null;
 
+      // ✅ FIX: Case-insensitive comparison
       if (checker.role === 'teacher_checker' && checker.subject) {
-        if (examSubject && checker.subject !== examSubject) {
+        if (!isSubjectMatch(checker.subject, examSubject)) {
           hasConflict = true;
           conflictReason = `Subject mismatch: Can only check ${checker.subject}`;
         }
@@ -139,8 +148,9 @@ export const assignSheets = async (req, res) => {
 
     const examSubject = examResult.rows[0]?.subject || null;
 
+    // ✅ FIX: Case-insensitive comparison
     if (checker.role === 'teacher_checker' && checker.subject && examSubject) {
-      if (checker.subject !== examSubject) {
+      if (!isSubjectMatch(checker.subject, examSubject)) {
         return res.status(400).json({
           success: false,
           message: `Checker can only check ${checker.subject} subject`,
@@ -270,10 +280,11 @@ export const randomAssignment = async (req, res) => {
 
     let eligibleCheckers = checkersResult.rows;
 
+    // ✅ FIX: Case-insensitive comparison
     if (examSubject) {
       eligibleCheckers = eligibleCheckers.filter((checker) => {
         if (checker.role === 'teacher_checker' && checker.subject) {
-          return checker.subject === examSubject;
+          return isSubjectMatch(checker.subject, examSubject);
         }
         return true;
       });
@@ -465,24 +476,14 @@ export const unassignSheet = async (req, res) => {
   }
 };
 
-// ─── ✅ NEW: GET MY ASSIGNED SHEETS (CHECKER WORK QUEUE) ──────
-
-// src/assignment/assignmentController.js
-
-// ─── GET MY ASSIGNED SHEETS (COMPLETE) ─────────────────────────
-
-// src/assignment/assignmentController.js
-
-// ─── GET MY ASSIGNED SHEETS (FIXED) ───────────────────────────
-
-// src/assignment/assignmentController.js
+// ─── GET MY ASSIGNED SHEETS (CHECKER WORK QUEUE) ──────────────
 
 export const getMyAssignedSheets = async (req, res) => {
   try {
     const userId = req.user.id;
     const { status } = req.query;
 
-    let conditions = ['a.checker_id = $1 AND a.status = \'assigned\''];
+    let conditions = ["a.checker_id = $1 AND a.status = 'assigned'"];
     const params = [userId];
     let paramCount = 2;
 
@@ -523,7 +524,7 @@ export const getMyAssignedSheets = async (req, res) => {
       WHERE ${whereClause}
       ORDER BY s.created_at DESC
       `,
-      params
+      params,
     );
 
     const countResult = await pool.query(
@@ -535,7 +536,7 @@ export const getMyAssignedSheets = async (req, res) => {
       FROM sheets s
       INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
       WHERE a.checker_id = $1`,
-      [userId]
+      [userId],
     );
 
     const counts = countResult.rows[0] || {};
@@ -563,18 +564,13 @@ export const getMyAssignedSheets = async (req, res) => {
   }
 };
 
-// ─── ✅ NEW: GET SHEET FOR MARKING ─────────────────────────────
-
-// ─── GET SHEET FOR MARKING (FIXED) ─────────────────────────────
-
-// src/assignment/assignmentController.js
+// ─── GET SHEET FOR MARKING ─────────────────────────────────────
 
 export const getSheetForMarking = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
 
-    // ✅ Sahi column name: "totalQuestions" (camelCase)
     const { rows } = await pool.query(
       `SELECT 
         s.id,
@@ -591,8 +587,8 @@ export const getSheetForMarking = async (req, res) => {
         s.updated_at,
         e.name AS exam_name,
         e.subject AS exam_subject,
-        e."totalQuestions",  -- ✅ CamelCase with double quotes
-        e."maxMarks",        -- ✅ CamelCase with double quotes
+        e."totalQuestions",
+        e."maxMarks",
         ms."questionName",
         ms."maxMarks" AS questionMaxMarks,
         ms.guidelines,
@@ -603,7 +599,7 @@ export const getSheetForMarking = async (req, res) => {
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN mark_schemes ms ON ms."examId" = e.id
       WHERE s.id = $1 AND a.checker_id = $2`,
-      [id, userId]
+      [id, userId],
     );
 
     if (rows.length === 0) {
@@ -618,8 +614,8 @@ export const getSheetForMarking = async (req, res) => {
     rows.forEach((row) => {
       if (row.questionName) {
         markScheme[row.questionName] = {
-          maxMarks: row.questionmaxmarks || row.questionMaxMarks,
-          guidelines: row.guidelines,
+          maxMarks: row.questionmaxmarks || row.questionMaxMarks || 0,
+          guidelines: row.guidelines || '',
         };
       }
     });
@@ -646,8 +642,8 @@ export const getSheetForMarking = async (req, res) => {
           id: sheet.exam_id,
           name: sheet.exam_name,
           subject: sheet.exam_subject,
-          totalQuestions: sheet.totalQuestions,
-          maxMarks: sheet.maxMarks,
+          totalQuestions: sheet.totalQuestions || 0,
+          maxMarks: sheet.maxMarks || 0,
         },
         markScheme: markScheme,
         pdfs: {
@@ -665,9 +661,8 @@ export const getSheetForMarking = async (req, res) => {
     });
   }
 };
-// ─── ✅ NEW: UPDATE CHECKER SHEET STATUS ───────────────────────
 
-// ─── UPDATE CHECKER SHEET STATUS (FIXED) ───────────────────────
+// ─── UPDATE CHECKER SHEET STATUS ──────────────────────────────
 
 export const updateCheckerSheetStatus = async (req, res) => {
   try {
@@ -688,7 +683,7 @@ export const updateCheckerSheetStatus = async (req, res) => {
       `SELECT a.sheet_id 
        FROM assignments a
        WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
-      [id, userId]
+      [id, userId],
     );
 
     if (checkResult.rows.length === 0) {
@@ -706,7 +701,6 @@ export const updateCheckerSheetStatus = async (req, res) => {
       updates.push(`status = $${paramCount}`);
       values.push(status);
       paramCount++;
-      // ✅ Removed checked_by
     }
 
     if (marks !== undefined && marks !== null) {
@@ -730,7 +724,7 @@ export const updateCheckerSheetStatus = async (req, res) => {
        SET ${updates.join(', ')}
        WHERE id = $${paramCount}
        RETURNING *`,
-      values
+      values,
     );
 
     return res.status(200).json({
@@ -748,9 +742,7 @@ export const updateCheckerSheetStatus = async (req, res) => {
   }
 };
 
-// ─── ✅ NEW: SAVE DRAFT MARKS ──────────────────────────────────
-
-// ─── SAVE DRAFT MARKS (FIXED) ──────────────────────────────────
+// ─── SAVE DRAFT MARKS ──────────────────────────────────────────
 
 export const saveDraftMarks = async (req, res) => {
   try {
@@ -758,12 +750,11 @@ export const saveDraftMarks = async (req, res) => {
     const { marks } = req.body;
     const userId = req.user.id;
 
-    // ✅ Check via assignments table
     const checkResult = await pool.query(
       `SELECT a.sheet_id 
        FROM assignments a
        WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
-      [id, userId]
+      [id, userId],
     );
 
     if (checkResult.rows.length === 0) {
@@ -773,12 +764,11 @@ export const saveDraftMarks = async (req, res) => {
       });
     }
 
-    // ✅ Update marks
     await pool.query(
       `UPDATE sheets 
        SET marks = $1, updated_at = NOW()
        WHERE id = $2`,
-      [marks, id]
+      [marks, id],
     );
 
     return res.status(200).json({

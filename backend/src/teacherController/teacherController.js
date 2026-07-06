@@ -696,16 +696,26 @@ export const deletePDF = async (req, res) => {
 export const getCheckingProgress = async (req, res) => {
   try {
     const { examId } = req.params;
-    const subject = req.user.subject;
+    // ✅ REMOVE subject filter - only check examId
+    // const subject = req.user.subject;
 
+    console.log('📋 getCheckingProgress - examId:', examId);
+
+    // ✅ FIX: Remove subject filter
     const examResult = await pool.query(
-      `SELECT id, name, "totalQuestions" as total_questions, "maxMarks" as max_marks FROM exams WHERE id = $1 AND subject = $2`,
-      [examId, subject],
+      `SELECT id, name, "totalQuestions" as total_questions, "maxMarks" as max_marks 
+       FROM exams 
+       WHERE id = $1`,
+      [examId],
     );
+
+    console.log('📋 Exam result:', examResult.rows);
+
     if (examResult.rows.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'Exam not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found',
+      });
     }
 
     const exam = examResult.rows[0];
@@ -761,16 +771,26 @@ export const getCheckingProgress = async (req, res) => {
 export const getResults = async (req, res) => {
   try {
     const { examId } = req.params;
-    const subject = req.user.subject;
+    // ✅ REMOVE subject filter - only check examId and status
+    // const subject = req.user.subject;
 
+    console.log('📋 getResults - examId:', examId);
+
+    // ✅ FIX: Remove subject filter
     const examResult = await pool.query(
-      `SELECT id, name, "totalQuestions" as total_questions, "maxMarks" as max_marks FROM exams WHERE id = $1 AND subject = $2 AND status = 'completed'`,
-      [examId, subject],
+      `SELECT id, name, "totalQuestions" as total_questions, "maxMarks" as max_marks 
+       FROM exams 
+       WHERE id = $1 AND status = 'completed'`,
+      [examId],
     );
+
+    console.log('📋 Exam result:', examResult.rows);
+
     if (examResult.rows.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'Exam not found or not completed' });
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found or not completed',
+      });
     }
 
     const exam = examResult.rows[0];

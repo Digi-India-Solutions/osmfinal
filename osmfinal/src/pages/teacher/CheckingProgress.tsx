@@ -42,15 +42,32 @@ export default function CheckingProgress() {
       setIsLoading(true);
       try {
         const response = await teacherApi.getExams();
-        console.log('📋 All exams:', response.data);
+        console.log('📋 All exams from API:', response.data);
+        console.log('📋 Current user subject:', subject);
 
         if (response.success) {
-          // ✅ Filter by subject
-          const filtered = response.data.filter(
-            (e) => e.subject?.toLowerCase() === subject?.toLowerCase(),
-          );
+          // ✅ FIX: Trim and compare case-insensitive
+          const trimmedSubject = subject.trim();
+          console.log('📋 Trimmed subject:', trimmedSubject);
+
+          const filtered = response.data.filter((e) => {
+            const examSubject = e.subject?.trim() || '';
+            const isMatch =
+              examSubject.toLowerCase() === trimmedSubject.toLowerCase();
+            console.log(
+              `📋 Exam: ${e.name}, Subject: ${examSubject}, Match: ${isMatch}`,
+            );
+            return isMatch;
+          });
+
           console.log('📋 Filtered exams:', filtered);
           setExams(filtered);
+
+          // ✅ If no exams found, show all exams as fallback
+          if (filtered.length === 0) {
+            console.log('⚠️ No exams matched, showing all exams as fallback');
+            setExams(response.data);
+          }
         }
       } catch (error) {
         console.error('Fetch exams error:', error);
@@ -210,7 +227,7 @@ export default function CheckingProgress() {
           Checking Progress
         </h2>
         <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">
-          {subject}
+          {subject || 'All Subjects'}
         </span>
       </div>
 
@@ -229,12 +246,23 @@ export default function CheckingProgress() {
           <option value="" disabled>
             Select an exam...
           </option>
-          {subjectExams.map((exam) => (
-            <option key={exam.id} value={exam.id}>
-              {exam.name} ({exam.date})
+          {subjectExams.length > 0 ? (
+            subjectExams.map((exam) => (
+              <option key={exam.id} value={exam.id}>
+                {exam.name} ({exam.date})
+              </option>
+            ))
+          ) : (
+            <option value="" disabled>
+              No exams found
             </option>
-          ))}
+          )}
         </select>
+        {subjectExams.length === 0 && (
+          <p className="text-xs text-amber-600 mt-2">
+            No exams found for {subject}. Showing all exams.
+          </p>
+        )}
       </div>
 
       {selectedExam && (
