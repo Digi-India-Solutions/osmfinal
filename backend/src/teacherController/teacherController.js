@@ -768,19 +768,19 @@ export const getCheckingProgress = async (req, res) => {
 
 // ─── RESULTS ─────────────────────────────────────────────────
 
+// src/teacherController/teacherController.js
+
 export const getResults = async (req, res) => {
   try {
     const { examId } = req.params;
-    // ✅ REMOVE subject filter - only check examId and status
-    // const subject = req.user.subject;
 
     console.log('📋 getResults - examId:', examId);
 
-    // ✅ FIX: Remove subject filter
+    // ✅ FIX: Remove status filter - check only examId
     const examResult = await pool.query(
       `SELECT id, name, "totalQuestions" as total_questions, "maxMarks" as max_marks 
        FROM exams 
-       WHERE id = $1 AND status = 'completed'`,
+       WHERE id = $1`,  // ✅ Removed "AND status = 'completed'"
       [examId],
     );
 
@@ -789,7 +789,7 @@ export const getResults = async (req, res) => {
     if (examResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Exam not found or not completed',
+        message: 'Exam not found',
       });
     }
 

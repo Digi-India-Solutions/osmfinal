@@ -8,6 +8,36 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+
+const superAdminLinks = [
+  { label: 'Dashboard', path: '/super-admin', icon: 'ri-dashboard-line' },
+  { label: 'Exams', path: '/admin/exams', icon: 'ri-file-list-3-line' },
+  {
+    label: 'Mark Scheme',
+    path: '/admin/mark-scheme',
+    icon: 'ri-price-tag-3-line',
+  },
+  {
+    label: 'Student Data',
+    path: '/admin/student-data',
+    icon: 'ri-database-2-line',
+  },
+  {
+    label: 'Sheet Upload',
+    path: '/admin/upload',
+    icon: 'ri-upload-cloud-2-line',
+  },
+  {
+    label: 'Assign Checkers',
+    path: '/admin/assign',
+    icon: 'ri-user-settings-line',
+  },
+  { label: 'Work Queue', path: '/admin/queue', icon: 'ri-stack-line' },
+  { label: 'Users', path: '/admin/users', icon: 'ri-team-line' },
+  { label: 'Reports', path: '/admin/reports', icon: 'ri-bar-chart-2-line' },
+  { label: 'Settings', path: '/admin/settings', icon: 'ri-settings-3-line' }, // ✅ Settings included
+];
+
 const adminLinks = [
   { label: 'Dashboard', path: '/admin', icon: 'ri-dashboard-line' },
   { label: 'Exams', path: '/admin/exams', icon: 'ri-file-list-3-line' },
@@ -34,7 +64,7 @@ const adminLinks = [
   { label: 'Work Queue', path: '/admin/queue', icon: 'ri-stack-line' },
   { label: 'Users', path: '/admin/users', icon: 'ri-team-line' },
   { label: 'Reports', path: '/admin/reports', icon: 'ri-bar-chart-2-line' },
-  { label: 'Settings', path: '/admin/settings', icon: 'ri-settings-3-line' },
+  // { label: 'Settings', path: '/admin/settings', icon: 'ri-settings-3-line' },
 ];
 
 const teacherLinks = [
@@ -247,6 +277,13 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </>
         ) : (
           <>
+            {role === 'super_admin' && ( // ✅ SUPER ADMIN
+              <NavSection
+                label="Navigation"
+                links={superAdminLinks}
+                collapsed={collapsed}
+              />
+            )}
             {role === 'admin' && (
               <NavSection
                 label="Navigation"

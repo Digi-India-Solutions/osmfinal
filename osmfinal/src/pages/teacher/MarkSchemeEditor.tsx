@@ -1,4 +1,5 @@
 // src/pages/MarkSchemeEditor.tsx
+
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
@@ -115,8 +116,6 @@ export default function MarkSchemeEditor() {
   const { currentUser } = useAuth();
   const loading = usePageLoading();
   const location = useLocation();
-  const role = currentUser?.role ?? '';
-  const subject = currentUser?.subject ?? '';
   const isAdminRoute = location.pathname.startsWith('/admin');
 
   const [modelAnswerFile, setModelAnswerFile] = useState<File | null>(null);
@@ -124,12 +123,29 @@ export default function MarkSchemeEditor() {
 
   const [examList, setExamList] = useState<ExamResponse[]>([]);
   const [examsLoading, setExamsLoading] = useState(true);
+  // ✅ Initialize isUserLoaded based on currentUser
+  const [isUserLoaded, setIsUserLoaded] = useState(!!currentUser);
+
+  // ✅ Update isUserLoaded when currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      console.log('🔍 User loaded:', currentUser);
+      setIsUserLoaded(true);
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     const fetchExams = async () => {
       try {
         setExamsLoading(true);
-        const res = await examApi.getAllExams({ limit: 1000 });
+        console.log('🔍 Calling getAllExams with excludeArchived: true');
+
+        const res = await examApi.getAllExams({
+          limit: 1000,
+          excludeArchived: true,
+        });
+
+        console.log('🔍 Response data length:', res.data.length);
         setExamList(res.data);
       } catch (error) {
         console.error('Failed to fetch exams:', error);
@@ -141,9 +157,53 @@ export default function MarkSchemeEditor() {
   }, []);
 
   const filteredExams = useMemo(() => {
-    if (role === 'admin' || role === 'teacher_checker') return examList;
-    return examList.filter((e) => e.subject === subject);
-  }, [role, subject, examList]);
+    const role = currentUser?.role ?? '';
+    const subject = currentUser?.subject ?? '';
+
+    console.log(
+      '🔍 Computing filteredExams - role:',
+      role,
+      'subject:',
+      subject,
+    );
+    console.log('🔍 examList length:', examList.length);
+    console.log('🔍 isUserLoaded:', isUserLoaded);
+
+    // ✅ Wait for user to load
+    if (!isUserLoaded) {
+      console.log('⏳ User not loaded yet, returning empty');
+      return [];
+    }
+
+    let exams = examList;
+
+    // ✅ Remove archived
+    exams = exams.filter((e) => e.status !== 'archived');
+
+    // ✅ Admin or teacher_checker - show all
+    if (role === 'admin' || role === 'teacher_checker') {
+      console.log('🔍 Admin/Teacher Checker - showing all exams');
+      return exams;
+    }
+
+    // ✅ Teacher - filter by subject
+    if (role === 'teacher') {
+      if (subject) {
+        exams = exams.filter(
+          (e) => e.subject.toLowerCase() === subject.toLowerCase(),
+        );
+        console.log(
+          `🔍 Teacher filtered by subject: "${subject}" -> ${exams.length} exams`,
+        );
+      } else {
+        console.log('⚠️ Teacher has no subject - returning empty');
+        return [];
+      }
+    }
+
+    console.log('🔍 filteredExams length:', exams.length);
+    return exams;
+  }, [currentUser?.role, currentUser?.subject, examList, isUserLoaded]);
 
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
   const [schemeQuestions, setSchemeQuestions] = useState<SchemeQuestion[]>([]);
@@ -219,93 +279,93 @@ export default function MarkSchemeEditor() {
 
   // ─── PDF UPLOAD FUNCTIONS ──────────────────────────────────
 
- const handleModelAnswerUpload = async (
-   e: React.ChangeEvent<HTMLInputElement>,
- ) => {
-   const file = e.target.files?.[0];
-   if (!file || !selectedExamId) return;
+  const handleModelAnswerUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedExamId) return;
 
-   console.log('🔍 ===== UPLOAD MODEL ANSWER =====');
-   console.log('🔍 Exam ID:', selectedExamId);
-   console.log('🔍 File name:', file.name);
-   console.log('🔍 File type:', file.type);
-   console.log('🔍 File size:', file.size);
+    console.log('🔍 ===== UPLOAD MODEL ANSWER =====');
+    console.log('🔍 Exam ID:', selectedExamId);
+    console.log('🔍 File name:', file.name);
+    console.log('🔍 File type:', file.type);
+    console.log('🔍 File size:', file.size);
 
-   if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
-     showToast('Only PDF files are allowed', 'error');
-     return;
-   }
+    if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
+      showToast('Only PDF files are allowed', 'error');
+      return;
+    }
 
-   if (file.size > 10 * 1024 * 1024) {
-     showToast('File too large. Max size is 10MB', 'error');
-     return;
-   }
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('File too large. Max size is 10MB', 'error');
+      return;
+    }
 
-   setUploadingModelAnswer(true);
-   try {
-     const response = await markSchemeApi.uploadModelAnswer(
-       selectedExamId,
-       file,
-     );
+    setUploadingModelAnswer(true);
+    try {
+      const response = await markSchemeApi.uploadModelAnswer(
+        selectedExamId,
+        file,
+      );
 
-     console.log('🔍 Response:', response);
-     if (response.success) {
-       setModelAnswerPdf(response.data.url);
-       // ✅ Also save file for later save with mark scheme
-       setModelAnswerFile(file);
-       showToast('Model answer uploaded successfully', 'success');
-     } else {
-       showToast(response.message || 'Failed to upload model answer', 'error');
-     }
-   } catch (error: any) {
-     console.error('Upload model answer error:', error);
-     showToast(error.message || 'Failed to upload model answer', 'error');
-   } finally {
-     setUploadingModelAnswer(false);
-     e.target.value = '';
-   }
- };
- const handleQuestionPaperUpload = async (
-   e: React.ChangeEvent<HTMLInputElement>,
- ) => {
-   const file = e.target.files?.[0];
-   if (!file || !selectedExamId) return;
+      console.log('🔍 Response:', response);
+      if (response.success) {
+        setModelAnswerPdf(response.data.url);
+        // ✅ Also save file for later save with mark scheme
+        setModelAnswerFile(file);
+        showToast('Model answer uploaded successfully', 'success');
+      } else {
+        showToast(response.message || 'Failed to upload model answer', 'error');
+      }
+    } catch (error: any) {
+      console.error('Upload model answer error:', error);
+      showToast(error.message || 'Failed to upload model answer', 'error');
+    } finally {
+      setUploadingModelAnswer(false);
+      e.target.value = '';
+    }
+  };
+  const handleQuestionPaperUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedExamId) return;
 
-   if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
-     showToast('Only PDF files are allowed', 'error');
-     return;
-   }
+    if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
+      showToast('Only PDF files are allowed', 'error');
+      return;
+    }
 
-   if (file.size > 10 * 1024 * 1024) {
-     showToast('File too large. Max size is 10MB', 'error');
-     return;
-   }
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('File too large. Max size is 10MB', 'error');
+      return;
+    }
 
-   setUploadingQuestionPaper(true);
-   try {
-     const response = await markSchemeApi.uploadQuestionPaper(
-       selectedExamId,
-       file,
-     );
-     if (response.success) {
-       setQuestionPaperPdf(response.data.url);
-       // ✅ Also save file for later save with mark scheme
-       setQuestionPaperFile(file);
-       showToast('Question paper uploaded successfully', 'success');
-     } else {
-       showToast(
-         response.message || 'Failed to upload question paper',
-         'error',
-       );
-     }
-   } catch (error: any) {
-     console.error('Upload question paper error:', error);
-     showToast(error.message || 'Failed to upload question paper', 'error');
-   } finally {
-     setUploadingQuestionPaper(false);
-     e.target.value = '';
-   }
- };
+    setUploadingQuestionPaper(true);
+    try {
+      const response = await markSchemeApi.uploadQuestionPaper(
+        selectedExamId,
+        file,
+      );
+      if (response.success) {
+        setQuestionPaperPdf(response.data.url);
+        // ✅ Also save file for later save with mark scheme
+        setQuestionPaperFile(file);
+        showToast('Question paper uploaded successfully', 'success');
+      } else {
+        showToast(
+          response.message || 'Failed to upload question paper',
+          'error',
+        );
+      }
+    } catch (error: any) {
+      console.error('Upload question paper error:', error);
+      showToast(error.message || 'Failed to upload question paper', 'error');
+    } finally {
+      setUploadingQuestionPaper(false);
+      e.target.value = '';
+    }
+  };
 
   const handleDeletePDF = async (type: 'model_answer' | 'question_paper') => {
     if (!selectedExamId) return;
@@ -497,7 +557,6 @@ export default function MarkSchemeEditor() {
     return schemeQuestions.reduce((sum, q) => sum + q.subParts.length, 0);
   }, [schemeQuestions]);
 
-
   const handleSaveScheme = async () => {
     if (!selectedExamId) return;
 
@@ -648,16 +707,11 @@ export default function MarkSchemeEditor() {
         <h2 className="text-lg font-semibold text-gray-900 whitespace-nowrap">
           Mark Scheme Editor
         </h2>
-        {role !== 'admin' && subject && (
-          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">
-            {subject}
-          </span>
-        )}
-        {role === 'admin' && (
-          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">
-            All Subjects
-          </span>
-        )}
+        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">
+          {currentUser?.role === 'admin'
+            ? 'All Subjects'
+            : currentUser?.subject || 'No Subject'}
+        </span>
       </div>
 
       <div className="bg-sky-50 border border-sky-100 rounded-xl p-3">
@@ -679,26 +733,38 @@ export default function MarkSchemeEditor() {
         <select
           className="w-full max-w-md border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-300"
           value={selectedExamId ?? ''}
-          disabled={examsLoading}
+          disabled={examsLoading || !isUserLoaded}
           onChange={(e) => {
             const val = e.target.value;
             if (val) handleExamChange(val);
           }}
         >
           <option value="" disabled>
-            {examsLoading ? 'Loading exams...' : 'Select an exam...'}
+            {!isUserLoaded
+              ? 'Loading user...'
+              : examsLoading
+                ? 'Loading exams...'
+                : 'Select an exam...'}
           </option>
-          {filteredExams.map((exam) => {
-            const matchedSubject = mockSubjects.find(
-              (s) => s.name === exam.subject,
-            );
-            return (
-              <option key={exam.id} value={exam.id}>
-                {exam.name} ({exam.date}) — {exam.subject}
-                {matchedSubject ? ` (${matchedSubject.code})` : ''}
-              </option>
-            );
-          })}
+          {filteredExams.length === 0 && !examsLoading && isUserLoaded ? (
+            <option value="" disabled>
+              {currentUser?.role === 'teacher' && !currentUser?.subject
+                ? 'No subject assigned to you'
+                : 'No exams available'}
+            </option>
+          ) : (
+            filteredExams.map((exam) => {
+              const matchedSubject = mockSubjects.find(
+                (s) => s.name === exam.subject,
+              );
+              return (
+                <option key={exam.id} value={exam.id}>
+                  {exam.name} ({exam.date}) — {exam.subject}
+                  {matchedSubject ? ` (${matchedSubject.code})` : ''}
+                </option>
+              );
+            })
+          )}
         </select>
       </div>
 
@@ -1191,7 +1257,9 @@ export default function MarkSchemeEditor() {
             <i className="ri-folder-open-line text-gray-400 text-2xl"></i>
           </div>
           <p className="text-sm text-gray-500">
-            No exams found. Create an exam first.
+            {currentUser?.role === 'teacher' && !currentUser?.subject
+              ? 'No subject assigned to you. Please contact admin.'
+              : 'No exams found. Create an exam first.'}
           </p>
         </div>
       )}

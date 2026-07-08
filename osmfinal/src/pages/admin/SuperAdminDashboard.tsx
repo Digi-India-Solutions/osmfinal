@@ -1,4 +1,4 @@
-// src/pages/admin/AdminDashboard.tsx
+// src/pages/super-admin/SuperAdminDashboard.tsx
 
 import { useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
@@ -27,24 +27,25 @@ import StatusBadge from '@/components/ui/StatusBadge';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { usePageLoading } from '@/hooks/usePageLoading';
 
-export default function AdminDashboard() {
-  const { currentUser } = useAuth(); 
+export default function SuperAdminDashboard() {
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const loading = usePageLoading();
 
   // ─── ✅ SUPER ADMIN ACCESS CHECK ──────────────────────────────
-useEffect(() => {
-  if (!currentUser) {
-    navigate('/login');
-    return;
-  }
 
-  // ✅ ONLY admin allowed (not super_admin)
-  if (currentUser.role !== 'admin') {
-    navigate('/login?error=unauthorized');
-    return;
-  }
-}, [currentUser, navigate]);
+  useEffect(() => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+
+    // ✅ Only super_admin allowed
+    if (currentUser.role !== 'super_admin') {
+      navigate('/login?error=unauthorized');
+      return;
+    }
+  }, [currentUser, navigate]);
 
   const recentSheets = [...sheets].sort((a, b) => b.id - a.id).slice(0, 8);
 
@@ -113,23 +114,19 @@ useEffect(() => {
 
   if (loading) return <LoadingSpinner fullPage />;
 
-  // ─── USER ROLE DISPLAY ──────────────────────────────────────────
-
-  const getRoleDisplay = (role: string) => {
-    if (role === 'super_admin') return '⭐ Super Admin';
-    if (role === 'admin') return '👑 Admin';
-    return role;
-  };
-
   return (
     <div className="space-y-6">
       <Breadcrumb
-        items={[{ label: 'Admin', href: '/admin' }, { label: 'Dashboard' }]}
+        items={[
+          { label: 'Super Admin', href: '/super-admin' },
+          { label: 'Dashboard' },
+        ]}
       />
 
-      <div className="bg-white rounded-2xl p-6">
+      {/* ─── WELCOME CARD ────────────────────────────────────────── */}
+      <div className="bg-white rounded-2xl p-6 border-l-4 border-amber-500">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gray-900 flex items-center justify-center shrink-0">
+          <div className="w-12 h-12 rounded-xl bg-amber-500 flex items-center justify-center shrink-0">
             <span className="text-white text-lg font-semibold">
               {currentUser?.name?.charAt(0)}
             </span>
@@ -142,16 +139,15 @@ useEffect(() => {
               <p className="text-sm text-gray-500">
                 Here's what's happening with your marking system today.
               </p>
-              {currentUser?.role === 'super_admin' && (
-                <span className="text-[10px] font-medium bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
-                  ⭐ Super Admin
-                </span>
-              )}
+              <span className="text-[10px] font-medium bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                ⭐ Super Admin
+              </span>
             </div>
           </div>
         </div>
       </div>
 
+      {/* ─── STATS CARDS ──────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {adminStats.map((stat) => (
           <div
@@ -175,6 +171,7 @@ useEffect(() => {
         ))}
       </div>
 
+      {/* ─── CHART ────────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-6">
         <h4 className="text-sm font-semibold text-gray-900 mb-4">
           Sheet Status Overview
@@ -219,6 +216,7 @@ useEffect(() => {
         </ResponsiveContainer>
       </div>
 
+      {/* ─── RECHECK CARDS ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -274,6 +272,7 @@ useEffect(() => {
         </div>
       </div>
 
+      {/* ─── QUICK LINKS ──────────────────────────────────────────── */}
       <div>
         <h4 className="text-sm font-semibold text-gray-900 mb-3">
           Quick Links to Reports
@@ -306,6 +305,7 @@ useEffect(() => {
         </div>
       </div>
 
+      {/* ─── TABLES ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl p-6">
           <h4 className="text-sm font-semibold text-gray-900 mb-4">

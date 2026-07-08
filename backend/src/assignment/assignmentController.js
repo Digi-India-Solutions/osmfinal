@@ -478,6 +478,8 @@ export const unassignSheet = async (req, res) => {
 
 // ─── GET MY ASSIGNED SHEETS (CHECKER WORK QUEUE) ──────────────
 
+// ─── GET MY ASSIGNED SHEETS (CHECKER WORK QUEUE) ──────────────
+
 export const getMyAssignedSheets = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -511,6 +513,7 @@ export const getMyAssignedSheets = async (req, res) => {
         s.updated_at,
         e.name AS exam_name,
         e.subject AS exam_subject,
+        e."spentTime" AS exam_spent_time,  -- ✅ ADD THIS
         u.name AS checker_name,
         (
           SELECT COUNT(*) 
@@ -566,6 +569,8 @@ export const getMyAssignedSheets = async (req, res) => {
 
 // ─── GET SHEET FOR MARKING ─────────────────────────────────────
 
+// ─── GET SHEET FOR MARKING ─────────────────────────────────────
+
 export const getSheetForMarking = async (req, res) => {
   try {
     const { id } = req.params;
@@ -589,6 +594,7 @@ export const getSheetForMarking = async (req, res) => {
         e.subject AS exam_subject,
         e."totalQuestions",
         e."maxMarks",
+        e."spentTime" AS exam_spent_time,  -- ✅ ADD THIS
         ms."questionName",
         ms."maxMarks" AS questionMaxMarks,
         ms.guidelines,
@@ -644,6 +650,7 @@ export const getSheetForMarking = async (req, res) => {
           subject: sheet.exam_subject,
           totalQuestions: sheet.totalQuestions || 0,
           maxMarks: sheet.maxMarks || 0,
+          spentTime: sheet.exam_spent_time || 0,  // ✅ ADD THIS
         },
         markScheme: markScheme,
         pdfs: {

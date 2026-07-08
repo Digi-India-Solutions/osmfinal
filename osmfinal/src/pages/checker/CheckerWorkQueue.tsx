@@ -179,11 +179,13 @@ export default function CheckerWorkQueue() {
             sheet.status === 'assigned' || sheet.status === 'uploaded';
           const isRecheck = sheet.status === 'recheck';
           const isRechecked = sheet.status === 'rechecked';
+          const isEscalated = sheet.status === 'escalated';
 
           // Determine status display
           let statusDisplay = sheet.status;
           if (isRecheck) statusDisplay = 'recheck';
           else if (isRechecked) statusDisplay = 'rechecked';
+          else if (isEscalated) statusDisplay = 'escalated';
 
           return (
             <div
@@ -210,6 +212,15 @@ export default function CheckerWorkQueue() {
                 <p className="text-xs text-gray-400 mt-0.5">
                   {sheet.exam_subject || ''}
                 </p>
+                {/* ✅ Show Minimum Time to Spend */}
+                {sheet.exam_spent_time && sheet.exam_spent_time > 0 && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 rounded-lg border border-amber-100">
+                    <i className="ri-timer-line text-amber-500 text-xs"></i>
+                    <span className="text-[10px] text-amber-700 font-medium">
+                      Min time spent: {sheet.exam_spent_time} min
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Draft indicator */}
@@ -229,6 +240,21 @@ export default function CheckerWorkQueue() {
                   <span className="text-[11px] text-violet-600 font-medium">
                     {sheet.pending_recheck_count || 0} recheck request
                     {sheet.pending_recheck_count !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              )}
+
+              {/* ✅ Escalated indicator */}
+              {isEscalated && (
+                <div className="flex items-center gap-1.5 mb-3">
+                  <span className="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>
+                  <span className="text-[11px] text-red-600 font-medium">
+                    Escalated
+                    {sheet.escalate_reason && (
+                      <span className="text-red-400 ml-1">
+                        ({sheet.escalate_reason})
+                      </span>
+                    )}
                   </span>
                 </div>
               )}
@@ -271,6 +297,14 @@ export default function CheckerWorkQueue() {
                   <button
                     onClick={() => handleStartMarking(sheet.id)}
                     className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-gray-50 text-gray-600 text-sm font-medium hover:bg-gray-100 transition-colors duration-150 whitespace-nowrap cursor-pointer"
+                  >
+                    <i className="ri-eye-line text-base"></i>
+                    View
+                  </button>
+                ) : isEscalated ? (
+                  <button
+                    onClick={() => handleStartMarking(sheet.id)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-red-50 text-red-700 text-sm font-medium hover:bg-red-100 transition-colors duration-150 whitespace-nowrap cursor-pointer"
                   >
                     <i className="ri-eye-line text-base"></i>
                     View

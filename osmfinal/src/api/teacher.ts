@@ -178,7 +178,10 @@ class TeacherApiService {
   ): Promise<{ success: boolean; data: TeacherExam[] }> {
     try {
       // ✅ Use examApi.getAllExams() instead of direct call
-      const response = await examApi.getAllExams({ limit: 1000 });
+      const response = await examApi.getAllExams({
+        limit: 1000,
+        excludeArchived: true,
+      });
 
       if (response.success) {
         // Convert to TeacherExam format

@@ -1,10 +1,12 @@
 // pages/auth/LoginPage.tsx
-import { useState, useEffect } from 'react';
+
+import { useState, useEffect, useRef } from 'react';
 import { type FormEvent } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 const roleRedirects: Record<string, string> = {
+  super_admin: '/super-admin', // ✅ ALAG ROUTE
   admin: '/admin',
   teacher: '/teacher',
   checker: '/checker',
@@ -27,6 +29,10 @@ export default function LoginPage() {
   }>({});
   const [loggingIn, setLoggingIn] = useState(false);
 
+  // ✅ Use useRef to prevent multiple redirects
+  const hasRedirected = useRef(false);
+  const isRedirecting = useRef(false);
+
   // ─── Check for unauthorized error ──────────────────────────────
 
   useEffect(() => {
@@ -41,11 +47,41 @@ export default function LoginPage() {
   // ─── Redirect if already authenticated ──────────────────────────
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated && currentUser) {
+    // ✅ Prevent multiple redirects
+    if (
+      !isLoading &&
+      isAuthenticated &&
+      currentUser &&
+      !hasRedirected.current &&
+      !isRedirecting.current
+    ) {
+      console.log('🔍 Current User:', currentUser);
+      console.log('🔍 User Role:', currentUser.role);
+
       const redirect = roleRedirects[currentUser.role] || '/login';
+      console.log('🔍 Redirecting to:', redirect);
+
+      // ✅ Mark as redirected
+      hasRedirected.current = true;
+      isRedirecting.current = true;
+
+      // ✅ Navigate
       navigate(redirect, { replace: true });
+
+      // ✅ Reset redirecting flag after navigation
+      setTimeout(() => {
+        isRedirecting.current = false;
+      }, 500);
     }
   }, [isLoading, isAuthenticated, currentUser, navigate]);
+
+  // ✅ Reset redirected when user logs out
+  useEffect(() => {
+    if (!currentUser) {
+      hasRedirected.current = false;
+      isRedirecting.current = false;
+    }
+  }, [currentUser]);
 
   // ─── Validations ──────────────────────────────────────────────────
 
@@ -104,7 +140,9 @@ export default function LoginPage() {
       const success = await login(email.trim(), password);
 
       if (success) {
-        // Redirect handled by useEffect
+        // ✅ Reset flag to allow redirect
+        hasRedirected.current = false;
+        isRedirecting.current = false;
       } else {
         setError('Invalid email or password. Please try again.');
       }
@@ -239,13 +277,32 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
           {/* ─── DEMO CREDENTIALS ──────────────────────────────────── */}
           <div className="mt-6 pt-5 border-t border-gray-100">
             <p className="text-xs text-gray-400 text-center mb-3">
-              🚀 Demo Credentials — Click to auto-fill (Password:{' '}
-              <strong>admin123</strong> for all)
+              🚀 Demo Credentials — Click to auto-fill
             </p>
             <div className="grid grid-cols-1 gap-1.5">
+              {/* Super Admin */}
+              <button
+                onClick={() => {
+                  setEmail('superadmin@osm.com');
+                  setPassword('Super@123');
+                  setFieldErrors({});
+                  setError('');
+                }}
+                className="text-xs text-gray-500 hover:text-gray-900 transition-colors cursor-pointer text-left px-3 py-1.5 rounded-md hover:bg-gray-50 whitespace-nowrap flex items-center justify-between"
+              >
+                <span>
+                  <span className="font-medium text-gray-700">
+                    ⭐ Super Admin:
+                  </span>{' '}
+                  superadmin@osm.com
+                </span>
+                <span className="text-gray-400">Super@123</span>
+              </button>
+
               {/* Admin */}
               <button
                 onClick={() => {

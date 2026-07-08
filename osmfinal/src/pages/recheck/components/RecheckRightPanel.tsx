@@ -37,6 +37,8 @@ interface RecheckRightPanelProps {
   questionPaperUrl: string | null;
   modelAnswerUrl: string | null;
   saveIndicatorText?: string;
+  minTimeRequired?: number; // ✅ Added
+  isTimeRequirementMet?: boolean; // ✅ Added
   saveIndicatorFresh?: boolean;
   onActiveMarkChange: (id: string) => void;
   onQuestionPageChange: (page: number) => void;
@@ -75,6 +77,8 @@ export default function RecheckRightPanel({
   modelAnswerUrl,
   saveIndicatorText = 'Auto-saves every 30s',
   saveIndicatorFresh = false,
+  minTimeRequired = 0, // ✅ Default
+  isTimeRequirementMet = true, // ✅ Default
   onActiveMarkChange,
   onQuestionPageChange,
   onRound2Update,
@@ -213,6 +217,29 @@ export default function RecheckRightPanel({
           {saveIndicatorText}
         </span>
       </div>
+
+      {/* ─── ✅ MINIMUM TIME INDICATOR ─── */}
+      {minTimeRequired > 0 && (
+        <div
+          className={`shrink-0 px-3 py-1.5 text-center text-[10px] font-medium border-b ${
+            isTimeRequirementMet
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+          }`}
+        >
+          {isTimeRequirementMet ? (
+            <span className="flex items-center justify-center gap-1.5">
+              <i className="ri-check-line text-xs"></i>
+              Minimum time requirement met
+            </span>
+          ) : (
+            <span className="flex items-center justify-center gap-1.5">
+              <i className="ri-timer-line text-xs"></i>
+              Minimum {minTimeRequired} minutes required
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ─── READ ONLY BANNER ─── */}
       {readOnly && (

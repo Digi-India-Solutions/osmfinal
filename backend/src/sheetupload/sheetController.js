@@ -1,4 +1,3 @@
-// src/sheets/sheet-controller.js
 import pool from '../pool.js';
 import {
   uploadImageToCloudinary,
@@ -8,195 +7,6 @@ import fs from 'fs';
 import path from 'path';
 
 // ─── UPLOAD SHEETS ──────────────────────────────────────────────
-
-// export const uploadSheets = async (req, res) => {
-//   try {
-//     const { examId } = req.params;
-//     const userId = req.user.id;
-
-//     if (!req.files || req.files.length === 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'No files uploaded',
-//       });
-//     }
-
-//     // ─── BARCODE VALIDATION FUNCTION ──────────────────────────
-//     const isValidBarcode = (barcode) => {
-//       // Pattern 1: BAR001, BAR002, etc.
-//       const pattern1 = /^BAR\d{3}$/i;
-
-//       // Pattern 2: STU001, STU002, etc.
-//       const pattern2 = /^STU\d{3}$/i;
-
-//       // Pattern 3: Just numbers (001, 002, etc.)
-//       const pattern3 = /^\d{3}$/;
-
-//       // Pattern 4: Any alphanumeric with 3+ digits (custom)
-//       const pattern4 = /^[A-Z]{3}\d{3}$/i;
-
-//       return (
-//         pattern1.test(barcode) ||
-//         pattern2.test(barcode) ||
-//         pattern3.test(barcode) ||
-//         pattern4.test(barcode)
-//       );
-//     };
-
-//     const uploadedSheets = [];
-//     let linkedCount = 0;
-//     let unlinkedCount = 0;
-//     const duplicateSheets = [];
-//     const invalidFiles = []; // Track invalid files
-
-//     for (const file of req.files) {
-//       // ─── EXTRACT BARCODE FROM FILENAME ──────────────────
-//       const fileName = path.parse(file.originalname).name;
-//       const barcode = fileName.trim().toUpperCase();
-
-//       // ─── VALIDATION 1: CHECK IF VALID BARCODE FORMAT ────
-//       if (!isValidBarcode(barcode)) {
-//         invalidFiles.push({
-//           filename: file.originalname,
-//           barcode: barcode,
-//           message:
-//             'Invalid barcode format. Expected: BAR001, STU001, or 001 format',
-//         });
-//         continue; // Skip this file
-//       }
-
-//       // ─── VALIDATION 2: BARCODE SHOULD NOT BE EMPTY ──────
-//       if (!barcode) {
-//         invalidFiles.push({
-//           filename: file.originalname,
-//           barcode: barcode,
-//           message: 'Empty barcode',
-//         });
-//         continue;
-//       }
-
-//       // ─── VALIDATION 3: CHECK DUPLICATE IN CURRENT UPLOAD ──
-//       const existingInCurrentUpload = uploadedSheets.find(
-//         (s) => s.barcode === barcode,
-//       );
-//       if (existingInCurrentUpload) {
-//         duplicateSheets.push({
-//           barcode,
-//           filename: file.originalname,
-//           message: 'Duplicate barcode in current upload',
-//         });
-//         continue;
-//       }
-
-//       // ─── VALIDATION 4: CHECK DUPLICATE IN DATABASE ──────
-//       const existingSheet = await pool.query(
-//         `SELECT id, barcode, file_name FROM sheets WHERE exam_id = $1 AND barcode = $2`,
-//         [examId, barcode],
-//       );
-
-//       if (existingSheet.rows.length > 0) {
-//         duplicateSheets.push({
-//           barcode,
-//           filename: file.originalname,
-//           existingFile: existingSheet.rows[0].file_name,
-//           message: 'Sheet with this barcode already uploaded for this exam',
-//         });
-//         continue;
-//       }
-
-//       // ─── UPLOAD TO CLOUDINARY ────────────────────────────
-//       const result = await uploadImageToCloudinary(file.path);
-
-//       // ─── FIND STUDENT BY BARCODE ──────────────────────────
-//       const studentResult = await pool.query(
-//         `SELECT id, roll_no, student_name, subject FROM student_records WHERE barcode = $1`,
-//         [barcode],
-//       );
-
-//       const student = studentResult.rows[0];
-
-//       // ─── INSERT SHEET ──────────────────────────────────────
-//       const sheetResult = await pool.query(
-//         `INSERT INTO sheets (
-//           exam_id, student_id, roll_no, student_name, barcode,
-//           file_name, file_url, file_size, mime_type, status, uploaded_by
-//         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-//         RETURNING *`,
-//         [
-//           examId,
-//           student?.id || null,
-//           student?.roll_no || null,
-//           student?.student_name || null,
-//           barcode,
-//           file.originalname,
-//           result.url,
-//           file.size,
-//           file.mimetype,
-//           student ? 'linked' : 'unlinked',
-//           userId,
-//         ],
-//       );
-
-//       const sheet = sheetResult.rows[0];
-
-//       if (student) {
-//         linkedCount++;
-//       } else {
-//         unlinkedCount++;
-//       }
-
-//       uploadedSheets.push({
-//         ...sheet,
-//         matched: !!student,
-//         student: student || null,
-//       });
-//     }
-
-//     // ─── RESPONSE WITH VALIDATION RESULTS ────────────────────
-//     const responseData = {
-//       sheets: uploadedSheets,
-//       total: uploadedSheets.length,
-//       linked: linkedCount,
-//       unlinked: unlinkedCount,
-//     };
-
-//     // Add validation info if any issues
-//     if (invalidFiles.length > 0) {
-//       responseData.invalidFiles = invalidFiles;
-//       responseData.invalidCount = invalidFiles.length;
-//     }
-
-//     if (duplicateSheets.length > 0) {
-//       responseData.duplicates = duplicateSheets;
-//       responseData.duplicateCount = duplicateSheets.length;
-//     }
-
-//     // Build message
-//     let message = `${uploadedSheets.length} sheets uploaded successfully`;
-//     if (invalidFiles.length > 0) {
-//       message += `, ${invalidFiles.length} files skipped (invalid barcode format)`;
-//     }
-//     if (duplicateSheets.length > 0) {
-//       message += `, ${duplicateSheets.length} files skipped (duplicates)`;
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       message: message,
-//       data: responseData,
-//     });
-//   } catch (error) {
-//     console.error('uploadSheets error:', error);
-//     return res.status(500).json({
-//       success: false,
-//       message: 'Failed to upload sheets',
-//       error: error.message,
-//     });
-//   }
-// };
-
-
-
 
 export const uploadSheets = async (req, res) => {
   try {
@@ -270,7 +80,7 @@ export const uploadSheets = async (req, res) => {
           student?.student_name || null,
           barcode,
           file.originalname,
-          fileUrl, // ✅ Local URL
+          fileUrl,
           file.size,
           file.mimetype,
           student ? 'linked' : 'unlinked',
@@ -343,7 +153,6 @@ export const autoLinkSheets = async (req, res) => {
       await client.query('BEGIN');
 
       for (const sheetId of sheetIds) {
-        // Get sheet by ID
         const sheetResult = await client.query(
           `SELECT id, barcode FROM sheets WHERE id = $1 AND exam_id = $2`,
           [sheetId, examId],
@@ -353,7 +162,6 @@ export const autoLinkSheets = async (req, res) => {
 
         const sheet = sheetResult.rows[0];
 
-        // Find student by barcode
         const studentResult = await client.query(
           `SELECT id, roll_no, student_name, subject 
            FROM student_records 
@@ -373,7 +181,6 @@ export const autoLinkSheets = async (req, res) => {
 
         const student = studentResult.rows[0];
 
-        // Update sheet with student info
         await client.query(
           `UPDATE sheets 
            SET student_id = $1, 
@@ -385,7 +192,6 @@ export const autoLinkSheets = async (req, res) => {
           [student.id, student.roll_no, student.student_name, sheetId],
         );
 
-        // Also update student_records sheet_status
         await client.query(
           `UPDATE student_records 
            SET sheet_status = 'uploaded' 
@@ -431,6 +237,7 @@ export const autoLinkSheets = async (req, res) => {
 };
 
 // ─── GET SHEETS BY EXAM ─────────────────────────────────────────
+// ✅ UPDATED: Added escalation columns
 
 export const getSheetsByExam = async (req, res) => {
   try {
@@ -442,6 +249,8 @@ export const getSheetsByExam = async (req, res) => {
         s.id, s.exam_id, s.student_id, s.roll_no, s.student_name,
         s.barcode, s.file_name, s.file_url, s.file_size, s.mime_type,
         s.status, s.marks, s.created_at, s.updated_at,
+        s.escalate_reason, s.escalate_type, s.escalate_remarks,
+        s.escalated_by, s.escalated_at,
         sr.subject
       FROM sheets s
       LEFT JOIN student_records sr ON s.student_id = sr.id
@@ -458,14 +267,17 @@ export const getSheetsByExam = async (req, res) => {
 
     const result = await pool.query(query, params);
 
-    // Get stats
+    // ✅ Updated stats with escalated
     const statsResult = await pool.query(
       `SELECT 
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE status = 'uploaded') AS uploaded,
         COUNT(*) FILTER (WHERE status = 'linked') AS linked,
+        COUNT(*) FILTER (WHERE status = 'checking') AS checking,
         COUNT(*) FILTER (WHERE status = 'checked') AS checked,
-        COUNT(*) FILTER (WHERE status = 'recheck') AS recheck
+        COUNT(*) FILTER (WHERE status = 'recheck') AS recheck,
+        COUNT(*) FILTER (WHERE status = 'rechecked') AS rechecked,
+        COUNT(*) FILTER (WHERE status = 'escalated') AS escalated
       FROM sheets WHERE exam_id = $1`,
       [examId],
     );
@@ -490,6 +302,7 @@ export const getSheetsByExam = async (req, res) => {
 };
 
 // ─── GET SHEET BY ID ────────────────────────────────────────────
+// ✅ UPDATED: Added escalation columns
 
 export const getSheetById = async (req, res) => {
   try {
@@ -498,9 +311,11 @@ export const getSheetById = async (req, res) => {
     const result = await pool.query(
       `SELECT 
         s.*,
-        sr.subject
+        sr.subject,
+        u.name AS escalated_by_name
       FROM sheets s
       LEFT JOIN student_records sr ON s.student_id = sr.id
+      LEFT JOIN users u ON s.escalated_by = u.id
       WHERE s.id = $1`,
       [id],
     );
@@ -528,20 +343,64 @@ export const getSheetById = async (req, res) => {
 };
 
 // ─── UPDATE SHEET MARKS ─────────────────────────────────────────
+// ✅ UPDATED: Added escalation fields
 
 export const updateSheetMarks = async (req, res) => {
   try {
     const { id } = req.params;
-    const { marks, status } = req.body;
+    const { marks, status, escalate_reason, escalate_type, escalate_remarks } =
+      req.body;
+
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (marks !== undefined && marks !== null) {
+      fields.push(`marks = $${paramCount}`);
+      values.push(marks);
+      paramCount++;
+    }
+
+    if (status) {
+      fields.push(`status = $${paramCount}`);
+      values.push(status);
+      paramCount++;
+    }
+
+    if (escalate_reason !== undefined) {
+      fields.push(`escalate_reason = $${paramCount}`);
+      values.push(escalate_reason);
+      paramCount++;
+    }
+
+    if (escalate_type !== undefined) {
+      fields.push(`escalate_type = $${paramCount}`);
+      values.push(escalate_type);
+      paramCount++;
+    }
+
+    if (escalate_remarks !== undefined) {
+      fields.push(`escalate_remarks = $${paramCount}`);
+      values.push(escalate_remarks);
+      paramCount++;
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fields to update',
+      });
+    }
+
+    fields.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(id);
 
     const result = await pool.query(
       `UPDATE sheets 
-       SET marks = COALESCE($1, marks),
-           status = COALESCE($2, status),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3
+       SET ${fields.join(', ')}
+       WHERE id = $${paramCount}
        RETURNING *`,
-      [marks, status, id],
+      values,
     );
 
     if (result.rows.length === 0) {
@@ -572,7 +431,6 @@ export const deleteSheet = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get sheet to delete from Cloudinary
     const sheetResult = await pool.query(
       `SELECT file_url FROM sheets WHERE id = $1`,
       [id],
@@ -585,7 +443,6 @@ export const deleteSheet = async (req, res) => {
       });
     }
 
-    // Delete from Cloudinary
     if (sheetResult.rows[0].file_url) {
       try {
         const publicId = sheetResult.rows[0].file_url
@@ -615,6 +472,7 @@ export const deleteSheet = async (req, res) => {
 };
 
 // ─── GET SHEET STATS ────────────────────────────────────────────
+// ✅ UPDATED: Added escalated in stats
 
 export const getSheetStats = async (req, res) => {
   try {
@@ -628,6 +486,8 @@ export const getSheetStats = async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'checking') AS checking,
         COUNT(*) FILTER (WHERE status = 'checked') AS checked,
         COUNT(*) FILTER (WHERE status = 'recheck') AS recheck,
+        COUNT(*) FILTER (WHERE status = 'rechecked') AS rechecked,
+        COUNT(*) FILTER (WHERE status = 'escalated') AS escalated,
         SUM(marks) AS total_marks,
         AVG(marks) AS average_marks
       FROM sheets 
@@ -650,8 +510,6 @@ export const getSheetStats = async (req, res) => {
   }
 };
 
-// src/sheets/sheet-controller.js (Add these functions)
-
 // ─── GET UNLINKED SHEETS ───────────────────────────────────────
 
 export const getUnlinkedSheets = async (req, res) => {
@@ -667,20 +525,20 @@ export const getUnlinkedSheets = async (req, res) => {
         AND (s.status = 'uploaded' OR s.status = 'unlinked')
         AND s.student_id IS NULL
       ORDER BY s.created_at ASC`,
-      [examId]
+      [examId],
     );
 
     return res.status(200).json({
       success: true,
       message: 'Unlinked sheets retrieved successfully',
-      data: result.rows
+      data: result.rows,
     });
   } catch (error) {
     console.error('getUnlinkedSheets error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to get unlinked sheets',
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -700,20 +558,20 @@ export const getUnlinkedStudents = async (req, res) => {
         AND sr.sheet_status != 'linked'
         AND s.id IS NULL
       ORDER BY sr.roll_no ASC`,
-      [examId]
+      [examId],
     );
 
     return res.status(200).json({
       success: true,
       message: 'Unlinked students retrieved successfully',
-      data: result.rows
+      data: result.rows,
     });
   } catch (error) {
     console.error('getUnlinkedStudents error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to get unlinked students',
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -728,7 +586,7 @@ export const manualLinkStudent = async (req, res) => {
     if (!studentId || !sheetId) {
       return res.status(400).json({
         success: false,
-        message: 'studentId and sheetId are required'
+        message: 'studentId and sheetId are required',
       });
     }
 
@@ -737,37 +595,34 @@ export const manualLinkStudent = async (req, res) => {
     try {
       await client.query('BEGIN');
 
-      // 1. Get student details
       const studentResult = await client.query(
         `SELECT roll_no, student_name, barcode FROM student_records WHERE id = $1`,
-        [studentId]
+        [studentId],
       );
 
       if (studentResult.rows.length === 0) {
         return res.status(404).json({
           success: false,
-          message: 'Student not found'
+          message: 'Student not found',
         });
       }
 
       const student = studentResult.rows[0];
 
-      // 2. Get sheet details
       const sheetResult = await client.query(
         `SELECT id, barcode FROM sheets WHERE id = $1 AND exam_id = $2 AND student_id IS NULL`,
-        [sheetId, examId]
+        [sheetId, examId],
       );
 
       if (sheetResult.rows.length === 0) {
         return res.status(404).json({
           success: false,
-          message: 'Sheet not found or already linked'
+          message: 'Sheet not found or already linked',
         });
       }
 
       const sheet = sheetResult.rows[0];
 
-      // 3. Update sheet with student info
       await client.query(
         `UPDATE sheets 
          SET student_id = $1, 
@@ -777,16 +632,21 @@ export const manualLinkStudent = async (req, res) => {
              status = 'linked',
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $5`,
-        [studentId, student.roll_no, student.student_name, student.barcode, sheetId]
+        [
+          studentId,
+          student.roll_no,
+          student.student_name,
+          student.barcode,
+          sheetId,
+        ],
       );
 
-      // 4. Update student_records sheet_status
       await client.query(
         `UPDATE student_records 
          SET sheet_status = 'uploaded',
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
-        [studentId]
+        [studentId],
       );
 
       await client.query('COMMIT');
@@ -799,8 +659,8 @@ export const manualLinkStudent = async (req, res) => {
           sheetId,
           roll_no: student.roll_no,
           student_name: student.student_name,
-          barcode: student.barcode
-        }
+          barcode: student.barcode,
+        },
       });
     } catch (error) {
       await client.query('ROLLBACK');
@@ -813,7 +673,7 @@ export const manualLinkStudent = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to link student',
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -842,14 +702,16 @@ export const getStudentLinkingStatus = async (req, res) => {
       FROM student_records sr
       LEFT JOIN sheets s ON sr.barcode = s.barcode AND s.exam_id = $1
       ORDER BY sr.roll_no ASC`,
-      [examId]
+      [examId],
     );
 
     const stats = {
       total: result.rows.length,
-      uploaded: result.rows.filter(r => r.sheet_status === 'uploaded').length,
-      linked: result.rows.filter(r => r.is_linked).length,
-      pending: result.rows.filter(r => r.sheet_status !== 'uploaded' && !r.is_linked).length
+      uploaded: result.rows.filter((r) => r.sheet_status === 'uploaded').length,
+      linked: result.rows.filter((r) => r.is_linked).length,
+      pending: result.rows.filter(
+        (r) => r.sheet_status !== 'uploaded' && !r.is_linked,
+      ).length,
     };
 
     return res.status(200).json({
@@ -857,15 +719,61 @@ export const getStudentLinkingStatus = async (req, res) => {
       message: 'Student linking status retrieved successfully',
       data: {
         students: result.rows,
-        stats
-      }
+        stats,
+      },
     });
   } catch (error) {
     console.error('getStudentLinkingStatus error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to get student linking status',
-      error: error.message
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET ESCALATED SHEETS ──────────────────────────────────────
+// ✅ NEW: Get all escalated sheets
+
+export const getEscalatedSheets = async (req, res) => {
+  try {
+    const { examId } = req.params;
+
+    let query = `
+      SELECT 
+        s.id, s.student_name, s.roll_no, s.barcode,
+        s.status, s.marks,
+        s.escalate_reason, s.escalate_type, s.escalate_remarks,
+        s.escalated_by, s.escalated_at,
+        e.name AS exam_name,
+        u.name AS escalated_by_name
+      FROM sheets s
+      JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN users u ON s.escalated_by = u.id
+      WHERE s.status = 'escalated'
+    `;
+    const params = [];
+
+    if (examId) {
+      query += ` AND s.exam_id = $1`;
+      params.push(examId);
+    }
+
+    query += ` ORDER BY s.escalated_at DESC`;
+
+    const result = await pool.query(query, params);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Escalated sheets retrieved successfully',
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error('getEscalatedSheets error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get escalated sheets',
+      error: error.message,
     });
   }
 };

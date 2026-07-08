@@ -18,7 +18,7 @@ export default function ResultsView() {
   const [isLoading, setIsLoading] = useState(true);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  // ✅ Fetch exams and filter by teacher's subject
+  // ✅ Fetch exams and filter by teacher's subject (exclude archived)
   useEffect(() => {
     const fetchExams = async () => {
       setIsLoading(true);
@@ -28,16 +28,26 @@ export default function ResultsView() {
         console.log('📋 Current user subject:', subject);
 
         if (response.success) {
-          // ✅ Filter by teacher's subject only
-          const trimmedSubject = subject.trim();
+          // ✅ Step 1: Exclude archived exams
+          const activeExams = response.data.filter(
+            (e) => e.status !== 'archived',
+          );
+          console.log('📋 Active exams (archived removed):', activeExams);
 
-          const filteredExams = response.data.filter((e) => {
+          // ✅ Step 2: Filter by teacher's subject
+          const trimmedSubject = subject.trim();
+          const filteredExams = activeExams.filter((e) => {
             const examSubject = e.subject?.trim() || '';
             return examSubject.toLowerCase() === trimmedSubject.toLowerCase();
           });
 
           console.log('📋 Filtered exams (by subject):', filteredExams);
           setExams(filteredExams);
+
+          // ✅ If no exams found, show message
+          if (filteredExams.length === 0) {
+            console.log('⚠️ No exams found for subject:', subject);
+          }
         }
       } catch (error) {
         console.error('Fetch exams error:', error);
@@ -180,7 +190,7 @@ export default function ResultsView() {
         </select>
         {exams.length === 0 && (
           <p className="text-xs text-amber-600 mt-2">
-            No exams found for {subject}.
+            No active exams found for {subject}.
           </p>
         )}
       </div>
@@ -343,7 +353,9 @@ export default function ResultsView() {
           <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
             <i className="ri-folder-open-line text-gray-400 text-2xl"></i>
           </div>
-          <p className="text-sm text-gray-500">No exams found for {subject}.</p>
+          <p className="text-sm text-gray-500">
+            No active exams found for {subject}.
+          </p>
         </div>
       )}
     </div>

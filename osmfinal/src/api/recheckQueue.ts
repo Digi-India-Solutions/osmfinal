@@ -8,7 +8,7 @@ export interface RecheckRequest {
   exam_id: number;
   reason: string;
   assign_to: string;
-  status: 'pending' | 'assigned' | 'completed' | 'rejected';
+  status: 'pending' | 'assigned' | 'completed' | 'rejected' | 'escalated';
   requested_by: string;
   resolved_by: string | null;
   resolved_at: string | null;
@@ -28,6 +28,12 @@ export interface RecheckRequest {
   marks_data?: Record<string, number>;
   finalMarksRule?: string;
   completed_at?: string;
+  // ✅ Escalation fields
+  escalate_reason?: string;
+  escalate_type?: string;
+  escalate_remarks?: string;
+  escalated_by?: string;
+  escalated_at?: string;
 }
 
 export interface RecheckMarkingData {
@@ -55,6 +61,7 @@ export interface RecheckMarkingData {
     id: number;
     name: string;
     subject: string;
+    spentTime?: number;
   };
   markScheme: Record<string, { maxMarks: number; guidelines: string }>;
   previousMarks: Record<string, number>;
@@ -229,6 +236,31 @@ class RecheckQueueService {
         success: false,
         message:
           error.response?.data?.message || 'Failed to update recheck request',
+      };
+    }
+  }
+
+  // ✅ ESCALATE RECHECK REQUEST
+  async escalateRecheckRequest(
+    id: number,
+    data: {
+      reason: string;
+      escalateType: string;
+      remarks?: string;
+    },
+  ): Promise<any> {
+    try {
+      const response = await api.patch(
+        `/api/v1/recheck-queue/requests/${id}/escalate`,
+        data,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Escalate recheck request error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to escalate recheck request',
       };
     }
   }

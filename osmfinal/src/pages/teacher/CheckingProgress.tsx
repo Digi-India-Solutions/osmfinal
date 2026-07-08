@@ -37,6 +37,8 @@ export default function CheckingProgress() {
   );
 
   // ✅ Fetch exams using teacherApi (which now uses examApi internally)
+  // src/pages/teacher/CheckingProgress.tsx
+
   useEffect(() => {
     const fetchExams = async () => {
       setIsLoading(true);
@@ -46,27 +48,28 @@ export default function CheckingProgress() {
         console.log('📋 Current user subject:', subject);
 
         if (response.success) {
-          // ✅ FIX: Trim and compare case-insensitive
-          const trimmedSubject = subject.trim();
-          console.log('📋 Trimmed subject:', trimmedSubject);
+          // ✅ Step 1: Exclude archived exams
+          const activeExams = response.data.filter(
+            (e) => e.status !== 'archived',
+          );
+          console.log('📋 Active exams (archived removed):', activeExams);
 
-          const filtered = response.data.filter((e) => {
+          // ✅ Step 2: Filter by subject
+          const trimmedSubject = subject.trim();
+          const filtered = activeExams.filter((e) => {
             const examSubject = e.subject?.trim() || '';
-            const isMatch =
-              examSubject.toLowerCase() === trimmedSubject.toLowerCase();
-            console.log(
-              `📋 Exam: ${e.name}, Subject: ${examSubject}, Match: ${isMatch}`,
-            );
-            return isMatch;
+            return examSubject.toLowerCase() === trimmedSubject.toLowerCase();
           });
 
           console.log('📋 Filtered exams:', filtered);
           setExams(filtered);
 
-          // ✅ If no exams found, show all exams as fallback
-          if (filtered.length === 0) {
-            console.log('⚠️ No exams matched, showing all exams as fallback');
-            setExams(response.data);
+          // ✅ Step 3: Fallback - show all active exams if no match
+          if (filtered.length === 0 && activeExams.length > 0) {
+            console.log(
+              '⚠️ No exams matched subject, showing all active exams',
+            );
+            setExams(activeExams);
           }
         }
       } catch (error) {

@@ -55,15 +55,26 @@ export default function CheckerCompleted() {
     fetchCompletedSheets();
   }, [fetchCompletedSheets]);
 
+  // ─── CALCULATE STATS ─────────────────────────────────────────
+
   const totalCompleted = sheets.length;
+
+  // ✅ Fix: Parse marks as float, handle null/undefined
   const averageMarks =
     totalCompleted > 0
       ? (
-          sheets.reduce((sum, s) => sum + (s.marks || 0), 0) / totalCompleted
+          sheets.reduce((sum, s) => {
+            const marks = parseFloat((s.marks as string) || '0');
+            return sum + (isNaN(marks) ? 0 : marks);
+          }, 0) / totalCompleted
         ).toFixed(1)
       : '0.0';
 
+  // ─── LOADING ──────────────────────────────────────────────────
+
   if (loading || sheetsLoading) return <LoadingSpinner fullPage />;
+
+  // ─── RENDER ──────────────────────────────────────────────────
 
   return (
     <div>
@@ -162,41 +173,49 @@ export default function CheckerCompleted() {
                 </tr>
               </thead>
               <tbody>
-                {sheets.map((sheet) => (
-                  <tr
-                    key={sheet.id}
-                    className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
-                  >
-                    <td className="px-5 py-3.5 font-medium text-gray-900">
-                      #{sheet.id}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-700">
-                      {sheet.exam_name || 'Unknown'}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-900 font-medium">
-                      {sheet.student_name || 'Unknown'}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500">
-                      {sheet.roll_no || '—'}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-900 font-semibold">
-                      {sheet.marks ?? '-'}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <StatusBadge status={sheet.status} />
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <button
-                        onClick={() =>
-                          navigate(`/checker/marking/${sheet.id}?mode=readonly`)
-                        }
-                        className="text-xs font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {sheets.map((sheet) => {
+                  // ✅ Parse marks as float for display
+                  const marks = parseFloat((sheet.marks as string) || '0');
+                  const displayMarks = isNaN(marks) ? '-' : marks.toFixed(2);
+
+                  return (
+                    <tr
+                      key={sheet.id}
+                      className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
+                    >
+                      <td className="px-5 py-3.5 font-medium text-gray-900">
+                        #{sheet.id}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-700">
+                        {sheet.exam_name || 'Unknown'}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-900 font-medium">
+                        {sheet.student_name || 'Unknown'}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500">
+                        {sheet.roll_no || '—'}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-900 font-semibold">
+                        {displayMarks}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <StatusBadge status={sheet.status} />
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <button
+                          onClick={() =>
+                            navigate(
+                              `/checker/marking/${sheet.id}?mode=readonly`,
+                            )
+                          }
+                          className="text-xs font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

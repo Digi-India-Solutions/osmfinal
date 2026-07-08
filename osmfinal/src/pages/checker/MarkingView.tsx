@@ -121,6 +121,7 @@ export default function MarkingView() {
 
   const [sheetData, setSheetData] = useState<any>(null);
   const [examData, setExamData] = useState<any>(null);
+  const [elapsed, setElapsed] = useState(0);
   const [markSchemeData, setMarkSchemeData] = useState<
     Record<string, { maxMarks: number; guidelines: string }>
   >({});
@@ -131,6 +132,11 @@ export default function MarkingView() {
     model_answer: null,
     question_paper: null,
   });
+
+  // ─── MINIMUM TIME STATE ──────────────────────────────────────
+
+  const [minTimeRequired, setMinTimeRequired] = useState(0);
+  const [isTimeRequirementMet, setIsTimeRequirementMet] = useState(true);
 
   // ─── BUILD MARKS FROM MARK SCHEME ────────────────────────────
 
@@ -166,7 +172,7 @@ export default function MarkingView() {
           setSheetData({
             ...data.sheet,
             file_url: toFullUrl(data.sheet?.file_url),
-            is_submitted: data.sheet?.is_submitted || false, // ✅ Add this
+            is_submitted: data.sheet?.is_submitted || false,
           });
           setExamData(data.exam);
           setMarkSchemeData(data.markScheme || {});
@@ -174,6 +180,11 @@ export default function MarkingView() {
             model_answer: toFullUrl(data.pdfs?.model_answer),
             question_paper: toFullUrl(data.pdfs?.question_paper),
           });
+
+          // ✅ Set minimum time requirement
+          const spentTime = data.exam?.spentTime || 0;
+          setMinTimeRequired(spentTime);
+          setIsTimeRequirementMet(spentTime === 0);
         }
       } catch (error) {
         console.error('Fetch sheet error:', error);
@@ -184,6 +195,16 @@ export default function MarkingView() {
 
     fetchData();
   }, [sheetIdNum]);
+
+  // ─── CHECK TIME REQUIREMENT ──────────────────────────────────
+
+  useEffect(() => {
+    if (minTimeRequired > 0) {
+      const requiredSeconds = minTimeRequired * 60;
+      const met = elapsed >= requiredSeconds;
+      setIsTimeRequirementMet(met);
+    }
+  }, [elapsed, minTimeRequired]);
 
   // ─── State ───
 
@@ -199,7 +220,6 @@ export default function MarkingView() {
     new Set(),
   );
   const [marks, setMarks] = useState<MarkEntry[]>([]);
-  const [elapsed, setElapsed] = useState(0);
 
   // ─── INITIALIZE MARKS FROM MARK SCHEME ──────────────────────
 
@@ -237,11 +257,9 @@ export default function MarkingView() {
   }, [stamps]);
 
   // ─── LOAD DRAFT OR SUBMITTED DATA ─────────────────────────────
-  // ✅ Single useEffect that handles both draft and submitted data
 
   useEffect(() => {
     const loadData = async () => {
-      // ✅ Only load if marks are initialized
       if (!sheetIdNum || marks.length === 0) {
         console.log('⏳ Skipping data load - marks not initialized:', {
           sheetIdNum,
@@ -261,12 +279,10 @@ export default function MarkingView() {
         let response;
 
         if (isReadOnly) {
-          // ✅ In readonly mode, get submitted data
           console.log('📥 Fetching submitted marks (readonly mode)...');
           response = await checkerApi.getSubmittedMarks(sheetIdNum);
           console.log('📥 Submitted marks response:', response);
         } else {
-          // ✅ In edit mode, get draft
           console.log('📥 Fetching draft (edit mode)...');
           response = await checkerApi.getDraft(sheetIdNum);
           console.log('📥 Draft response:', response);
@@ -276,7 +292,6 @@ export default function MarkingView() {
           const data = response.data;
           console.log('📊 Data loaded:', data);
 
-          // ✅ RESTORE MARKS
           if (data.marks_data && Object.keys(data.marks_data).length > 0) {
             console.log('📊 Marks data:', data.marks_data);
 
@@ -291,7 +306,6 @@ export default function MarkingView() {
             console.log('📊 Restored marks:', restoredMarks);
             setMarks(restoredMarks);
 
-            // Track which marks have been manually set
             Object.keys(data.marks_data).forEach((id) => {
               if (data.marks_data[id] !== undefined) {
                 manuallySetMarksRef.current.add(id);
@@ -300,18 +314,15 @@ export default function MarkingView() {
             console.log('✅ manuallySetMarksRef:', manuallySetMarksRef.current);
           }
 
-          // ✅ RESTORE STAMPS
           if (data.stamps_data && data.stamps_data.length > 0) {
             console.log('📌 Stamps data:', data.stamps_data);
             setStamps(data.stamps_data);
           }
 
-          // ✅ RESTORE ANNOTATIONS
           if (data.annotations_data && data.annotations_data.length > 0) {
             console.log('✏️ Annotations data:', data.annotations_data);
             setAnnotations(data.annotations_data);
 
-            // 🔥 FIX: Sync counter so new annotations don't collide with restored ones
             const maxId = Math.max(
               ...data.annotations_data.map((a: Annotation) => a.id),
               0,
@@ -333,7 +344,7 @@ export default function MarkingView() {
     };
 
     loadData();
-  }, [sheetIdNum, isReadOnly, marks.length]); // ✅ Runs when marks are initialized
+  }, [sheetIdNum, isReadOnly, marks.length]);
 
   const marksRef = useRef(marks);
   useEffect(() => {
@@ -572,12 +583,10 @@ export default function MarkingView() {
   }, [saveDraft]);
 
   // ─── AUTO-SAVE: 30-second interval + beforeunload + API sync ───
-  // ✅ FIXED: Check if already submitted before saving draft
   useEffect(() => {
     if (isReadOnly) return;
 
     const interval = setInterval(() => {
-      // ✅ Check if already submitted - using sheetData
       const isAlreadySubmitted = sheetData?.is_submitted || false;
       if (!isAlreadySubmitted) {
         saveDraftRef.current();
@@ -954,8 +963,24 @@ export default function MarkingView() {
     return incomplete;
   }, [marks]);
 
+  // ─── ✅ SUBMIT CLICK WITH TIME CHECK ──────────────
+
   const handleSubmitClick = useCallback(
     (type: 'submitContinue' | 'submitExit') => {
+      // ✅ Convert minutes to seconds
+      const requiredSeconds = minTimeRequired * 60;
+
+      // ✅ Check minimum time requirement
+      if (minTimeRequired > 0 && elapsed < requiredSeconds) {
+        const remaining = requiredSeconds - elapsed;
+        const remainingMinutes = Math.ceil(remaining / 60);
+        setToastMessage(
+          `⚠️ Please spend at least ${minTimeRequired} minutes. ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''} remaining.`,
+        );
+        setTimeout(() => setToastMessage(null), 5000);
+        return;
+      }
+
       const incomplete = checkIncomplete();
       if (incomplete.length > 0) {
         setIncompleteWarning({ questions: incomplete, pendingType: type });
@@ -963,8 +988,29 @@ export default function MarkingView() {
       }
       handleSubmitMarks(type === 'submitContinue' ? 'continue' : 'exit');
     },
-    [checkIncomplete, handleSubmitMarks],
+    [checkIncomplete, handleSubmitMarks, minTimeRequired, elapsed],
   );
+
+  // ─── ✅ ESCALATE CLICK WITH TIME CHECK ─────────────
+
+  const handleEscalateClick = useCallback(() => {
+    // ✅ Convert minutes to seconds
+    const requiredSeconds = minTimeRequired * 60;
+
+    // ✅ Check minimum time requirement before escalating
+    if (minTimeRequired > 0 && elapsed < requiredSeconds) {
+      const remaining = requiredSeconds - elapsed;
+      const remainingMinutes = Math.ceil(remaining / 60);
+      setToastMessage(
+        `⚠️ Please spend at least ${minTimeRequired} minutes before escalating. ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''} remaining.`,
+      );
+      setTimeout(() => setToastMessage(null), 5000);
+      return;
+    }
+    setModalType('escalate');
+  }, [minTimeRequired, elapsed]);
+
+  // ─── INCOMPLETE SUBMISSION HANDLERS ──────────────────────────
 
   const handleIncompleteGoBack = useCallback(() => {
     setIncompleteWarning(null);
@@ -978,6 +1024,8 @@ export default function MarkingView() {
     }
   }, [incompleteWarning, handleSubmitMarks]);
 
+  // ─── CONFIRM MODAL HANDLER ──────────────────────────────────
+
   const handleModalConfirm = useCallback(() => {
     setModalType(null);
     localStorage.removeItem(`osm_draft_sheet_${sheetIdNum}`);
@@ -986,11 +1034,45 @@ export default function MarkingView() {
     }
   }, [modalType, navigate, sheetIdNum]);
 
-  const handleEscalateConfirm = useCallback(() => {
-    setModalType(null);
-    setToastMessage('Sheet escalated successfully');
-    setTimeout(() => setToastMessage(null), 2500);
-  }, []);
+  // ─── ESCALATE CONFIRM HANDLER ───────────────────────────────
+
+  const handleEscalateConfirm = useCallback(
+    async (data: { reason: string; escalateType: string; remarks: string }) => {
+      if (!sheetIdNum) {
+        setToastMessage('Sheet ID not found');
+        setTimeout(() => setToastMessage(null), 3000);
+        return;
+      }
+
+      try {
+        console.log('📤 Escalating sheet:', sheetIdNum, data);
+
+        const response = await checkerApi.escalateSheet(sheetIdNum, {
+          reason: data.reason,
+          escalateType: data.escalateType,
+          remarks: data.remarks,
+        });
+
+        if (response.success) {
+          setModalType(null);
+          setToastMessage('✅ Sheet escalated successfully');
+          setTimeout(() => setToastMessage(null), 2500);
+
+          setTimeout(() => {
+            navigate('/checker/queue');
+          }, 1500);
+        } else {
+          setToastMessage(response.message || 'Failed to escalate sheet');
+          setTimeout(() => setToastMessage(null), 3000);
+        }
+      } catch (error: any) {
+        console.error('❌ Escalate error:', error);
+        setToastMessage(error.message || 'Failed to escalate sheet');
+        setTimeout(() => setToastMessage(null), 3000);
+      }
+    },
+    [sheetIdNum, navigate],
+  );
 
   const handleRightTabChange = useCallback((tab: RightTab) => {
     setRightTab(tab);
@@ -1023,8 +1105,6 @@ export default function MarkingView() {
   const examName = examData
     ? `${examData.name} — ${examData.subject}`
     : 'Loading...';
-  const studentName = sheetData?.student_name || 'Unknown';
-  const studentRoll = sheetData?.roll_no || '—';
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-[#0f172a]">
@@ -1036,6 +1116,27 @@ export default function MarkingView() {
             Page <span className="text-white font-medium">{currentPage}</span>{' '}
             of {TOTAL_PAGES}
           </span>
+          {/* ✅ Show minimum time requirement in top bar */}
+          {minTimeRequired > 0 && (
+            <span
+              className={`text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
+                elapsed >= minTimeRequired * 60
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+              }`}
+            >
+              <i
+                className={`${
+                  elapsed >= minTimeRequired * 60
+                    ? 'ri-check-line'
+                    : 'ri-timer-line'
+                } text-xs`}
+              ></i>
+              {elapsed >= minTimeRequired * 60
+                ? `✅ Min time ${minTimeRequired}m met`
+                : `⏱️ ${Math.floor(elapsed / 60)}/${minTimeRequired}m required`}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-1.5">
@@ -1046,14 +1147,6 @@ export default function MarkingView() {
               {formatTime(elapsed)}
             </span>
           </div>
-          <span className="text-slate-400">
-            Student:{' '}
-            <span className="text-white font-semibold">{studentName}</span>
-          </span>
-          <span className="text-slate-400">
-            Roll:{' '}
-            <span className="text-white font-semibold">{studentRoll}</span>
-          </span>
         </div>
       </header>
 
@@ -1242,9 +1335,11 @@ export default function MarkingView() {
             onRequestAddMark={handleRequestAddMark}
             onClearStampValue={handleClearStampValue}
             onRightTabChange={handleRightTabChange}
-            onEscalate={() => setModalType('escalate')}
+            onEscalate={handleEscalateClick}
             onSubmitContinue={() => handleSubmitClick('submitContinue')}
             onSubmitExit={() => handleSubmitClick('submitExit')}
+            minTimeRequired={minTimeRequired}
+            isTimeRequirementMet={isTimeRequirementMet}
           />
         </div>
       </div>
