@@ -18,19 +18,36 @@ export default function ResultsView() {
   const [isLoading, setIsLoading] = useState(true);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  // ✅ Fetch ALL exams (no filter)
+  // ✅ Fetch exams and filter by teacher's subject (exclude archived)
   useEffect(() => {
     const fetchExams = async () => {
       setIsLoading(true);
       try {
-        // ✅ Remove filter - get all exams
         const response = await teacherApi.getExams();
         console.log('📋 All exams from API:', response.data);
+        console.log('📋 Current user subject:', subject);
 
         if (response.success) {
-          // ✅ Show ALL exams without filtering by subject
-          setExams(response.data);
-          console.log('📋 Exams set:', response.data);
+          // ✅ Step 1: Exclude archived exams
+          const activeExams = response.data.filter(
+            (e) => e.status !== 'archived',
+          );
+          console.log('📋 Active exams (archived removed):', activeExams);
+
+          // ✅ Step 2: Filter by teacher's subject
+          const trimmedSubject = subject.trim();
+          const filteredExams = activeExams.filter((e) => {
+            const examSubject = e.subject?.trim() || '';
+            return examSubject.toLowerCase() === trimmedSubject.toLowerCase();
+          });
+
+          console.log('📋 Filtered exams (by subject):', filteredExams);
+          setExams(filteredExams);
+
+          // ✅ If no exams found, show message
+          if (filteredExams.length === 0) {
+            console.log('⚠️ No exams found for subject:', subject);
+          }
         }
       } catch (error) {
         console.error('Fetch exams error:', error);
@@ -41,12 +58,7 @@ export default function ResultsView() {
       }
     };
     fetchExams();
-  }, []);
-
-  // ✅ Filter completed exams from all exams
-  const completedExams = useMemo(() => {
-    return exams.filter((e) => e.status === 'completed');
-  }, [exams]);
+  }, [subject]);
 
   // Fetch results when exam selected
   useEffect(() => {
@@ -58,9 +70,15 @@ export default function ResultsView() {
 
       setIsLoading(true);
       try {
+        console.log('📋 Fetching results for examId:', selectedExamId);
         const response = await teacherApi.getResults(selectedExamId);
+        console.log('📋 Results response:', response);
+
         if (response.success) {
           setResults(response.data);
+        } else {
+          setToastMsg(response.message || 'Failed to load results');
+          setTimeout(() => setToastMsg(null), 3000);
         }
       } catch (error) {
         console.error('Fetch results error:', error);
@@ -139,13 +157,13 @@ export default function ResultsView() {
           Results View
         </h2>
         <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">
-          {subject || 'All Subjects'} &middot; Completed Exams Only
+          {subject || 'All Subjects'}
         </span>
       </div>
 
       <div className="bg-white rounded-2xl p-6">
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Select Completed Exam
+          Select Exam
         </label>
         <select
           className="w-full max-w-md border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-300"
@@ -156,17 +174,23 @@ export default function ResultsView() {
           }}
         >
           <option value="" disabled>
-            Select a completed exam...
+            Select an exam...
           </option>
-          {completedExams.map((exam) => (
-            <option key={exam.id} value={exam.id}>
-              {exam.name} ({exam.date})
+          {exams.length > 0 ? (
+            exams.map((exam) => (
+              <option key={exam.id} value={exam.id}>
+                {exam.name} ({exam.date}) - {exam.status}
+              </option>
+            ))
+          ) : (
+            <option value="" disabled>
+              No exams found for {subject}
             </option>
-          ))}
+          )}
         </select>
-        {completedExams.length === 0 && (
-          <p className="text-xs text-gray-400 mt-2">
-            No completed exams found.
+        {exams.length === 0 && (
+          <p className="text-xs text-amber-600 mt-2">
+            No active exams found for {subject}.
           </p>
         )}
       </div>
@@ -198,7 +222,7 @@ export default function ResultsView() {
               </h3>
               <p className="text-xs text-gray-400 mt-0.5">
                 {selectedExam.date} &middot; {selectedExam.max_marks} marks
-                &middot; Pass: 40%
+                &middot; Status: {selectedExam.status}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -219,9 +243,15 @@ export default function ResultsView() {
 
           <div className="bg-white rounded-2xl p-6 overflow-x-auto">
             {examSheets.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-6">
-                No checked sheets found for this exam.
-              </p>
+              <div className="text-center py-6">
+                <p className="text-sm text-gray-400">
+                  No checked sheets found for this exam.
+                </p>
+                <p className="text-xs text-amber-600 mt-2">
+                  Note: Only sheets with status 'checked' or 'rechecked' appear
+                  here.
+                </p>
+              </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
@@ -307,23 +337,25 @@ export default function ResultsView() {
         </>
       )}
 
-      {!selectedExam && completedExams.length > 0 && (
+      {!selectedExam && exams.length > 0 && (
         <div className="bg-white rounded-2xl p-12 text-center">
           <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
             <i className="ri-bar-chart-box-line text-gray-400 text-2xl"></i>
           </div>
           <p className="text-sm text-gray-500">
-            Select a completed exam above to view results.
+            Select an exam above to view results.
           </p>
         </div>
       )}
 
-      {completedExams.length === 0 && (
+      {exams.length === 0 && (
         <div className="bg-white rounded-2xl p-12 text-center">
           <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
             <i className="ri-folder-open-line text-gray-400 text-2xl"></i>
           </div>
-          <p className="text-sm text-gray-500">No completed exams found.</p>
+          <p className="text-sm text-gray-500">
+            No active exams found for {subject}.
+          </p>
         </div>
       )}
     </div>

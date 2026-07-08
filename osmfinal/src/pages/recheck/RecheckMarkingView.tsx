@@ -113,6 +113,12 @@ export default function RecheckMarkingView() {
     [],
   );
 
+  // ─── MINIMUM TIME STATE ──────────────────────────────────────
+
+  const [minTimeRequired, setMinTimeRequired] = useState(0);
+  const [isTimeRequirementMet, setIsTimeRequirementMet] = useState(true);
+  const [elapsed, setElapsed] = useState(0);
+
   // ─── PDF PAGE STATE ──────────────────────────────────────────
 
   const [pdfPageImages, setPdfPageImages] = useState<Record<number, string>>(
@@ -159,6 +165,11 @@ export default function RecheckMarkingView() {
             question_paper: toFullUrl(data.pdfs?.question_paper),
           });
 
+          // ✅ Set minimum time requirement from exam
+          const spentTime = data.exam?.spentTime || 0;
+          setMinTimeRequired(spentTime);
+          setIsTimeRequirementMet(spentTime === 0);
+
           if (data.request?.isReadOnly && data.recheckMarks) {
             setRecheckMarksData(data.recheckMarks || {});
             setRecheckAnnotationsData(data.recheckAnnotations || []);
@@ -177,6 +188,16 @@ export default function RecheckMarkingView() {
 
     fetchData();
   }, [requestIdNum]);
+
+  // ─── CHECK TIME REQUIREMENT ──────────────────────────────────
+
+  useEffect(() => {
+    if (minTimeRequired > 0) {
+      const requiredSeconds = minTimeRequired * 60;
+      const met = elapsed >= requiredSeconds;
+      setIsTimeRequirementMet(met);
+    }
+  }, [elapsed, minTimeRequired]);
 
   // ─── BUILD MARKS FROM MARK SCHEME ────────────────────────────
 
@@ -206,7 +227,6 @@ export default function RecheckMarkingView() {
   const [selectedThumbnails, setSelectedThumbnails] = useState<Set<number>>(
     new Set(),
   );
-  const [elapsed, setElapsed] = useState(0);
 
   const [marks, setMarks] = useState<RecheckMarkEntry[]>([]);
 
@@ -308,26 +328,39 @@ export default function RecheckMarkingView() {
 
   // ─── Click-to-place stamp state ───
 
+  // ─── Click-to-place stamp state ───
+
+  const initialStamps = useMemo((): RecheckStamp[] => {
+    return initialMarks.map((m) => ({
+      markId: m.id,
+      placed: false,
+      x: 0,
+      y: 0,
+      page: 0,
+      value: null,
+    }));
+  }, [initialMarks]);
+
   const [stamps, setStamps] = useState<RecheckStamp[]>([]);
+  const stampsInitializedRef = useRef(false);
+
+  const [escalateData, setEscalateData] = useState<{
+    reason: string;
+    escalateType: string;
+    remarks: string;
+  } | null>(null);
 
   useEffect(() => {
-    if (marks.length > 0) {
-      let initialStamps = marks.map((m) => ({
-        markId: m.id,
-        placed: false,
-        x: 0,
-        y: 0,
-        page: 0,
-        value: null,
-      }));
+    if (initialStamps.length === 0) return;
+    if (stampsInitializedRef.current) return; // ✅ sirf ek baar chalega
 
-      if (requestData?.isReadOnly && recheckStampsData.length > 0) {
-        initialStamps = recheckStampsData;
-      }
-
+    if (requestData?.isReadOnly && recheckStampsData.length > 0) {
+      setStamps(recheckStampsData);
+    } else {
       setStamps(initialStamps);
     }
-  }, [marks, requestData?.isReadOnly, recheckStampsData]);
+    stampsInitializedRef.current = true;
+  }, [initialStamps, requestData?.isReadOnly, recheckStampsData]);
 
   const [placingMarkId, setPlacingMarkId] = useState<string | null>(null);
   const [instructionBanner, setInstructionBanner] = useState<string | null>(
@@ -413,7 +446,9 @@ export default function RecheckMarkingView() {
     requestData?.finalMarksRule || 'higher',
   );
 
+  // ─── Timer ───
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     timerRef.current = setInterval(() => {
       setElapsed((prev) => prev + 1);
@@ -776,17 +811,27 @@ export default function RecheckMarkingView() {
 
   // ─── Active mark change ───
 
-  const handleActiveMarkChange = useCallback((id: string) => {
-    setActiveMarkId(id);
-    const stamp = stampsRef.current.find((s) => s.markId === id);
-    if (stamp && !stamp.placed) {
-      setPlacingMarkId(id);
-      setInstructionBanner(`Click on sheet to place mark position for ${id}`);
-    } else {
-      setPlacingMarkId(null);
-      setInstructionBanner(null);
-    }
-  }, []);
+  const handleActiveMarkChange = useCallback(
+    (id: string) => {
+      setActiveMarkId(id);
+
+      if (requestData?.isReadOnly) {
+        setPlacingMarkId(null);
+        setInstructionBanner(null);
+        return;
+      }
+
+      const stamp = stampsRef.current.find((s) => s.markId === id);
+      if (stamp && !stamp.placed) {
+        setPlacingMarkId(id);
+        setInstructionBanner(`Click on sheet to place mark position for ${id}`);
+      } else {
+        setPlacingMarkId(null);
+        setInstructionBanner(null);
+      }
+    },
+    [requestData?.isReadOnly],
+  );
 
   // ─── Sheet click for stamp placement ───
 
@@ -924,17 +969,50 @@ export default function RecheckMarkingView() {
       .map((m) => m.criterion);
   }, [marks]);
 
-  // ─── Submit recheck ───
+  // ─── ✅ SUBMIT RECHECK WITH TIME CHECK ───
 
   const handleSubmitRecheck = useCallback(() => {
     if (requestData?.isReadOnly) return;
+
+    // ✅ Check minimum time requirement
+    const requiredSeconds = minTimeRequired * 60;
+    if (minTimeRequired > 0 && elapsed < requiredSeconds) {
+      const remaining = requiredSeconds - elapsed;
+      const remainingMinutes = Math.ceil(remaining / 60);
+      setToastMessage(
+        `⚠️ Please spend at least ${minTimeRequired} minutes. ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''} remaining.`,
+      );
+      setTimeout(() => setToastMessage(null), 5000);
+      return;
+    }
+
     const incomplete = checkIncomplete();
     if (incomplete.length > 0) {
       setIncompleteWarning({ questions: incomplete });
       return;
     }
     setModalType('submit');
-  }, [checkIncomplete, requestData?.isReadOnly]);
+  }, [checkIncomplete, requestData?.isReadOnly, minTimeRequired, elapsed]);
+
+  // ─── ✅ ESCALATE FURTHER WITH TIME CHECK ───
+
+  const handleEscalateFurther = useCallback(() => {
+    if (requestData?.isReadOnly) return;
+
+    // ✅ Check minimum time requirement before escalating
+    const requiredSeconds = minTimeRequired * 60;
+    if (minTimeRequired > 0 && elapsed < requiredSeconds) {
+      const remaining = requiredSeconds - elapsed;
+      const remainingMinutes = Math.ceil(remaining / 60);
+      setToastMessage(
+        `⚠️ Please spend at least ${minTimeRequired} minutes before escalating. ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''} remaining.`,
+      );
+      setTimeout(() => setToastMessage(null), 5000);
+      return;
+    }
+
+    setModalType('escalate');
+  }, [requestData?.isReadOnly, minTimeRequired, elapsed]);
 
   const handleIncompleteGoBack = useCallback(() => {
     setIncompleteWarning(null);
@@ -1099,6 +1177,27 @@ export default function RecheckMarkingView() {
             Page <span className="text-white font-medium">{currentPage}</span>{' '}
             of {TOTAL_PAGES}
           </span>
+          {/* ✅ Show minimum time requirement in top bar */}
+          {minTimeRequired > 0 && (
+            <span
+              className={`text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
+                elapsed >= minTimeRequired * 60
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+              }`}
+            >
+              <i
+                className={`${
+                  elapsed >= minTimeRequired * 60
+                    ? 'ri-check-line'
+                    : 'ri-timer-line'
+                } text-xs`}
+              ></i>
+              {elapsed >= minTimeRequired * 60
+                ? `✅ Min time ${minTimeRequired}m met`
+                : `⏱️ ${Math.floor(elapsed / 60)}/${minTimeRequired}m required`}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-1.5">
@@ -1109,14 +1208,6 @@ export default function RecheckMarkingView() {
               {formatTime(elapsed)}
             </span>
           </div>
-          <span className="text-slate-400">
-            Student:{' '}
-            <span className="text-white font-semibold">{studentName}</span>
-          </span>
-          <span className="text-slate-400">
-            Roll:{' '}
-            <span className="text-white font-semibold">{studentRoll}</span>
-          </span>
         </div>
       </header>
 
@@ -1308,7 +1399,9 @@ export default function RecheckMarkingView() {
             onClearStampValue={handleClearStampValue}
             onRightTabChange={setRightTab}
             onSubmitRecheck={handleSubmitRecheck}
-            onEscalateFurther={() => setModalType('escalate')}
+            onEscalateFurther={handleEscalateFurther}
+            minTimeRequired={minTimeRequired}
+            isTimeRequirementMet={isTimeRequirementMet}
           />
         </div>
       </div>
@@ -1376,12 +1469,14 @@ export default function RecheckMarkingView() {
         />
       )}
 
-      {/* ─── ESCALATE MODAL ─── */}
       {modalType === 'escalate' && (
         <EscalateModal
           totalAwarded={round2Total}
           totalMax={totalMax}
-          onEscalate={handleEscalateConfirm}
+          onEscalate={(data) => {
+            setEscalateData(data);
+            handleEscalateConfirm();
+          }}
           onCancel={() => setModalType(null)}
         />
       )}

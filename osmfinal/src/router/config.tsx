@@ -1,4 +1,5 @@
 // config.tsx
+
 import type { RouteObject } from 'react-router-dom';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
@@ -18,6 +19,9 @@ import ResultReport from '@/pages/admin/ResultReport';
 import RecheckReport from '@/pages/admin/RecheckReport';
 import CheckerPerformance from '@/pages/admin/CheckerPerformance';
 import SettingsPage from '@/pages/admin/SettingsPage';
+
+// ─── SUPER ADMIN PAGES ──────────────────────────────────────────────
+import SuperAdminDashboard from '@/pages/admin/SuperAdminDashboard'; // ✅ ADD
 
 // ─── TEACHER PAGES ────────────────────────────────────────────────────
 import TeacherDashboard from '@/pages/teacher/TeacherDashboard';
@@ -50,7 +54,6 @@ function ProtectedRoute({
 }) {
   const { currentUser, isAuthenticated, isLoading } = useAuth();
 
-  // ✅ Loading State - Auth check ho raha hai
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -62,22 +65,18 @@ function ProtectedRoute({
     );
   }
 
-  // ❌ Not Authenticated
   if (!isAuthenticated) {
     return <Navigate to={redirectTo} replace />;
   }
 
-  // ❌ Role Not Allowed
   if (
     allowedRoles.length > 0 &&
     currentUser &&
     !allowedRoles.includes(currentUser.role)
   ) {
-    // Role mismatch - redirect to login with error state
     return <Navigate to={`${redirectTo}?error=unauthorized`} replace />;
   }
 
-  // ✅ Access Granted
   return <Outlet />;
 }
 
@@ -95,6 +94,7 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute
         allowedRoles={[
+          'super_admin', // ✅ ADD
           'admin',
           'teacher',
           'checker',
@@ -107,6 +107,30 @@ const routes: RouteObject[] = [
       {
         element: <Layout />,
         children: [
+          // ─── SUPER ADMIN ROUTES ──────────────────────────
+          {
+            element: <ProtectedRoute allowedRoles={['super_admin']} />,
+            children: [
+              { path: '/super-admin', element: <SuperAdminDashboard /> }, // ✅ ADD
+              // ✅ Super Admin can access all admin routes too
+              { path: '/admin/exams', element: <ExamManagement /> },
+              { path: '/admin/mark-scheme', element: <MarkSchemeEditor /> },
+              { path: '/admin/student-data', element: <StudentDataUpload /> },
+              { path: '/admin/upload', element: <SheetUpload /> },
+              { path: '/admin/assign', element: <CheckerAssignment /> },
+              { path: '/admin/queue', element: <WorkQueue /> },
+              { path: '/admin/users', element: <UserManagement /> },
+              { path: '/admin/reports', element: <AdminReports /> },
+              { path: '/admin/reports/results', element: <ResultReport /> },
+              { path: '/admin/reports/recheck', element: <RecheckReport /> },
+              {
+                path: '/admin/reports/performance',
+                element: <CheckerPerformance />,
+              },
+              { path: '/admin/settings', element: <SettingsPage /> },
+            ],
+          },
+
           // ─── ADMIN ROUTES ──────────────────────────────
           {
             element: <ProtectedRoute allowedRoles={['admin']} />,
@@ -126,7 +150,7 @@ const routes: RouteObject[] = [
                 path: '/admin/reports/performance',
                 element: <CheckerPerformance />,
               },
-              { path: '/admin/settings', element: <SettingsPage /> },
+              // ❌ Settings removed for admin
               { path: '/admin/*', element: <AdminDashboard /> },
             ],
           },

@@ -37,20 +37,40 @@ export default function CheckingProgress() {
   );
 
   // ✅ Fetch exams using teacherApi (which now uses examApi internally)
+  // src/pages/teacher/CheckingProgress.tsx
+
   useEffect(() => {
     const fetchExams = async () => {
       setIsLoading(true);
       try {
         const response = await teacherApi.getExams();
-        console.log('📋 All exams:', response.data);
+        console.log('📋 All exams from API:', response.data);
+        console.log('📋 Current user subject:', subject);
 
         if (response.success) {
-          // ✅ Filter by subject
-          const filtered = response.data.filter(
-            (e) => e.subject?.toLowerCase() === subject?.toLowerCase(),
+          // ✅ Step 1: Exclude archived exams
+          const activeExams = response.data.filter(
+            (e) => e.status !== 'archived',
           );
+          console.log('📋 Active exams (archived removed):', activeExams);
+
+          // ✅ Step 2: Filter by subject
+          const trimmedSubject = subject.trim();
+          const filtered = activeExams.filter((e) => {
+            const examSubject = e.subject?.trim() || '';
+            return examSubject.toLowerCase() === trimmedSubject.toLowerCase();
+          });
+
           console.log('📋 Filtered exams:', filtered);
           setExams(filtered);
+
+          // ✅ Step 3: Fallback - show all active exams if no match
+          if (filtered.length === 0 && activeExams.length > 0) {
+            console.log(
+              '⚠️ No exams matched subject, showing all active exams',
+            );
+            setExams(activeExams);
+          }
         }
       } catch (error) {
         console.error('Fetch exams error:', error);
@@ -210,7 +230,7 @@ export default function CheckingProgress() {
           Checking Progress
         </h2>
         <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">
-          {subject}
+          {subject || 'All Subjects'}
         </span>
       </div>
 
@@ -229,12 +249,23 @@ export default function CheckingProgress() {
           <option value="" disabled>
             Select an exam...
           </option>
-          {subjectExams.map((exam) => (
-            <option key={exam.id} value={exam.id}>
-              {exam.name} ({exam.date})
+          {subjectExams.length > 0 ? (
+            subjectExams.map((exam) => (
+              <option key={exam.id} value={exam.id}>
+                {exam.name} ({exam.date})
+              </option>
+            ))
+          ) : (
+            <option value="" disabled>
+              No exams found
             </option>
-          ))}
+          )}
         </select>
+        {subjectExams.length === 0 && (
+          <p className="text-xs text-amber-600 mt-2">
+            No exams found for {subject}. Showing all exams.
+          </p>
+        )}
       </div>
 
       {selectedExam && (

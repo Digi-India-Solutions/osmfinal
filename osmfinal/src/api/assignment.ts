@@ -66,7 +66,8 @@ export interface IAssignedSheet {
     | 'checked'
     | 'recheck'
     | 'rechecked'
-    | 'uploaded';
+    | 'uploaded'
+    | 'escalated';
   marks: number;
   assigned_to: number | null;
   checked_by: number | null;
@@ -74,8 +75,15 @@ export interface IAssignedSheet {
   updated_at: string;
   exam_name: string;
   exam_subject: string;
+  exam_spent_time?: number; // ✅ ADD THIS - minimum time to spend
   assigned_to_name: string | null;
   pending_recheck_count: number;
+  // ✅ Escalation fields
+  escalate_reason?: string;
+  escalate_type?: string;
+  escalate_remarks?: string;
+  escalated_by?: string;
+  escalated_at?: string;
 }
 
 export interface ICheckerStats {
@@ -91,6 +99,41 @@ export interface ICheckerSheetsResponse {
   data: {
     items: IAssignedSheet[];
     stats: ICheckerStats;
+  };
+}
+
+// ─── SHEET FOR MARKING RESPONSE ──────────────────────────────
+
+export interface ISheetForMarkingResponse {
+  success: boolean;
+  message: string;
+  data: {
+    sheet: {
+      id: number;
+      exam_id: string;
+      student_id: number | null;
+      roll_no: string | null;
+      student_name: string | null;
+      barcode: string | null;
+      file_name: string;
+      file_url: string;
+      status: string;
+      marks: number;
+      is_submitted?: boolean;
+    };
+    exam: {
+      id: string;
+      name: string;
+      subject: string;
+      totalQuestions: number;
+      maxMarks: number;
+      spentTime: number; // ✅ ADD THIS
+    };
+    markScheme: Record<string, { maxMarks: number; guidelines: string }>;
+    pdfs: {
+      model_answer: string | null;
+      question_paper: string | null;
+    };
   };
 }
 
@@ -234,7 +277,7 @@ class AssignmentService {
   }
 
   // Get sheet for marking with mark scheme
-  async getSheetForMarking(sheetId: number): Promise<any> {
+  async getSheetForMarking(sheetId: number): Promise<ISheetForMarkingResponse> {
     try {
       const response = await api.get(`/api/v1/assignments/sheet/${sheetId}`);
       return response.data;
@@ -244,6 +287,33 @@ class AssignmentService {
         success: false,
         message:
           error.response?.data?.message || 'Failed to get sheet for marking',
+        data: {
+          sheet: {
+            id: 0,
+            exam_id: '',
+            student_id: null,
+            roll_no: null,
+            student_name: null,
+            barcode: null,
+            file_name: '',
+            file_url: '',
+            status: '',
+            marks: 0,
+          },
+          exam: {
+            id: '',
+            name: '',
+            subject: '',
+            totalQuestions: 0,
+            maxMarks: 0,
+            spentTime: 0,
+          },
+          markScheme: {},
+          pdfs: {
+            model_answer: null,
+            question_paper: null,
+          },
+        },
       };
     }
   }

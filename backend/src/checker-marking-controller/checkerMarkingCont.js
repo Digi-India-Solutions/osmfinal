@@ -1,8 +1,4 @@
-// src/checker/checker-marking-controller.js
-
 import pool from '../pool.js';
-
-// ─── SAVE DRAFT MARKS ──────────────────────────────────────────
 
 // ─── SAVE DRAFT MARKS ──────────────────────────────────────────
 
@@ -119,7 +115,6 @@ export const saveDraft = async (req, res) => {
 };
 
 // ─── SUBMIT MARKS ──────────────────────────────────────────────
-// ✅ FIXED: Allows re-submission (overwrites previous submission)
 
 export const submitMarks = async (req, res) => {
   try {
@@ -146,9 +141,6 @@ export const submitMarks = async (req, res) => {
 
     const examId = assignmentCheck.rows[0].exam_id;
 
-    // ✅ REMOVED: The check that prevents re-submission
-    // Now we just upsert (insert or update) regardless of previous submission status
-
     // Check if marking record exists
     const existing = await pool.query(
       `SELECT id FROM checker_markings 
@@ -159,7 +151,7 @@ export const submitMarks = async (req, res) => {
     let result;
 
     if (existing.rows.length > 0) {
-      // ✅ Update existing record - allow overwriting previous submission
+      // Update existing record - allow overwriting previous submission
       result = await pool.query(
         `UPDATE checker_markings 
          SET marks_data = $1,
@@ -205,7 +197,7 @@ export const submitMarks = async (req, res) => {
       );
     }
 
-    // ✅ CRITICAL: Update sheet marks and status
+    // Update sheet marks and status
     await pool.query(
       `UPDATE sheets 
        SET marks = $1, 
@@ -345,12 +337,19 @@ export const getSubmittedMarks = async (req, res) => {
 
 // ─── ESCALATE SHEET ─────────────────────────────────────────────
 
+// ─── ESCALATE SHEET ─────────────────────────────────────────────
+
+// ─── ESCALATE SHEET ─────────────────────────────────────────────
+
 export const escalateSheet = async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user.id;
-    const { reason, remarks } = req.body;
+    const { reason, escalateType, remarks } = req.body;
 
+    console.log('🔍 Escalate request:', { sheetId, userId, reason, escalateType, remarks });
+
+    // Validation
     if (!reason) {
       return res.status(400).json({
         success: false,
@@ -360,7 +359,7 @@ export const escalateSheet = async (req, res) => {
 
     // Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
-      `SELECT sheet_id FROM assignments 
+      `SELECT sheet_id, exam_id FROM assignments 
        WHERE sheet_id = $1 AND checker_id = $2 AND status = 'assigned'`,
       [sheetId, userId],
     );
@@ -372,28 +371,105 @@ export const escalateSheet = async (req, res) => {
       });
     }
 
-    // Update sheet status to 'escalated'
-    await pool.query(
-      `UPDATE sheets SET status = 'escalated', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-      [sheetId],
+    const examId = assignmentCheck.rows[0].exam_id;
+
+    // ✅ Update sheet status to 'escalated' with all details
+    const result = await pool.query(
+      `UPDATE sheets 
+       SET status = 'escalated',
+           escalate_reason = $1,
+           escalate_type = $2,
+           escalate_remarks = $3,
+           escalated_by = $4,
+           escalated_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5
+       RETURNING *`,
+      [reason, escalateType || 'other', remarks || null, userId, sheetId],
     );
 
-    // Save escalation log
-    await pool.query(
-      `INSERT INTO sheet_activity_logs (sheet_id, action, performed_by, details)
-       VALUES ($1, 'escalated', $2, $3)`,
-      [sheetId, userId, JSON.stringify({ reason, remarks })],
-    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sheet not found',
+      });
+    }
+
+    // ✅ COMMENT OUT OR REMOVE - checker_markings update (columns don't exist)
+    // const markingExists = await pool.query(
+    //   `SELECT id FROM checker_markings 
+    //    WHERE sheet_id = $1 AND checker_id = $2`,
+    //   [sheetId, userId],
+    // );
+    //
+    // if (markingExists.rows.length > 0) {
+    //   await pool.query(
+    //     `UPDATE checker_markings 
+    //      SET is_escalated = true,
+    //          escalated_at = CURRENT_TIMESTAMP,
+    //          escalate_reason = $1,
+    //          escalate_type = $2,
+    //          escalate_remarks = $3,
+    //          updated_at = CURRENT_TIMESTAMP
+    //      WHERE sheet_id = $4 AND checker_id = $5`,
+    //     [reason, escalateType || 'other', remarks || null, sheetId, userId],
+    //   );
+    // }
 
     return res.status(200).json({
       success: true,
       message: 'Sheet escalated successfully',
+      data: result.rows[0],
     });
   } catch (error) {
     console.error('escalateSheet error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to escalate sheet',
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET ESCALATED SHEETS ──────────────────────────────────────
+
+export const getEscalatedSheets = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await pool.query(
+      `SELECT 
+        s.id,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.status,
+        s.escalate_reason,
+        s.escalate_type,
+        s.escalate_remarks,
+        s.escalated_by,
+        s.escalated_at,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        u.name AS escalated_by_name
+       FROM sheets s
+       JOIN exams e ON s.exam_id = e.id
+       LEFT JOIN users u ON s.escalated_by = u.id
+       WHERE s.status = 'escalated'
+       ORDER BY s.escalated_at DESC`,
+      [],
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Escalated sheets retrieved successfully',
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error('getEscalatedSheets error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get escalated sheets',
       error: error.message,
     });
   }

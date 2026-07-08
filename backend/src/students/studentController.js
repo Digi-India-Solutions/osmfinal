@@ -1,5 +1,6 @@
 // src/students/studentController.js
-import { connectDB } from '../pool.js';
+
+import pool from '../pool.js';
 import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
@@ -21,7 +22,7 @@ const normalizeColumnName = (name) => {
     .replace(/[^a-z0-9_]/g, '');
 };
 
-// Map Excel columns to database fields (with exam_id support)
+// Map Excel columns to database fields
 const mapRowToRecord = (row) => {
   const normalizedRow = {};
   for (const [key, value] of Object.entries(row)) {
@@ -32,7 +33,6 @@ const mapRowToRecord = (row) => {
   const rollNo =
     normalizedRow['roll_no'] ||
     normalizedRow['roll'] ||
-    normalizedRow['rollnumber'] ||
     normalizedRow['rollnumber'];
   const studentName =
     normalizedRow['student_name'] ||
@@ -63,13 +63,12 @@ const mapRowToRecord = (row) => {
     normalizedRow['barcode_no'] ||
     normalizedRow['barcodeno'];
 
-  // ✅ Exam ID support (UUID)
-  const examId =
-    normalizedRow['exam_id'] ||
-    normalizedRow['examid'] ||
+  // ✅ EXAM NAME - Not UUID
+  const examName =
     normalizedRow['exam'] ||
-    normalizedRow['exam_no'] ||
-    normalizedRow['examnumber'] ||
+    normalizedRow['exam_name'] ||
+    normalizedRow['examname'] ||
+    normalizedRow['exam_id'] ||
     null;
 
   return {
@@ -80,8 +79,24 @@ const mapRowToRecord = (row) => {
     semester: semester,
     subject: subject,
     barcode: barcode,
-    exam_id: examId, // ✅ Keep as string (UUID)
+    exam_name: examName, // ✅ Store exam name, not UUID
   };
+};
+
+// ✅ Get exam UUID by name and subject
+const getExamIdByNameAndSubject = async (examName, subject) => {
+  if (!examName) return null;
+
+  try {
+    const result = await pool.query(
+      `SELECT id FROM exams WHERE name = $1 AND subject = $2`,
+      [examName, subject],
+    );
+    return result.rows[0]?.id || null;
+  } catch (error) {
+    console.error('Error finding exam:', error);
+    return null;
+  }
 };
 
 const parseExcelFile = (filePath) => {
@@ -115,14 +130,6 @@ const validateStudentRecord = (row) => {
   return { valid: true };
 };
 
-// ✅ Validate UUID format
-const isValidUUID = (uuid) => {
-  if (!uuid) return true; // null is valid
-  const uuidRegex =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(uuid);
-};
-
 // ─── UPLOAD AND PREVIEW ────────────────────────────────────────
 
 export const uploadAndPreview = async (req, res) => {
@@ -151,6 +158,14 @@ export const uploadAndPreview = async (req, res) => {
     const validRecords = [];
     const barcodes = new Set();
 
+    // ✅ Pre-fetch all exams for quick lookup
+    const examsResult = await pool.query(`SELECT id, name, subject FROM exams`);
+    const examMap = {};
+    examsResult.rows.forEach((exam) => {
+      const key = `${exam.name}|${exam.subject}`;
+      examMap[key] = exam.id;
+    });
+
     for (let i = 0; i < mappedData.length; i++) {
       const row = mappedData[i];
       const validation = validateStudentRecord(row);
@@ -166,16 +181,18 @@ export const uploadAndPreview = async (req, res) => {
       }
       barcodes.add(row.barcode.toString());
 
-      // ✅ Parse exam_id if exists (UUID format)
+      // ✅ Get exam ID from exam name + subject
       let examId = null;
-      if (row.exam_id) {
-        const examIdStr = row.exam_id.toString().trim();
-        if (isValidUUID(examIdStr)) {
-          examId = examIdStr;
-        } else {
+      let examName = row.exam_name;
+
+      if (examName) {
+        const key = `${examName}|${row.subject}`;
+        examId = examMap[key] || null;
+
+        if (!examId) {
           errors.push({
             row: i + 2,
-            error: `Invalid exam_id format: ${examIdStr}. Must be a valid UUID.`,
+            error: `Exam "${examName}" not found for subject "${row.subject}"`,
           });
           continue;
         }
@@ -189,7 +206,8 @@ export const uploadAndPreview = async (req, res) => {
         semester: parseInt(row.semester),
         subject: row.subject.toString(),
         barcode: row.barcode.toString(),
-        exam_id: examId, // ✅ UUID as string
+        exam_id: examId,
+        exam_name: examName, // For preview only
         sheet_status: 'pending',
       });
     }
@@ -243,10 +261,20 @@ export const importStudents = async (req, res) => {
 
     const mappedData = rawData.map((row) => mapRowToRecord(row));
 
-    const client = await connectDB.connect();
+    const client = await pool.connect();
     let importedCount = 0;
     let skippedCount = 0;
     const errors = [];
+
+    // ✅ Pre-fetch all exams
+    const examsResult = await client.query(
+      `SELECT id, name, subject FROM exams`,
+    );
+    const examMap = {};
+    examsResult.rows.forEach((exam) => {
+      const key = `${exam.name}|${exam.subject}`;
+      examMap[key] = exam.id;
+    });
 
     try {
       await client.query('BEGIN');
@@ -260,6 +288,7 @@ export const importStudents = async (req, res) => {
             continue;
           }
 
+          // Check duplicate barcode
           const existing = await client.query(
             `SELECT id FROM student_records WHERE barcode = $1`,
             [row.barcode.toString()],
@@ -270,16 +299,18 @@ export const importStudents = async (req, res) => {
             continue;
           }
 
-          // ✅ Parse exam_id if exists (UUID format)
+          // ✅ Get exam ID from exam name + subject
           let examId = null;
-          if (row.exam_id) {
-            const examIdStr = row.exam_id.toString().trim();
-            if (isValidUUID(examIdStr)) {
-              examId = examIdStr;
-            } else {
+          let examName = row.exam_name;
+
+          if (examName) {
+            const key = `${examName}|${row.subject}`;
+            examId = examMap[key] || null;
+
+            if (!examId) {
               errors.push({
                 row: row,
-                error: `Invalid exam_id format: ${examIdStr}. Must be a valid UUID.`,
+                error: `Exam "${examName}" not found for subject "${row.subject}"`,
               });
               skippedCount++;
               continue;
@@ -299,7 +330,7 @@ export const importStudents = async (req, res) => {
               parseInt(row.semester),
               row.subject.toString(),
               row.barcode.toString(),
-              examId, // ✅ UUID as string
+              examId,
               'pending',
             ],
           );
@@ -340,8 +371,7 @@ export const importStudents = async (req, res) => {
   }
 };
 
-// ─── GET ALL STUDENTS (WITH EXAM NAME - SUBJECT MATCH) ────────
-
+// ─── GET ALL STUDENTS ──────────────────────────────────────────
 
 export const getStudents = async (req, res) => {
   try {
@@ -388,30 +418,27 @@ export const getStudents = async (req, res) => {
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // Get total count
-    const countResult = await connectDB.query(
+    const countResult = await pool.query(
       `SELECT COUNT(*)::int AS total FROM student_records s ${whereClause}`,
       params,
     );
     const total = countResult.rows[0]?.total || 0;
 
-    // ✅ Get data with exam name - JOIN only if exam subject matches student subject
-    const result = await connectDB.query(
+    const result = await pool.query(
       `SELECT 
         s.id, s.roll_no, s.student_name, s.course, s.branch, s.semester, 
         s.subject, s.barcode, s.exam_id, s.sheet_status,
         s.created_at, s.updated_at,
         e.name AS exam_name
       FROM student_records s
-      LEFT JOIN exams e ON s.exam_id = e.id AND e.subject = s.subject
+      LEFT JOIN exams e ON s.exam_id = e.id
       ${whereClause}
       ORDER BY s.id ASC
       LIMIT $${paramCount} OFFSET $${paramCount + 1}`,
       [...params, parseInt(limit), offset],
     );
 
-    // Get stats
-    const statsResult = await connectDB.query(
+    const statsResult = await pool.query(
       `SELECT 
         COUNT(*) AS total,
         COUNT(DISTINCT subject) AS subjects,
@@ -427,8 +454,7 @@ export const getStudents = async (req, res) => {
     );
     const stats = statsResult.rows[0];
 
-    // Subject wise count
-    const subjectResult = await connectDB.query(
+    const subjectResult = await pool.query(
       `SELECT subject, COUNT(*) AS count 
        FROM student_records 
        GROUP BY subject 
@@ -475,14 +501,14 @@ export const getStudentById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await connectDB.query(
+    const result = await pool.query(
       `SELECT 
         s.id, s.roll_no, s.student_name, s.course, s.branch, s.semester, 
         s.subject, s.barcode, s.exam_id, s.sheet_status,
         s.created_at, s.updated_at,
         e.name AS exam_name
       FROM student_records s
-      LEFT JOIN exams e ON s.exam_id = e.id AND e.subject = s.subject
+      LEFT JOIN exams e ON s.exam_id = e.id
       WHERE s.id = $1`,
       [id],
     );
@@ -526,7 +552,7 @@ export const updateStudent = async (req, res) => {
       sheet_status,
     } = req.body;
 
-    const existing = await connectDB.query(
+    const existing = await pool.query(
       `SELECT id FROM student_records WHERE id = $1`,
       [id],
     );
@@ -538,7 +564,7 @@ export const updateStudent = async (req, res) => {
       });
     }
 
-    const result = await connectDB.query(
+    const result = await pool.query(
       `UPDATE student_records 
        SET 
          roll_no = COALESCE($1, roll_no),
@@ -582,35 +608,33 @@ export const updateStudent = async (req, res) => {
   }
 };
 
-// src/students/studentController.js
-
-// ─── AUTO-LINK STUDENTS TO EXAMS BY SUBJECT ─────────────────────
+// ─── AUTO-LINK STUDENTS TO EXAMS ──────────────────────────────
 
 export const autoLinkStudentsToExams = async (req, res) => {
   try {
-    const client = await connectDB.connect();
+    const client = await pool.connect();
     let linkedCount = 0;
 
     try {
       await client.query('BEGIN');
 
-      // Get all active exams
       const examsResult = await client.query(
-        `SELECT id, subject FROM exams WHERE status = 'active'`
+        `SELECT id, subject FROM exams WHERE status = 'active'`,
       );
       const exams = examsResult.rows;
 
       for (const exam of exams) {
-        // Update students with matching subject
         const result = await client.query(
           `UPDATE student_records 
            SET exam_id = $1, updated_at = CURRENT_TIMESTAMP
            WHERE subject = $2 AND exam_id IS NULL
            RETURNING id`,
-          [exam.id, exam.subject]
+          [exam.id, exam.subject],
         );
         linkedCount += result.rows.length;
-        console.log(`✅ Linked ${result.rows.length} students to ${exam.subject} exam`);
+        console.log(
+          `✅ Linked ${result.rows.length} students to ${exam.subject} exam`,
+        );
       }
 
       await client.query('COMMIT');
@@ -618,7 +642,7 @@ export const autoLinkStudentsToExams = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: `${linkedCount} students linked to exams successfully`,
-        data: { linkedCount }
+        data: { linkedCount },
       });
     } catch (error) {
       await client.query('ROLLBACK');
@@ -631,7 +655,7 @@ export const autoLinkStudentsToExams = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to link students to exams',
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -642,7 +666,7 @@ export const deleteStudent = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await connectDB.query(
+    const result = await pool.query(
       `DELETE FROM student_records WHERE id = $1 RETURNING id`,
       [id],
     );
@@ -681,7 +705,7 @@ export const bulkDeleteStudents = async (req, res) => {
       });
     }
 
-    const result = await connectDB.query(
+    const result = await pool.query(
       `DELETE FROM student_records WHERE id = ANY($1::int[]) RETURNING id`,
       [ids],
     );

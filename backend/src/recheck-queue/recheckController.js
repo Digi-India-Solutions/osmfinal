@@ -25,8 +25,6 @@ export const getMyRecheckRequests = async (req, res) => {
 
     const whereClause = conditions.join(' AND ');
 
-    // ✅ REMOVED: rr.final_marks_rule - column doesn't exist yet
-    // ✅ Use COALESCE to handle null values
     const { rows } = await pool.query(
       `SELECT 
         rr.id,
@@ -42,6 +40,11 @@ export const getMyRecheckRequests = async (req, res) => {
         rr.created_at,
         rr.updated_at,
         rr.resolved_at AS completed_at,
+        rr.escalate_reason,
+        rr.escalate_type,
+        rr.escalate_remarks,
+        rr.escalated_by,
+        rr.escalated_at,
         s.student_name,
         s.roll_no,
         s.barcode,
@@ -50,10 +53,11 @@ export const getMyRecheckRequests = async (req, res) => {
         s.marks AS current_marks,
         e.name AS exam_name,
         e.subject AS exam_subject,
+        e."spentTime" AS exam_spent_time,
         u.name AS requested_by_name,
         u2.name AS resolved_by_name,
         rm.marks_data,
-        'higher' AS "finalMarksRule", -- ✅ Hardcode default until column exists
+        'higher' AS "finalMarksRule",
         (
           SELECT COUNT(*) 
           FROM recheck_requests rr2 
@@ -72,11 +76,12 @@ export const getMyRecheckRequests = async (req, res) => {
       params,
     );
 
-    // Get counts
+    // Get counts - add escalated count
     const countResult = await pool.query(
       `SELECT 
         COUNT(*) FILTER (WHERE status = 'pending') AS pending_count,
-        COUNT(*) FILTER (WHERE status IN ('completed', 'rejected')) AS completed_count
+        COUNT(*) FILTER (WHERE status IN ('completed', 'rejected')) AS completed_count,
+        COUNT(*) FILTER (WHERE status = 'escalated') AS escalated_count
       FROM recheck_requests
       WHERE assign_to = $1`,
       [userId],
@@ -92,6 +97,7 @@ export const getMyRecheckRequests = async (req, res) => {
         stats: {
           pending: parseInt(counts.pending_count || 0),
           completed: parseInt(counts.completed_count || 0),
+          escalated: parseInt(counts.escalated_count || 0),
         },
       },
     });
@@ -104,7 +110,6 @@ export const getMyRecheckRequests = async (req, res) => {
     });
   }
 };
-
 // ─── GET RECHECK REQUEST BY ID ─────────────────────────────────
 
 // src/recheck-queue/recheckController.js
@@ -173,13 +178,16 @@ export const getRecheckRequestById = async (req, res) => {
 };
 // ─── UPDATE RECHECK REQUEST STATUS ─────────────────────────────
 
+// src/recheck-queue/recheckController.js
+
 export const updateRecheckRequestStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, remarks } = req.body;
     const userId = req.user.id;
 
-    const validStatuses = ['pending', 'assigned', 'completed', 'rejected'];
+    // ✅ Add 'escalated' to valid statuses
+    const validStatuses = ['pending', 'assigned', 'completed', 'rejected', 'escalated'];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -188,7 +196,7 @@ export const updateRecheckRequestStatus = async (req, res) => {
     }
 
     const checkResult = await pool.query(
-      `SELECT id FROM recheck_requests 
+      `SELECT id, sheet_id FROM recheck_requests 
        WHERE id = $1 AND assign_to = $2`,
       [id, userId],
     );
@@ -200,6 +208,8 @@ export const updateRecheckRequestStatus = async (req, res) => {
       });
     }
 
+    const sheetId = checkResult.rows[0].sheet_id;
+
     let query = `
       UPDATE recheck_requests 
       SET status = $1, updated_at = NOW()
@@ -209,6 +219,13 @@ export const updateRecheckRequestStatus = async (req, res) => {
 
     if (status === 'completed' || status === 'rejected') {
       query += `, resolved_by = $${paramCount}, resolved_at = NOW()`;
+      values.push(userId);
+      paramCount++;
+    }
+
+    if (status === 'escalated') {
+      // ✅ For escalated, set escalated_by and escalated_at
+      query += `, escalated_by = $${paramCount}, escalated_at = NOW()`;
       values.push(userId);
       paramCount++;
     }
@@ -224,14 +241,19 @@ export const updateRecheckRequestStatus = async (req, res) => {
 
     const { rows } = await pool.query(query, values);
 
-    if (status === 'completed' && rows.length > 0) {
-      const request = rows[0];
-      if (request.sheet_id) {
-        await pool.query(
-          `UPDATE sheets SET status = 'rechecked', updated_at = NOW() WHERE id = $1`,
-          [request.sheet_id],
-        );
-      }
+    // ✅ If status is escalated, update sheet status too
+    if (status === 'escalated' && rows.length > 0 && sheetId) {
+      await pool.query(
+        `UPDATE sheets SET status = 'escalated', updated_at = NOW() WHERE id = $1`,
+        [sheetId],
+      );
+    }
+
+    if (status === 'completed' && rows.length > 0 && sheetId) {
+      await pool.query(
+        `UPDATE sheets SET status = 'rechecked', updated_at = NOW() WHERE id = $1`,
+        [sheetId],
+      );
     }
 
     return res.status(200).json({
@@ -254,12 +276,13 @@ export const updateRecheckRequestStatus = async (req, res) => {
 // ─── START RECHECK MARKING ──────────────────────────────────────
 // ✅ FIXED: Works for both 'pending' and 'completed' status
 
+// ─── START RECHECK MARKING ──────────────────────────────────────
+
 export const startRecheckMarking = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
 
-    // ✅ Check if user has access to this request
     const accessCheck = await pool.query(
       `SELECT id, status FROM recheck_requests 
        WHERE id = $1 AND assign_to = $2`,
@@ -276,7 +299,7 @@ export const startRecheckMarking = async (req, res) => {
     const requestStatus = accessCheck.rows[0].status;
     const isCompleted = requestStatus === 'completed' || requestStatus === 'rejected';
 
-    // ✅ Build query based on status
+    // ✅ UPDATED QUERY - added e."spentTime"
     let query = `
       SELECT 
         rr.id,
@@ -302,6 +325,7 @@ export const startRecheckMarking = async (req, res) => {
         s.status AS sheet_status,
         e.name AS exam_name,
         e.subject AS exam_subject,
+        e."spentTime" AS exam_spent_time,  -- ✅ ADD THIS
         ms."questionName",
         ms."maxMarks",
         ms.guidelines,
@@ -314,8 +338,6 @@ export const startRecheckMarking = async (req, res) => {
       WHERE rr.id = $1 AND rr.assign_to = $2
     `;
 
-    // ✅ For pending requests, get fresh data
-    // ✅ For completed requests, get submitted data
     const { rows } = await pool.query(query, [id, userId]);
 
     if (rows.length === 0) {
@@ -353,7 +375,7 @@ export const startRecheckMarking = async (req, res) => {
       }
     }
 
-    // ✅ Get recheck marks if completed
+    // Get recheck marks if completed
     let recheckMarks = {};
     let recheckAnnotations = [];
     let recheckStamps = [];
@@ -374,7 +396,7 @@ export const startRecheckMarking = async (req, res) => {
       }
     }
 
-    // ✅ Build full file URL
+    // Build full file URL
     const baseUrl = process.env.API_URL || 'http://localhost:7000';
     const buildFullUrl = (path) => {
       if (!path) return null;
@@ -383,7 +405,6 @@ export const startRecheckMarking = async (req, res) => {
       return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
     };
 
-    // ✅ Get final marks rule
     const finalMarksRule = request.final_marks_rule || 'higher';
 
     return res.status(200).json({
@@ -398,7 +419,7 @@ export const startRecheckMarking = async (req, res) => {
           status: request.status,
           finalMarksRule: finalMarksRule,
           created_at: request.created_at,
-          isReadOnly: isCompleted, // ✅ Add flag
+          isReadOnly: isCompleted,
         },
         sheet: {
           id: request.sheet_id,
@@ -414,12 +435,13 @@ export const startRecheckMarking = async (req, res) => {
           id: request.exam_id,
           name: request.exam_name,
           subject: request.exam_subject,
+          spentTime: request.exam_spent_time || 0, // ✅ ADD THIS
         },
         markScheme: markScheme,
         previousMarks: previousMarks,
-        recheckMarks: recheckMarks, // ✅ ADD for readonly view
-        recheckAnnotations: recheckAnnotations, // ✅ ADD
-        recheckStamps: recheckStamps, // ✅ ADD
+        recheckMarks: recheckMarks,
+        recheckAnnotations: recheckAnnotations,
+        recheckStamps: recheckStamps,
         pdfs: {
           model_answer: buildFullUrl(request.model_answer_pdf),
           question_paper: buildFullUrl(request.question_paper_pdf),
@@ -747,6 +769,87 @@ export const getRecheckDraft = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get recheck draft',
+      error: error.message,
+    });
+  }
+};
+
+// src/recheck-queue/recheckController.js
+
+// ─── ESCALATE RECHECK REQUEST ──────────────────────────────────────
+
+// src/recheck-queue/recheckController.js
+
+// ─── ESCALATE RECHECK REQUEST ──────────────────────────────────────
+
+export const escalateRecheckRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const { reason, escalateType, remarks } = req.body;
+
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reason is required for escalation',
+      });
+    }
+
+    const checkResult = await pool.query(
+      `SELECT rr.id, rr.sheet_id, rr.status
+       FROM recheck_requests rr
+       WHERE rr.id = $1 AND rr.assign_to = $2`,
+      [id, userId],
+    );
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recheck request not found or not assigned to you',
+      });
+    }
+
+    const sheetId = checkResult.rows[0].sheet_id;
+
+    // ✅ Update recheck request status to 'escalated'
+    await pool.query(
+      `UPDATE recheck_requests 
+       SET status = 'escalated',
+           escalate_reason = $1,
+           escalate_type = $2,
+           escalate_remarks = $3,
+           escalated_by = $4,
+           escalated_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5`,
+      [reason, escalateType || 'other', remarks || null, userId, id],
+    );
+
+    // ✅ Update sheet status to 'escalated'
+    if (sheetId) {
+      await pool.query(
+        `UPDATE sheets 
+         SET status = 'escalated',
+             escalate_reason = $1,
+             escalate_type = $2,
+             escalate_remarks = $3,
+             escalated_by = $4,
+             escalated_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5`,
+        [reason, escalateType || 'other', remarks || null, userId, sheetId],
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Recheck request escalated successfully',
+    });
+  } catch (error) {
+    console.error('escalateRecheckRequest error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to escalate recheck request',
       error: error.message,
     });
   }
