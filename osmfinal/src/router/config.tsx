@@ -21,7 +21,7 @@ import CheckerPerformance from '@/pages/admin/CheckerPerformance';
 import SettingsPage from '@/pages/admin/SettingsPage';
 
 // ─── SUPER ADMIN PAGES ──────────────────────────────────────────────
-import SuperAdminDashboard from '@/pages/admin/SuperAdminDashboard'; // ✅ ADD
+import SuperAdminDashboard from '@/pages/admin/SuperAdminDashboard';
 
 // ─── TEACHER PAGES ────────────────────────────────────────────────────
 import TeacherDashboard from '@/pages/teacher/TeacherDashboard';
@@ -94,7 +94,7 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute
         allowedRoles={[
-          'super_admin', // ✅ ADD
+          'super_admin',
           'admin',
           'teacher',
           'checker',
@@ -107,31 +107,7 @@ const routes: RouteObject[] = [
       {
         element: <Layout />,
         children: [
-          // ─── SUPER ADMIN ROUTES ──────────────────────────
-          {
-            element: <ProtectedRoute allowedRoles={['super_admin']} />,
-            children: [
-              { path: '/super-admin', element: <SuperAdminDashboard /> }, // ✅ ADD
-              // ✅ Super Admin can access all admin routes too
-              { path: '/admin/exams', element: <ExamManagement /> },
-              { path: '/admin/mark-scheme', element: <MarkSchemeEditor /> },
-              { path: '/admin/student-data', element: <StudentDataUpload /> },
-              { path: '/admin/upload', element: <SheetUpload /> },
-              { path: '/admin/assign', element: <CheckerAssignment /> },
-              { path: '/admin/queue', element: <WorkQueue /> },
-              { path: '/admin/users', element: <UserManagement /> },
-              { path: '/admin/reports', element: <AdminReports /> },
-              { path: '/admin/reports/results', element: <ResultReport /> },
-              { path: '/admin/reports/recheck', element: <RecheckReport /> },
-              {
-                path: '/admin/reports/performance',
-                element: <CheckerPerformance />,
-              },
-              { path: '/admin/settings', element: <SettingsPage /> },
-            ],
-          },
-
-          // ─── ADMIN ROUTES ──────────────────────────────
+          // ─── ✅ ADMIN ROUTES (PEHLE) ──────────────────────────
           {
             element: <ProtectedRoute allowedRoles={['admin']} />,
             children: [
@@ -152,6 +128,30 @@ const routes: RouteObject[] = [
               },
               // ❌ Settings removed for admin
               { path: '/admin/*', element: <AdminDashboard /> },
+            ],
+          },
+
+          // ─── ✅ SUPER ADMIN ROUTES (BAAD ME) ──────────────────
+          {
+            element: <ProtectedRoute allowedRoles={['super_admin']} />,
+            children: [
+              { path: '/super-admin', element: <SuperAdminDashboard /> },
+              // ✅ Super Admin can access all admin features including settings
+              { path: '/admin/exams', element: <ExamManagement /> },
+              { path: '/admin/mark-scheme', element: <MarkSchemeEditor /> },
+              { path: '/admin/student-data', element: <StudentDataUpload /> },
+              { path: '/admin/upload', element: <SheetUpload /> },
+              { path: '/admin/assign', element: <CheckerAssignment /> },
+              { path: '/admin/queue', element: <WorkQueue /> },
+              { path: '/admin/users', element: <UserManagement /> },
+              { path: '/admin/reports', element: <AdminReports /> },
+              { path: '/admin/reports/results', element: <ResultReport /> },
+              { path: '/admin/reports/recheck', element: <RecheckReport /> },
+              {
+                path: '/admin/reports/performance',
+                element: <CheckerPerformance />,
+              },
+              { path: '/admin/settings', element: <SettingsPage /> }, // ✅ Settings included
             ],
           },
 
