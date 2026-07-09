@@ -187,7 +187,13 @@ export const updateRecheckRequestStatus = async (req, res) => {
     const userId = req.user.id;
 
     // ✅ Add 'escalated' to valid statuses
-    const validStatuses = ['pending', 'assigned', 'completed', 'rejected', 'escalated'];
+    const validStatuses = [
+      'pending',
+      'assigned',
+      'completed',
+      'rejected',
+      'escalated',
+    ];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -297,7 +303,8 @@ export const startRecheckMarking = async (req, res) => {
     }
 
     const requestStatus = accessCheck.rows[0].status;
-    const isCompleted = requestStatus === 'completed' || requestStatus === 'rejected';
+    const isCompleted =
+      requestStatus === 'completed' || requestStatus === 'rejected';
 
     // ✅ UPDATED QUERY - added e."spentTime"
     let query = `
@@ -369,8 +376,11 @@ export const startRecheckMarking = async (req, res) => {
          ORDER BY submitted_at DESC LIMIT 1`,
         [request.sheet_id],
       );
-      
-      if (prevMarksResult.rows.length > 0 && prevMarksResult.rows[0].marks_data) {
+
+      if (
+        prevMarksResult.rows.length > 0 &&
+        prevMarksResult.rows[0].marks_data
+      ) {
         previousMarks = prevMarksResult.rows[0].marks_data || {};
       }
     }
@@ -379,7 +389,7 @@ export const startRecheckMarking = async (req, res) => {
     let recheckMarks = {};
     let recheckAnnotations = [];
     let recheckStamps = [];
-    
+
     if (isCompleted) {
       const recheckResult = await pool.query(
         `SELECT marks_data, annotations_data, stamps_data, total_marks 
@@ -388,7 +398,7 @@ export const startRecheckMarking = async (req, res) => {
          ORDER BY submitted_at DESC LIMIT 1`,
         [id],
       );
-      
+
       if (recheckResult.rows.length > 0) {
         recheckMarks = recheckResult.rows[0].marks_data || {};
         recheckAnnotations = recheckResult.rows[0].annotations_data || [];
@@ -397,10 +407,12 @@ export const startRecheckMarking = async (req, res) => {
     }
 
     // Build full file URL
-    const baseUrl = process.env.API_URL || 'http://localhost:7000';
+    const baseUrl =
+      process.env.API_URL || 'https://osmapi.digiindiasolutions.com';
     const buildFullUrl = (path) => {
       if (!path) return null;
-      if (path.startsWith('http://') || path.startsWith('https://')) return path;
+      if (path.startsWith('http://') || path.startsWith('https://'))
+        return path;
       if (path.startsWith('/uploads')) return `${baseUrl}${path}`;
       return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
     };
@@ -409,7 +421,9 @@ export const startRecheckMarking = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: isCompleted ? 'Recheck data retrieved successfully (readonly)' : 'Recheck marking data retrieved successfully',
+      message: isCompleted
+        ? 'Recheck data retrieved successfully (readonly)'
+        : 'Recheck marking data retrieved successfully',
       data: {
         request: {
           id: request.id,
@@ -523,7 +537,14 @@ export const saveRecheckMarks = async (req, res) => {
 export const completeRecheck = async (req, res) => {
   try {
     const { id } = req.params;
-    const { marks, remarks, marksData, annotationsData, stampsData, finalMarksRule } = req.body;
+    const {
+      marks,
+      remarks,
+      marksData,
+      annotationsData,
+      stampsData,
+      finalMarksRule,
+    } = req.body;
     const userId = req.user.id;
 
     const checkResult = await pool.query(
@@ -535,7 +556,8 @@ export const completeRecheck = async (req, res) => {
     if (checkResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Recheck request not found, not assigned to you, or already processed',
+        message:
+          'Recheck request not found, not assigned to you, or already processed',
       });
     }
 
@@ -645,14 +667,14 @@ export const completeRecheck = async (req, res) => {
   }
 };
 
-
 // ─── SAVE RECHECK DRAFT (per-question marks + annotations + stamps) ───
 
 export const saveRecheckDraft = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const { marksData, annotationsData, stampsData, totalMarks, remarks } = req.body;
+    const { marksData, annotationsData, stampsData, totalMarks, remarks } =
+      req.body;
 
     const checkResult = await pool.query(
       `SELECT sheet_id, exam_id FROM recheck_requests 
@@ -663,7 +685,8 @@ export const saveRecheckDraft = async (req, res) => {
     if (checkResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Recheck request not found, not assigned to you, or already processed',
+        message:
+          'Recheck request not found, not assigned to you, or already processed',
       });
     }
 

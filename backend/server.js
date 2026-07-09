@@ -24,8 +24,9 @@ app.use(
           "'self'",
           'http://localhost:3000',
           'http://localhost:3001',
+          'https://osm.digiindiasolutions.com', // ✅ ADD
         ],
-        frameSrc: ["'self'", 'http://localhost:7000'],
+        frameSrc: ["'self'", 'https://osmapi.digiindiasolutions.com'],
         imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com'],
       },
     },
@@ -54,24 +55,36 @@ app.use(express.json({ limit: '1000mb' }));
 app.use(express.urlencoded({ limit: '1000mb', extended: true }));
 app.use(cookieParser());
 
+// ✅ UPDATED CORS CONFIGURATION
 const allowedOrigins = [
+  // Development
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://192.168.166.80:3001',
+  // Production
+  'https://osm.digiindiasolutions.com',
+  'https://osmapi.digiindiasolutions.com',
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // ✅ Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) {
+        return callback(null, true);
+      }
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        console.log('❌ CORS blocked for origin:', origin);
         callback(new Error('Not allowed by CORS'));
       }
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
   }),
 );
 
