@@ -28,23 +28,23 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { usePageLoading } from '@/hooks/usePageLoading';
 
 export default function AdminDashboard() {
-  const { currentUser } = useAuth(); 
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const loading = usePageLoading();
 
-  // ─── ✅ SUPER ADMIN ACCESS CHECK ──────────────────────────────
-useEffect(() => {
-  if (!currentUser) {
-    navigate('/login');
-    return;
-  }
+  // ─── ✅ ADMIN + SUPER ADMIN ACCESS CHECK ──────────────────────
+  useEffect(() => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
 
-  // ✅ ONLY admin allowed (not super_admin)
-  if (currentUser.role !== 'admin') {
-    navigate('/login?error=unauthorized');
-    return;
-  }
-}, [currentUser, navigate]);
+    // ✅ Admin aur Super Admin dono allowed
+    if (currentUser.role !== 'admin' && currentUser.role !== 'super_admin') {
+      navigate('/login?error=unauthorized');
+      return;
+    }
+  }, [currentUser, navigate]);
 
   const recentSheets = [...sheets].sort((a, b) => b.id - a.id).slice(0, 8);
 
@@ -112,14 +112,6 @@ useEffect(() => {
   ];
 
   if (loading) return <LoadingSpinner fullPage />;
-
-  // ─── USER ROLE DISPLAY ──────────────────────────────────────────
-
-  const getRoleDisplay = (role: string) => {
-    if (role === 'super_admin') return '⭐ Super Admin';
-    if (role === 'admin') return '👑 Admin';
-    return role;
-  };
 
   return (
     <div className="space-y-6">
@@ -401,16 +393,13 @@ useEffect(() => {
                   'recheck',
                   'rechecked',
                 ] as const
-              ).map((status) => {
-                const count = sheets.filter((s) => s.status === status).length;
-                return (
-                  <StatusBadge
-                    key={status}
-                    status={status}
-                    className="text-[11px]"
-                  />
-                );
-              })}
+              ).map((status) => (
+                <StatusBadge
+                  key={status}
+                  status={status}
+                  className="text-[11px]"
+                />
+              ))}
             </div>
           </div>
         </div>

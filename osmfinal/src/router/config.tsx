@@ -20,9 +20,6 @@ import RecheckReport from '@/pages/admin/RecheckReport';
 import CheckerPerformance from '@/pages/admin/CheckerPerformance';
 import SettingsPage from '@/pages/admin/SettingsPage';
 
-// ─── SUPER ADMIN PAGES ──────────────────────────────────────────────
-import SuperAdminDashboard from '@/pages/admin/SuperAdminDashboard'; // ✅ ADD
-
 // ─── TEACHER PAGES ────────────────────────────────────────────────────
 import TeacherDashboard from '@/pages/teacher/TeacherDashboard';
 import MarkSchemeEditor from '@/pages/teacher/MarkSchemeEditor';
@@ -94,7 +91,7 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute
         allowedRoles={[
-          'super_admin', // ✅ ADD
+          'super_admin',
           'admin',
           'teacher',
           'checker',
@@ -107,33 +104,9 @@ const routes: RouteObject[] = [
       {
         element: <Layout />,
         children: [
-          // ─── SUPER ADMIN ROUTES ──────────────────────────
+          // ─── ✅ ADMIN + SUPER ADMIN ROUTES (SHARED) ───────────
           {
-            element: <ProtectedRoute allowedRoles={['super_admin']} />,
-            children: [
-              { path: '/super-admin', element: <SuperAdminDashboard /> }, // ✅ ADD
-              // ✅ Super Admin can access all admin routes too
-              { path: '/admin/exams', element: <ExamManagement /> },
-              { path: '/admin/mark-scheme', element: <MarkSchemeEditor /> },
-              { path: '/admin/student-data', element: <StudentDataUpload /> },
-              { path: '/admin/upload', element: <SheetUpload /> },
-              { path: '/admin/assign', element: <CheckerAssignment /> },
-              { path: '/admin/queue', element: <WorkQueue /> },
-              { path: '/admin/users', element: <UserManagement /> },
-              { path: '/admin/reports', element: <AdminReports /> },
-              { path: '/admin/reports/results', element: <ResultReport /> },
-              { path: '/admin/reports/recheck', element: <RecheckReport /> },
-              {
-                path: '/admin/reports/performance',
-                element: <CheckerPerformance />,
-              },
-              { path: '/admin/settings', element: <SettingsPage /> },
-            ],
-          },
-
-          // ─── ADMIN ROUTES ──────────────────────────────
-          {
-            element: <ProtectedRoute allowedRoles={['admin']} />,
+            element: <ProtectedRoute allowedRoles={['admin', 'super_admin']} />,
             children: [
               { path: '/admin', element: <AdminDashboard /> },
               { path: '/admin/exams', element: <ExamManagement /> },
@@ -150,9 +123,14 @@ const routes: RouteObject[] = [
                 path: '/admin/reports/performance',
                 element: <CheckerPerformance />,
               },
-              // ❌ Settings removed for admin
               { path: '/admin/*', element: <AdminDashboard /> },
             ],
+          },
+
+          // ─── ✅ SETTINGS — SIRF SUPER ADMIN KE LIYE ───────────
+          {
+            element: <ProtectedRoute allowedRoles={['super_admin']} />,
+            children: [{ path: '/admin/settings', element: <SettingsPage /> }],
           },
 
           // ─── TEACHER ROUTES ─────────────────────────────
@@ -218,6 +196,12 @@ const routes: RouteObject[] = [
             element: <RecheckMarkingView />,
           },
         ],
+      },
+
+      // ─── OLD /super-admin LINKS → REDIRECT TO /admin ────────
+      {
+        path: '/super-admin',
+        element: <Navigate to="/admin" replace />,
       },
     ],
   },
