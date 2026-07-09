@@ -49,8 +49,17 @@ export default function CheckerAssignment() {
 
   // ─── FILTER EXAMS ──────────────────────────────────────────
 
+  // src/pages/admin/CheckerAssignment.tsx
+
+  // ─── FILTER EXAMS ──────────────────────────────────────────
+
   const filteredExams = useMemo(() => {
-    if (role === 'admin' || role === 'teacher_checker') {
+    // ✅ Super Admin, Admin, Teacher Checker - sab dikhao
+    if (
+      role === 'super_admin' ||
+      role === 'admin' ||
+      role === 'teacher_checker'
+    ) {
       return exams;
     }
     return exams.filter((e) => e.subject === subject);
@@ -58,11 +67,17 @@ export default function CheckerAssignment() {
 
   // ─── FETCH EXAMS ────────────────────────────────────────────
 
+  // ─── FETCH EXAMS ────────────────────────────────────────────
+
   useEffect(() => {
     const fetchExams = async () => {
       try {
         setExamsLoading(true);
-        const res = await examApi.getAllExams({ limit: 1000 });
+        // ✅ Super Admin ke liye bhi excludeArchived true
+        const res = await examApi.getAllExams({
+          limit: 1000,
+          excludeArchived: true,
+        });
         setExams(res.data);
       } catch (error) {
         console.error('Failed to fetch exams:', error);
