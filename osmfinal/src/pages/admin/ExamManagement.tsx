@@ -1,17 +1,24 @@
+// src/pages/admin/ExamManagement.tsx
+
 import { useEffect, useState } from 'react';
-import { mockSubjects, sheets, mockMasterStudents } from '@/mock/mockData';
 import Breadcrumb from '@/components/ui/Breadcrumb';
 import StatusBadge from '@/components/ui/StatusBadge';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { usePageLoading } from '@/hooks/usePageLoading';
 import { useNavigate } from 'react-router-dom';
 import { examApi, type ExamResponse } from '../../api/exam';
+import subjectService, { ISubject } from '../../api/subject';
 
 export default function ExamManagement() {
   const loading = usePageLoading();
   const navigate = useNavigate();
   const [examList, setExamList] = useState<ExamResponse[]>([]);
   const [examsLoading, setExamsLoading] = useState(true);
+
+  // ─── SUBJECTS STATE ──────────────────────────────────────────
+  const [subjects, setSubjects] = useState<ISubject[]>([]);
+  const [subjectsLoading, setSubjectsLoading] = useState(true);
+
   const [saving, setSaving] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingExam, setEditingExam] = useState<ExamResponse | null>(null);
@@ -35,7 +42,7 @@ export default function ExamManagement() {
     ? examList.find((e) => e.id === detailExamId) || null
     : null;
   const examStudents = detailExamId
-    ? mockMasterStudents.filter((s) => s.examId === detailExamId)
+    ? [] // Will be replaced with real data later
     : [];
 
   const showToast = (msg: string) => {
@@ -43,6 +50,25 @@ export default function ExamManagement() {
     setTimeout(() => setToastMsg(null), 2500);
   };
 
+  // ─── FETCH SUBJECTS ──────────────────────────────────────────
+  useEffect(() => {
+    const fetchSubjects = async () => {
+      try {
+        setSubjectsLoading(true);
+        const response = await subjectService.getActiveSubjects();
+        if (response.success) {
+          setSubjects((response.data as ISubject[]) || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch subjects:', error);
+      } finally {
+        setSubjectsLoading(false);
+      }
+    };
+    fetchSubjects();
+  }, []);
+
+  // ─── FETCH EXAMS ─────────────────────────────────────────────
   const fetchExams = async () => {
     try {
       setExamsLoading(true);
@@ -380,15 +406,24 @@ export default function ExamManagement() {
                   }}
                   onBlur={() => validateField('subject', form.subject)}
                   className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer ${errors.subject ? 'border-rose-400' : 'border-gray-200'}`}
+                  disabled={subjectsLoading}
                 >
                   <option value="">Select subject</option>
-                  {mockSubjects
-                    .filter((s) => s.status === 'active')
-                    .map((s) => (
+                  {subjectsLoading ? (
+                    <option value="" disabled>
+                      Loading subjects...
+                    </option>
+                  ) : subjects.length === 0 ? (
+                    <option value="" disabled>
+                      No subjects available
+                    </option>
+                  ) : (
+                    subjects.map((s) => (
                       <option key={s.id} value={s.name}>
-                        {s.name}
+                        {s.name} {s.code ? `(${s.code})` : ''}
                       </option>
-                    ))}
+                    ))
+                  )}
                 </select>
                 {errors.subject && (
                   <p className="text-xs text-rose-500 mt-1">{errors.subject}</p>
@@ -694,11 +729,7 @@ export default function ExamManagement() {
                           </thead>
                           <tbody>
                             {examStudents.map((student) => {
-                              const matchedSheet = sheets.find(
-                                (s) =>
-                                  s.barcode === student.barcode &&
-                                  s.examId === detailExam.id,
-                              );
+                              const matchedSheet = null; // Will be replaced with real data
                               return (
                                 <tr
                                   key={student.id}

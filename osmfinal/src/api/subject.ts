@@ -1,4 +1,5 @@
 // src/api/subject.ts
+
 import api from './axios';
 
 export interface ISubject {
@@ -33,6 +34,23 @@ class SubjectService {
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to get subjects',
+      };
+    }
+  }
+
+  // Get active subjects only (for dropdowns)
+  async getActiveSubjects(): Promise<ISubjectResponse> {
+    try {
+      const response = await api.get('/api/v1/auth/subjects', {
+        params: { status: 'active' },
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Get active subjects error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get active subjects',
       };
     }
   }
