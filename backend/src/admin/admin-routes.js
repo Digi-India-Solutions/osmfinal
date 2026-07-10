@@ -14,12 +14,14 @@ import {
   deleteUserByAdmin,
   changePassword,
   updateProfile,
+  registerSuperAdmin,
 } from './admin-controller.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
 const router = Router();
 
 // Auth routes
+router.post('/auth/register-super-admin', registerSuperAdmin);
 router.post('/login', login);
 router.post('/logout', verifyToken, logout);
 router.post('/refresh-token', refreshToken);

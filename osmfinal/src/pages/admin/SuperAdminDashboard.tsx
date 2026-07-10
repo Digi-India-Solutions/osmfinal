@@ -1,4 +1,4 @@
-// src/pages/admin/AdminDashboard.tsx
+// src/pages/super-admin/SuperAdminDashboard.tsx
 
 import { useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
@@ -27,20 +27,21 @@ import StatusBadge from '@/components/ui/StatusBadge';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { usePageLoading } from '@/hooks/usePageLoading';
 
-export default function AdminDashboard() {
+export default function SuperAdminDashboard() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const loading = usePageLoading();
 
-  // ─── ✅ ADMIN + SUPER ADMIN ACCESS CHECK ──────────────────────
+  // ─── ✅ SUPER ADMIN ACCESS CHECK ──────────────────────────────
+
   useEffect(() => {
     if (!currentUser) {
       navigate('/login');
       return;
     }
 
-    // ✅ Admin aur Super Admin dono allowed
-    if (currentUser.role !== 'admin' && currentUser.role !== 'super_admin') {
+    // ✅ Only super_admin allowed
+    if (currentUser.role !== 'super_admin') {
       navigate('/login?error=unauthorized');
       return;
     }
@@ -116,12 +117,16 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       <Breadcrumb
-        items={[{ label: 'Admin', href: '/admin' }, { label: 'Dashboard' }]}
+        items={[
+          { label: 'Super Admin', href: '/super-admin' },
+          { label: 'Dashboard' },
+        ]}
       />
 
-      <div className="bg-white rounded-2xl p-6">
+      {/* ─── WELCOME CARD ────────────────────────────────────────── */}
+      <div className="bg-white rounded-2xl p-6 border-l-4 border-amber-500">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gray-900 flex items-center justify-center shrink-0">
+          <div className="w-12 h-12 rounded-xl bg-amber-500 flex items-center justify-center shrink-0">
             <span className="text-white text-lg font-semibold">
               {currentUser?.name?.charAt(0)}
             </span>
@@ -134,16 +139,15 @@ export default function AdminDashboard() {
               <p className="text-sm text-gray-500">
                 Here's what's happening with your marking system today.
               </p>
-              {currentUser?.role === 'super_admin' && (
-                <span className="text-[10px] font-medium bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
-                  ⭐ Super Admin
-                </span>
-              )}
+              <span className="text-[10px] font-medium bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                ⭐ Super Admin
+              </span>
             </div>
           </div>
         </div>
       </div>
 
+      {/* ─── STATS CARDS ──────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {adminStats.map((stat) => (
           <div
@@ -167,6 +171,7 @@ export default function AdminDashboard() {
         ))}
       </div>
 
+      {/* ─── CHART ────────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-6">
         <h4 className="text-sm font-semibold text-gray-900 mb-4">
           Sheet Status Overview
@@ -211,6 +216,7 @@ export default function AdminDashboard() {
         </ResponsiveContainer>
       </div>
 
+      {/* ─── RECHECK CARDS ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -266,6 +272,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* ─── QUICK LINKS ──────────────────────────────────────────── */}
       <div>
         <h4 className="text-sm font-semibold text-gray-900 mb-3">
           Quick Links to Reports
@@ -298,6 +305,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* ─── TABLES ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl p-6">
           <h4 className="text-sm font-semibold text-gray-900 mb-4">
@@ -393,13 +401,16 @@ export default function AdminDashboard() {
                   'recheck',
                   'rechecked',
                 ] as const
-              ).map((status) => (
-                <StatusBadge
-                  key={status}
-                  status={status}
-                  className="text-[11px]"
-                />
-              ))}
+              ).map((status) => {
+                const count = sheets.filter((s) => s.status === status).length;
+                return (
+                  <StatusBadge
+                    key={status}
+                    status={status}
+                    className="text-[11px]"
+                  />
+                );
+              })}
             </div>
           </div>
         </div>

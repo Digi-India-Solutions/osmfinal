@@ -4,6 +4,8 @@ import pool from '../pool.js';
 
 // ─── GET ALL SHEETS ─────────────────────────────────────────────
 
+// ─── GET ALL SHEETS ─────────────────────────────────────────────
+
 export const getSheets = async (req, res) => {
   try {
     const { examId, status, search, page = 1, limit = 50 } = req.query;
@@ -41,8 +43,7 @@ export const getSheets = async (req, res) => {
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // ✅ Query with actual columns from your table
-    const query = `
+    let query = `
       SELECT 
         s.id,
         s.exam_id,
@@ -59,6 +60,11 @@ export const getSheets = async (req, res) => {
         s.uploaded_by,
         s.created_at,
         s.updated_at,
+        s.escalate_reason,
+        s.escalate_type,
+        s.escalate_remarks,
+        s.escalated_by,
+        s.escalated_at,
         e.name AS exam_name,
         e.subject AS exam_subject,
         u.name AS uploaded_by_name,
@@ -72,33 +78,41 @@ export const getSheets = async (req, res) => {
       LEFT JOIN users u ON s.uploaded_by = u.id
       ${whereClause}
       ORDER BY s.created_at DESC
-      LIMIT $${paramCount} OFFSET $${paramCount + 1}
     `;
 
-    const dataParams = [...params, parseInt(limit), offset];
+    const dataParams = [...params];
+    query += ` LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    dataParams.push(parseInt(limit), offset);
+
     const { rows } = await pool.query(query, dataParams);
 
-    // Get total count
-    const countParams = params.slice(0, -2);
-    const countResult = await pool.query(
-      `SELECT COUNT(*)::int AS total FROM sheets s ${whereClause}`,
-      countParams,
-    );
+    // ✅ Get total count
+    let countQuery = `SELECT COUNT(*)::int AS total FROM sheets s`;
+    if (whereClause) {
+      countQuery += ` ${whereClause}`;
+    }
+    const countResult = await pool.query(countQuery, params);
     const total = countResult.rows[0]?.total || 0;
 
-    // Get status counts for tabs
-    const statsResult = await pool.query(
-      `SELECT 
+    // ✅ Get status counts for tabs - WITH ESCALATED
+    let statsQuery = `
+      SELECT 
         COUNT(*) AS all_count,
         COUNT(*) FILTER (WHERE s.status IN ('uploaded', 'assigned')) AS pending_count,
         COUNT(*) FILTER (WHERE s.status = 'checking') AS checking_count,
         COUNT(*) FILTER (WHERE s.status = 'recheck') AS rechecking_count,
-        COUNT(*) FILTER (WHERE s.status IN ('checked', 'rechecked')) AS completed_count
+        COUNT(*) FILTER (WHERE s.status IN ('checked', 'rechecked')) AS completed_count,
+        COUNT(*) FILTER (WHERE s.status = 'escalated') AS escalated_count
       FROM sheets s
-      ${whereClause}`,
-      countParams,
-    );
+    `;
+    if (whereClause) {
+      statsQuery += ` ${whereClause}`;
+    }
+    
+    const statsResult = await pool.query(statsQuery, params);
     const stats = statsResult.rows[0] || {};
+
+    console.log('🔍 Stats:', stats); // Debug log
 
     return res.status(200).json({
       success: true,
@@ -115,6 +129,7 @@ export const getSheets = async (req, res) => {
           checking: parseInt(stats.checking_count || 0),
           rechecking: parseInt(stats.rechecking_count || 0),
           completed: parseInt(stats.completed_count || 0),
+          escalated: parseInt(stats.escalated_count || 0), // ✅ New
         },
       },
     });
@@ -127,7 +142,6 @@ export const getSheets = async (req, res) => {
     });
   }
 };
-
 // ─── GET SINGLE SHEET ──────────────────────────────────────────
 
 export const getSheetById = async (req, res) => {

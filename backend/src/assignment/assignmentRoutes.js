@@ -1,4 +1,5 @@
 // src/routes/assignment.routes.js
+
 import { Router } from 'express';
 import {
   getUnassignedSheets,
@@ -8,44 +9,42 @@ import {
   getAssignmentsByExam,
   getAssignmentsByChecker,
   unassignSheet,
+  getMyAssignedSheets,
+  getSheetForMarking,
+  updateCheckerSheetStatus,
+  saveDraftMarks,
 } from './assignmentController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
 const router = Router();
 
-// ─── ASSIGNMENT ROUTES ──────────────────────────────────────────
+// ─── ADMIN ASSIGNMENT ROUTES ──────────────────────────────────
 
-// Get unassigned sheets for an exam
 router.get(
   '/exams/:examId/sheets/unassigned',
   verifyToken,
   getUnassignedSheets,
 );
-
-// Get available checkers for an exam
 router.get(
   '/exams/:examId/checkers/available',
   verifyToken,
   getAvailableCheckers,
 );
-
-// Assign sheets to a checker
 router.post('/exams/:examId/assign', verifyToken, assignSheets);
-
-// Random assignment
 router.post('/exams/:examId/assign/random', verifyToken, randomAssignment);
-
-// Get all assignments for an exam
 router.get('/exams/:examId/assignments', verifyToken, getAssignmentsByExam);
-
-// Get assignments for a checker
 router.get(
   '/checkers/:checkerId/assignments',
   verifyToken,
   getAssignmentsByChecker,
 );
-
-// Unassign a sheet
 router.delete('/assignments/:assignmentId', verifyToken, unassignSheet);
+
+// ─── ✅ CHECKER WORK QUEUE ROUTES ─────────────────────────────
+
+router.get('/my-sheets', verifyToken, getMyAssignedSheets);
+router.get('/sheet/:id', verifyToken, getSheetForMarking);
+router.patch('/sheet/:id/status', verifyToken, updateCheckerSheetStatus);
+router.post('/sheet/:id/draft', verifyToken, saveDraftMarks);
 
 export default router;

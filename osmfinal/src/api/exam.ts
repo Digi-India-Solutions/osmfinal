@@ -9,6 +9,7 @@ export interface ExamResponse {
   date: string;
   totalQuestions: number;
   maxMarks: number;
+  spentTime: number; // ✅ New field
   status: 'active' | 'inactive' | 'archived';
   createdBy: number;
   created_at?: string;
@@ -21,6 +22,7 @@ export interface CreateExamData {
   date: string;
   totalQuestions: number;
   maxMarks: number;
+  spentTime?: number;
   status?: 'active' | 'inactive' | 'archived';
   createdBy: number;
 }
@@ -38,12 +40,26 @@ export const examApi = {
     return response.data.data;
   },
 
+  // ✅ Fixed - Sirf ek baar define kiya
   getAllExams: async (params?: {
     page?: number;
     limit?: number;
     search?: string;
+    excludeArchived?: boolean;
   }): Promise<PaginatedExamsResponse> => {
-    const response = await axiosInstance.get('/api/v1/exam/exams', { params });
+    // ✅ Debug
+    console.log('🔍 getAllExams called with params:', params);
+
+    const queryParams: any = { ...params };
+    if (params?.excludeArchived !== undefined) {
+      queryParams.excludeArchived = params.excludeArchived ? 'true' : 'false';
+    }
+
+    console.log('🔍 Final queryParams:', queryParams); // ✅ Debug
+
+    const response = await axiosInstance.get('/api/v1/exam/exams', {
+      params: queryParams,
+    });
     return response.data;
   },
 

@@ -8,6 +8,9 @@ import {
   startRecheckMarking,
   saveRecheckMarks,
   completeRecheck,
+  saveRecheckDraft, // ✅ ADD
+  getRecheckDraft,
+  escalateRecheckRequest,
 } from './recheckController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
@@ -32,5 +35,10 @@ router.post('/requests/:id/marks', verifyToken, saveRecheckMarks);
 
 // Complete recheck
 router.post('/requests/:id/complete', verifyToken, completeRecheck);
+
+router.post('/requests/:id/draft', verifyToken, saveRecheckDraft);   // ✅ ADD
+router.get('/requests/:id/draft', verifyToken, getRecheckDraft);     // ✅ ADD
+router.patch('/requests/:id/escalate', verifyToken, escalateRecheckRequest); // ✅ Add route
+
 
 export default router;

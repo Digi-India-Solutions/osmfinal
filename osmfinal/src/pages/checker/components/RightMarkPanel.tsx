@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
-import type { MarkEntry, RightTab } from "../MarkingView";
+// src/pages/checker/components/RightMarkPanel.tsx
+
+import { useState, useEffect, useCallback } from 'react';
+import type { MarkEntry, RightTab } from '../MarkingView';
 
 interface RightMarkPanelProps {
   marks: MarkEntry[];
@@ -12,6 +14,10 @@ interface RightMarkPanelProps {
   readOnly?: boolean;
   saveIndicatorText?: string;
   saveIndicatorFresh?: boolean;
+  questionPaperUrl?: string | null;
+  modelAnswerUrl?: string | null;
+  minTimeRequired?: number; // ✅ ADD
+  isTimeRequirementMet?: boolean; // ✅ ADD
   onActiveMarkChange: (id: string) => void;
   onQuestionPageChange: (page: number) => void;
   onMarkUpdate: (id: string, awarded: number) => void;
@@ -28,103 +34,6 @@ const QUESTIONS_PER_PAGE = 4;
 const totalQuestions = 23;
 const totalQuestionPages = Math.ceil(totalQuestions / QUESTIONS_PER_PAGE);
 
-interface QPaperQuestion {
-  q: string;
-  sub: string[];
-}
-
-const questionPaperPages: QPaperQuestion[][] = [
-  // Page 1 — Q1 & Q2
-  [
-    {
-      q: "Q1. Define input and output devices. Give two examples each. (12 marks)",
-      sub: [
-        "(a) Define input device with example (3 marks)",
-        "(b) Define output device with example (3 marks)",
-        "(c) Difference between input and output (3 marks)",
-        "(d) Give 4 examples of each (3 marks)",
-      ],
-    },
-    {
-      q: "Q2. Explain basic functions of a computer with diagram. (12 marks)",
-      sub: [],
-    },
-  ],
-  // Page 2 — Q3, Q4, Q5
-  [
-    {
-      q: "Q3. Differentiate between RAM and ROM. (11 marks)",
-      sub: [],
-    },
-    {
-      q: "Q4. What is an operating system? List its functions. (15 marks)",
-      sub: [],
-    },
-    {
-      q: "Q5. Explain number systems used in computers. (8 marks)",
-      sub: [],
-    },
-  ],
-  // Page 3 — Q6, Q7
-  [
-    {
-      q: "Q6. Write short notes on CPU, ALU, Control Unit. (12 marks)",
-      sub: [],
-    },
-    {
-      q: "Q7. Explain primary and secondary memory. (10 marks)",
-      sub: [],
-    },
-  ],
-];
-
-interface ModelAnswerItem {
-  label: string;
-  marks: number;
-  text: string;
-}
-
-const modelAnswerPages: ModelAnswerItem[][] = [
-  // Page 1 — Q1
-  [
-    { label: "Q1(i)", marks: 3, text: "Award 1 mark per correct point. Max 3." },
-    { label: "Q1(ii)", marks: 3, text: "Input→Processing→Output→Storage. 1 mark per function." },
-    { label: "Q1(iii)", marks: 3, text: "Any 2 input devices with explanation. 1.5 marks each." },
-    { label: "Q1(iv)", marks: 3, text: "Any 2 output devices with explanation. 1.5 marks each." },
-  ],
-  // Page 2 — Q2
-  [
-    { label: "Q2(i)", marks: 4, text: "Input vs Output difference. 2 marks per side." },
-    { label: "Q2(ii)", marks: 4, text: "RAM=volatile+r/w, ROM=non-volatile+read only. 2 marks per side." },
-    { label: "Q2(iii)", marks: 4, text: "Valid explanation. Award marks for correct concept." },
-  ],
-  // Page 3 — Q3
-  [
-    { label: "Q3(i)", marks: 3, text: "Define each function clearly. 1 mark per function with proper naming." },
-    { label: "Q3(ii)", marks: 3, text: "Diagram carries 2 marks, explanation carries 1 mark." },
-    { label: "Q3(iii)", marks: 3, text: "Award marks for correct steps shown. Method carries weight." },
-    { label: "Q3(iv)", marks: 3, text: "Short answer expected. Key concept = full marks." },
-  ],
-  // Page 4 — Q4
-  [
-    { label: "Q4(i)", marks: 5, text: "Full definition with examples = 5 marks. Partial = 3 marks." },
-    { label: "Q4(ii)", marks: 5, text: "List all 5 functions. 1 mark each. Missing = deduct 1." },
-    { label: "Q4(iii)", marks: 5, text: "Explain each function with an example. No example = max 3." },
-  ],
-  // Page 5 — Q5, Q6, Q7
-  [
-    { label: "Q5(i)", marks: 2, text: "Name all 4 number systems. 0.5 marks each." },
-    { label: "Q5(ii)", marks: 2, text: "Binary to decimal conversion steps must be shown." },
-    { label: "Q5(iii)", marks: 2, text: "Octal and hexadecimal explained with base values." },
-    { label: "Q5(iv)", marks: 2, text: "One application of each number system." },
-    { label: "Q6(i)", marks: 4, text: "CPU definition and block diagram. Diagram = 1.5 marks." },
-    { label: "Q6(ii)", marks: 4, text: "ALU explanation with all arithmetic and logic functions." },
-    { label: "Q6(iii)", marks: 4, text: "Control Unit with timing and control signals diagram." },
-    { label: "Q7(i)", marks: 3, text: "Primary memory types (RAM/ROM). 1.5 marks with characteristics." },
-    { label: "Q7(ii)", marks: 3, text: "Secondary memory with comparison table. 3 devices = full." },
-  ],
-];
-
 export default function RightMarkPanel({
   marks,
   activeMarkId,
@@ -134,8 +43,12 @@ export default function RightMarkPanel({
   rightTab,
   hasModelAnswer,
   readOnly = false,
-  saveIndicatorText = "Auto-saves every 30s",
+  saveIndicatorText = 'Auto-saves every 30s',
   saveIndicatorFresh = false,
+  questionPaperUrl = null,
+  modelAnswerUrl = null,
+  minTimeRequired = 0, // ✅ Default
+  isTimeRequirementMet = true, // ✅ Default
   onActiveMarkChange,
   onQuestionPageChange,
   onMarkUpdate,
@@ -148,27 +61,28 @@ export default function RightMarkPanel({
   onSubmitExit,
 }: RightMarkPanelProps) {
   // ─── Shared numpad state ───
-  const [displayValue, setDisplayValue] = useState("");
+  const [displayValue, setDisplayValue] = useState('');
 
   const activeMark = marks.find((m) => m.id === activeMarkId);
   const activeMax = activeMark?.max ?? 0;
 
   useEffect(() => {
     if (activeMark) {
-      setDisplayValue(activeMark.awarded > 0 ? String(activeMark.awarded) : "");
+      setDisplayValue(activeMark.awarded > 0 ? String(activeMark.awarded) : '');
     } else {
-      setDisplayValue("");
+      setDisplayValue('');
     }
-  }, [activeMarkId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeMarkId]);
 
   const startIdx = questionPage * QUESTIONS_PER_PAGE;
   const visibleMarks = marks.slice(startIdx, startIdx + QUESTIONS_PER_PAGE);
   const displayStart = startIdx + 1;
   const displayEnd = Math.min(startIdx + QUESTIONS_PER_PAGE, totalQuestions);
 
-  const displayNumeric = displayValue === "" ? 0 : parseFloat(displayValue) || 0;
-  const hasDecimal = displayValue.includes(".");
-  const isEmpty = displayValue === "";
+  const displayNumeric =
+    displayValue === '' ? 0 : parseFloat(displayValue) || 0;
+  const hasDecimal = displayValue.includes('.');
+  const isEmpty = displayValue === '';
 
   // ─── Numpad handlers ───
   const handleDigit = useCallback(
@@ -185,16 +99,16 @@ export default function RightMarkPanel({
 
   const handleDecimal = useCallback(() => {
     if (hasDecimal || isEmpty) return;
-    setDisplayValue((prev) => prev + ".");
+    setDisplayValue((prev) => prev + '.');
   }, [hasDecimal, isEmpty]);
 
   const handleHalf = useCallback(() => {
     setDisplayValue((prev) => {
-      const current = prev === "" ? 0 : parseFloat(prev) || 0;
+      const current = prev === '' ? 0 : parseFloat(prev) || 0;
       const next = current + 0.5;
       if (next > activeMax) return prev;
       const s = String(next);
-      return s.endsWith(".0") ? String(Math.floor(next)) : s;
+      return s.endsWith('.0') ? String(Math.floor(next)) : s;
     });
   }, [activeMax]);
 
@@ -203,7 +117,7 @@ export default function RightMarkPanel({
   }, []);
 
   const handleClear = useCallback(() => {
-    setDisplayValue("");
+    setDisplayValue('');
     if (activeMarkId) {
       onClearStampValue(activeMarkId);
     }
@@ -222,9 +136,9 @@ export default function RightMarkPanel({
 
   // ─── Tab config ───
   const tabs: { key: RightTab; icon: string; label: string }[] = [
-    { key: "marks", icon: "ri-list-check", label: "Marks" },
-    { key: "questions", icon: "ri-file-list-3-line", label: "Q. Paper" },
-    { key: "answerSheet", icon: "ri-check-double-line", label: "Ans. Sheet" },
+    { key: 'marks', icon: 'ri-list-check', label: 'Marks' },
+    { key: 'questions', icon: 'ri-file-list-3-line', label: 'Q. Paper' },
+    { key: 'answerSheet', icon: 'ri-check-double-line', label: 'Ans. Sheet' },
   ];
 
   return (
@@ -270,6 +184,29 @@ export default function RightMarkPanel({
           {saveIndicatorText}
         </span>
       </div>
+
+      {/* ─── ✅ MINIMUM TIME INDICATOR ─── */}
+      {minTimeRequired > 0 && (
+        <div
+          className={`shrink-0 px-3 py-1.5 text-center text-[10px] font-medium border-b ${
+            isTimeRequirementMet
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+          }`}
+        >
+          {isTimeRequirementMet ? (
+            <span className="flex items-center justify-center gap-1.5">
+              <i className="ri-check-line text-xs"></i>
+              Minimum time requirement met
+            </span>
+          ) : (
+            <span className="flex items-center justify-center gap-1.5">
+              <i className="ri-timer-line text-xs"></i>
+              Minimum {minTimeRequired} minutes required
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ─── READ ONLY BANNER ─── */}
       {readOnly && (
@@ -456,7 +393,7 @@ export default function RightMarkPanel({
           </div>
         )}
 
-        {/* ─── QUESTION PAPER TAB — PDF-style scrollable white page cards ─── */}
+        {/* ─── QUESTION PAPER TAB ─── */}
         {rightTab === 'questions' && (
           <div className="flex-1 flex flex-col min-h-0">
             {questionPaperUrl ? (
@@ -480,10 +417,10 @@ export default function RightMarkPanel({
           </div>
         )}
 
-        {/* ─── ANSWER SHEET TAB — PDF-style scrollable white page cards ─── */}
+        {/* ─── ANSWER SHEET TAB ─── */}
         {rightTab === 'answerSheet' && (
           <div className="flex-1 flex flex-col min-h-0">
-            {hasModelAnswer && modelAnswerUrl ? (
+            {modelAnswerUrl ? (
               <>
                 <div
                   className="shrink-0 px-3 py-2 flex items-center gap-2"
@@ -537,7 +474,7 @@ export default function RightMarkPanel({
           </div>
         )}
 
-        {/* ─── TOTAL BAR (always visible) ─── */}
+        {/* ─── TOTAL BAR ─── */}
         <div className="border-t border-slate-700 px-3 py-2 flex items-center justify-between shrink-0">
           <span className="text-xs font-semibold text-slate-300">
             Total Awarded Marks:
@@ -547,7 +484,7 @@ export default function RightMarkPanel({
           </span>
         </div>
 
-        {/* ─── ACTION BUTTONS (hidden in readonly mode) ─── */}
+        {/* ─── ACTION BUTTONS ─── */}
         {!readOnly && (
           <div className="px-2.5 pb-3 space-y-1.5 pt-1 shrink-0">
             <button

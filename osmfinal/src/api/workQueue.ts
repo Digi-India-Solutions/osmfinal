@@ -2,27 +2,41 @@
 
 import api from './axios';
 
-// src/pages/admin/WorkQueue.tsx
-
-// ✅ Interface update - removed assigned_to related fields
 export interface Sheet {
   id: number;
-  exam_id: number;
-  student_id: number | null;
-  roll_no: string | null;
-  student_name: string | null;
-  barcode: string | null;
+  exam_id: string;
+  student_id: number;
+  roll_no: string;
+  student_name: string;
+  barcode: string;
   file_name: string;
   file_url: string;
-  status: 'uploaded' | 'assigned' | 'checking' | 'checked' | 'recheck' | 'rechecked';
-  marks: number;
-  uploaded_by: string | null;
+  file_size: number;
+  mime_type: string;
+  status:
+    | 'uploaded'
+    | 'assigned'
+    | 'checking'
+    | 'checked'
+    | 'recheck'
+    | 'rechecked'
+    | 'escalated';
+  marks: string;
+  uploaded_by: string;
   created_at: string;
   updated_at: string;
   exam_name: string;
   exam_subject: string;
-  uploaded_by_name: string | null;
-  pending_recheck_count: number;
+  uploaded_by_name: string;
+  pending_recheck_count: string;
+  assigned_to_name?: string;
+  // ✅ Escalation fields
+  escalate_reason?: string;
+  escalate_type?: string;
+  escalate_remarks?: string;
+  escalated_by?: string;
+  escalated_at?: string;
+  escalated_by_name?: string;
 }
 
 export interface RecheckUser {
@@ -60,6 +74,7 @@ export interface SheetStats {
   checking: number;
   rechecking: number;
   completed: number;
+  escalated: number; // ✅ Added
 }
 
 export interface SheetsResponse {
@@ -105,6 +120,7 @@ class WorkQueueService {
             checking: 0,
             rechecking: 0,
             completed: 0,
+            escalated: 0, // ✅ Added
           },
         },
       };

@@ -16,6 +16,7 @@ interface User {
   name: string;
   email: string;
   role: string;
+  subject?: string | null; // ✅ ADDED
   permissions: Record<string, any>;
   isActive: boolean;
 }
@@ -32,7 +33,8 @@ interface AuthContextType {
 
 // ─── API CONFIG ────────────────────────────────────────────────────────
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:7000';
+const API_URL =
+  import.meta.env.VITE_API_URL || 'https://osmapi.digiindiasolutions.com';
 
 // Axios instance with credentials
 const api = axios.create({
@@ -64,23 +66,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ─── Check if user is already logged in ──────────────────────────
 
+  // context/AuthContext.tsx
+
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const response = await api.get('/api/v1/auth/me');
-        console.log("AAA===>", response.data)
+        console.log('🔍 Auth Response:', response.data);
+
         if (response.data.success) {
           const userData = response.data.data;
-           console.log("AAA===>", response.data.data)
-          setCurrentUser(userData);
-          localStorage.setItem('osm_user', JSON.stringify(userData));
+          console.log('🔍 User Data from API:', userData);
+          console.log('🔍 Subject from API:', userData.subject);
+
+          // ✅ Ensure subject is set
+          const userWithSubject = {
+            ...userData,
+            subject: userData.subject || null,
+          };
+
+          console.log('🔍 Setting user with subject:', userWithSubject);
+
+          setCurrentUser(userWithSubject);
+          localStorage.setItem('osm_user', JSON.stringify(userWithSubject));
         } else {
-          // Invalid session
           localStorage.removeItem('osm_user');
           setCurrentUser(null);
         }
       } catch (error) {
-        // Not authenticated
+        console.error('Auth check error:', error);
         localStorage.removeItem('osm_user');
         setCurrentUser(null);
       } finally {

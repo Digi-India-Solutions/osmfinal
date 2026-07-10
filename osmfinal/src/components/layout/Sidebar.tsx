@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { NavLink } from 'react-router-dom';
 import settingsService, { ISettings } from '@/api/setting';
@@ -8,6 +8,7 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+// ─── ADMIN + SUPER ADMIN SHARED LINKS ────────────────────────────────
 const adminLinks = [
   { label: 'Dashboard', path: '/admin', icon: 'ri-dashboard-line' },
   { label: 'Exams', path: '/admin/exams', icon: 'ri-file-list-3-line' },
@@ -34,6 +35,10 @@ const adminLinks = [
   { label: 'Work Queue', path: '/admin/queue', icon: 'ri-stack-line' },
   { label: 'Users', path: '/admin/users', icon: 'ri-team-line' },
   { label: 'Reports', path: '/admin/reports', icon: 'ri-bar-chart-2-line' },
+];
+
+// ✅ Sirf Super Admin ke liye extra link
+const superAdminOnlyLinks = [
   { label: 'Settings', path: '/admin/settings', icon: 'ri-settings-3-line' },
 ];
 
@@ -137,6 +142,13 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { currentUser } = useAuth();
   const role = currentUser?.role;
   const isDual = role === 'teacher_checker';
+  const isAdminOrSuperAdmin = role === 'admin' || role === 'super_admin';
+
+  // ✅ Super Admin ko admin ke saare links + Settings dikhega
+  const resolvedAdminLinks =
+    role === 'super_admin'
+      ? [...adminLinks, ...superAdminOnlyLinks]
+      : adminLinks;
 
   // ─── SETTINGS STATE ──────────────────────────────────────────────────────
 
@@ -247,10 +259,10 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </>
         ) : (
           <>
-            {role === 'admin' && (
+            {isAdminOrSuperAdmin && ( // ✅ Admin + Super Admin — same section
               <NavSection
                 label="Navigation"
-                links={adminLinks}
+                links={resolvedAdminLinks}
                 collapsed={collapsed}
               />
             )}

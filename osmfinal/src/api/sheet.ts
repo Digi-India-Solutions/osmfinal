@@ -12,10 +12,24 @@ export interface ISheet {
   file_url: string;
   file_size: number;
   mime_type: string;
-  status: 'uploaded' | 'linked' | 'checking' | 'checked' | 'recheck';
+  status:
+    | 'uploaded'
+    | 'linked'
+    | 'checking'
+    | 'checked'
+    | 'recheck'
+    | 'rechecked'
+    | 'escalated';
   marks: number;
   created_at: string;
   updated_at: string;
+  // ✅ Escalation fields
+  escalate_reason?: string;
+  escalate_type?: string;
+  escalate_remarks?: string;
+  escalated_by?: string;
+  escalated_at?: string;
+  escalated_by_name?: string;
 }
 
 export interface ISheetStats {
@@ -25,6 +39,8 @@ export interface ISheetStats {
   checking: number;
   checked: number;
   recheck: number;
+  rechecked: number;
+  escalated: number;
   total_marks: number;
   average_marks: number;
 }
@@ -55,6 +71,11 @@ export interface IStudentLinkingStatus {
   file_name: string | null;
   sheet_status_display: string | null;
   is_linked: boolean;
+  // ✅ Escalation fields for student
+  escalate_reason?: string;
+  escalate_type?: string;
+  escalate_remarks?: string;
+  escalated_at?: string;
 }
 
 export interface ILinkStats {
@@ -62,6 +83,13 @@ export interface ILinkStats {
   uploaded: number;
   linked: number;
   pending: number;
+}
+
+// ✅ New interface for escalation
+export interface IEscalationData {
+  reason: string;
+  escalateType: string;
+  remarks?: string;
 }
 
 class SheetService {
@@ -136,6 +164,8 @@ class SheetService {
             checking: 0,
             checked: 0,
             recheck: 0,
+            rechecked: 0,
+            escalated: 0,
           },
         },
       };
@@ -246,7 +276,13 @@ class SheetService {
 
   async updateSheet(
     id: number,
-    data: { marks?: number; status?: string },
+    data: {
+      marks?: number;
+      status?: string;
+      escalate_reason?: string;
+      escalate_type?: string;
+      escalate_remarks?: string;
+    },
   ): Promise<any> {
     try {
       const response = await api.put(`/api/v1/sheets/sheets/${id}`, data);
@@ -271,6 +307,46 @@ class SheetService {
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to delete sheet',
+      };
+    }
+  }
+
+  // ─── ESCALATE SHEET ──────────────────────────────────────────
+  // ✅ NEW: Escalate a sheet
+
+  async escalateSheet(sheetId: number, data: IEscalationData): Promise<any> {
+    try {
+      const response = await api.patch(
+        `/api/v1/sheets/sheets/${sheetId}/escalate`,
+        data,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Escalate sheet error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to escalate sheet',
+      };
+    }
+  }
+
+  // ─── GET ESCALATED SHEETS ─────────────────────────────────────
+  // ✅ NEW: Get all escalated sheets
+
+  async getEscalatedSheets(examId?: string): Promise<any> {
+    try {
+      const params = examId ? { examId } : {};
+      const response = await api.get(`/api/v1/sheets/sheets/escalated`, {
+        params,
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Get escalated sheets error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get escalated sheets',
+        data: [],
       };
     }
   }

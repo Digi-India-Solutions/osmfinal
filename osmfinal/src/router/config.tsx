@@ -1,4 +1,5 @@
 // config.tsx
+
 import type { RouteObject } from 'react-router-dom';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
@@ -50,7 +51,6 @@ function ProtectedRoute({
 }) {
   const { currentUser, isAuthenticated, isLoading } = useAuth();
 
-  // ✅ Loading State - Auth check ho raha hai
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -62,22 +62,18 @@ function ProtectedRoute({
     );
   }
 
-  // ❌ Not Authenticated
   if (!isAuthenticated) {
     return <Navigate to={redirectTo} replace />;
   }
 
-  // ❌ Role Not Allowed
   if (
     allowedRoles.length > 0 &&
     currentUser &&
     !allowedRoles.includes(currentUser.role)
   ) {
-    // Role mismatch - redirect to login with error state
     return <Navigate to={`${redirectTo}?error=unauthorized`} replace />;
   }
 
-  // ✅ Access Granted
   return <Outlet />;
 }
 
@@ -95,6 +91,7 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute
         allowedRoles={[
+          'super_admin',
           'admin',
           'teacher',
           'checker',
@@ -107,9 +104,9 @@ const routes: RouteObject[] = [
       {
         element: <Layout />,
         children: [
-          // ─── ADMIN ROUTES ──────────────────────────────
+          // ─── ✅ ADMIN + SUPER ADMIN ROUTES (SHARED) ───────────
           {
-            element: <ProtectedRoute allowedRoles={['admin']} />,
+            element: <ProtectedRoute allowedRoles={['admin', 'super_admin']} />,
             children: [
               { path: '/admin', element: <AdminDashboard /> },
               { path: '/admin/exams', element: <ExamManagement /> },
@@ -126,9 +123,14 @@ const routes: RouteObject[] = [
                 path: '/admin/reports/performance',
                 element: <CheckerPerformance />,
               },
-              { path: '/admin/settings', element: <SettingsPage /> },
               { path: '/admin/*', element: <AdminDashboard /> },
             ],
+          },
+
+          // ─── ✅ SETTINGS — SIRF SUPER ADMIN KE LIYE ───────────
+          {
+            element: <ProtectedRoute allowedRoles={['super_admin']} />,
+            children: [{ path: '/admin/settings', element: <SettingsPage /> }],
           },
 
           // ─── TEACHER ROUTES ─────────────────────────────
@@ -194,6 +196,12 @@ const routes: RouteObject[] = [
             element: <RecheckMarkingView />,
           },
         ],
+      },
+
+      // ─── OLD /super-admin LINKS → REDIRECT TO /admin ────────
+      {
+        path: '/super-admin',
+        element: <Navigate to="/admin" replace />,
       },
     ],
   },

@@ -20,6 +20,7 @@ const normalizeRoleKey = (value) =>
     .replace(/\s+/g, '_');
 
 const ROLES = {
+  SUPER_ADMIN: 'super_admin',
   ADMIN: 'admin',
   TEACHER: 'teacher',
   CHECKER: 'checker',
@@ -28,6 +29,18 @@ const ROLES = {
 };
 
 const ROLE_PERMISSIONS = {
+  super_admin: {
+    // ✅ ADD THIS
+    dashboard: { view: true },
+    exams: { view: true, create: true, edit: true, delete: true },
+    'mark-scheme': { view: true, create: true, edit: true },
+    'student-data': { view: true, upload: true, manage: true },
+    sheets: { view: true, upload: true, assign: true },
+    queue: { view: true, manage: true },
+    users: { view: true, create: true, edit: true, delete: true },
+    reports: { view: true, export: true },
+    settings: { view: true, edit: true }, // ✅ Settings available
+  },
   admin: {
     dashboard: { view: true },
     exams: { view: true, create: true, edit: true, delete: true },
@@ -37,7 +50,7 @@ const ROLE_PERMISSIONS = {
     queue: { view: true, manage: true },
     users: { view: true, create: true, edit: true, delete: true },
     reports: { view: true, export: true },
-    settings: { view: true, edit: true },
+    // settings: { view: true, edit: true },
   },
   teacher: {
     'teacher-dashboard': { view: true },
@@ -176,6 +189,7 @@ export const login = async (req, res) => {
             name: user.name,
             email: user.email,
             role: user.role,
+            subject: user.subject || null, // ✅ ADDED
             permissions: permissions,
             isActive: user.is_active,
           },
@@ -522,6 +536,100 @@ export const createUserByAdmin = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+    });
+  }
+};
+
+// src/exam-admin-controller.js
+
+// ─── TEMPORARY SUPER ADMIN REGISTER ──────────────────────────────────────
+// ⚠️ REMOVE THIS AFTER CREATING SUPER ADMIN
+
+export const registerSuperAdmin = async (req, res) => {
+  try {
+    const { name, email, password, secretKey } = req.body;
+
+    // ✅ Secret key protection
+    const SUPER_ADMIN_SECRET = process.env.SUPER_ADMIN_SECRET || 'your-super-secret-key-123';
+
+    if (secretKey !== SUPER_ADMIN_SECRET) {
+      return res.status(403).json({
+        success: false,
+        message: 'Invalid secret key',
+      });
+    }
+
+    // Validation
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email and password are required',
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters',
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await connectDB.query(
+      `SELECT id FROM users WHERE email = $1`,
+      [email],
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists',
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Insert Super Admin
+    const result = await connectDB.query(
+      `INSERT INTO users (id, name, email, password_hash, role, is_active, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, 'super_admin', true, NOW())
+       RETURNING id, name, email, role, is_active`,
+      [name, email, hashedPassword],
+    );
+
+    // Add permissions for super admin
+    const superAdminPermissions = {
+      dashboard: { view: true },
+      exams: { view: true, create: true, edit: true, delete: true },
+      'mark-scheme': { view: true, create: true, edit: true },
+      'student-data': { view: true, upload: true, manage: true },
+      sheets: { view: true, upload: true, assign: true },
+      queue: { view: true, manage: true },
+      users: { view: true, create: true, edit: true, delete: true },
+      reports: { view: true, export: true },
+      settings: { view: true, edit: true },
+    };
+
+    await upsertUserPermissionsJsonb(result.rows[0].id, superAdminPermissions);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Super Admin created successfully',
+      data: {
+        id: result.rows[0].id,
+        name: result.rows[0].name,
+        email: result.rows[0].email,
+        role: result.rows[0].role,
+        isActive: result.rows[0].is_active,
+      },
+    });
+  } catch (error) {
+    console.error('Register Super Admin Error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create Super Admin',
+      error: error.message,
     });
   }
 };

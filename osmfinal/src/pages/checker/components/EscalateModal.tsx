@@ -1,21 +1,36 @@
-import { useState, useCallback } from "react";
+// src/pages/checker/components/EscalateModal.tsx
+
+import { useState, useCallback } from 'react';
 
 interface EscalateModalProps {
   totalAwarded: number;
   totalMax: number;
-  onEscalate: () => void;
+  onEscalate: (data: {
+    reason: string;
+    escalateType: string;
+    remarks: string;
+  }) => void;
   onCancel: () => void;
 }
 
 const REASON_OPTIONS = [
-  { value: "", label: "Select a reason..." },
-  { value: "wrong-scanning", label: "Wrong scanning — sheet is blurred or unreadable" },
-  { value: "wrong-subject", label: "Wrong subject — sheet belongs to different subject" },
-  { value: "wrong-student", label: "Wrong student — roll number mismatch" },
-  { value: "incomplete", label: "Incomplete sheet — pages are missing" },
-  { value: "damaged", label: "Damaged sheet — sheet is torn or unreadable" },
-  { value: "double-answer", label: "Double answer — student wrote two answers for same question" },
-  { value: "other", label: "Other — specify in remarks below" },
+  { value: '', label: 'Select a reason...' },
+  {
+    value: 'wrong-scanning',
+    label: 'Wrong scanning — sheet is blurred or unreadable',
+  },
+  {
+    value: 'wrong-subject',
+    label: 'Wrong subject — sheet belongs to different subject',
+  },
+  { value: 'wrong-student', label: 'Wrong student — roll number mismatch' },
+  { value: 'incomplete', label: 'Incomplete sheet — pages are missing' },
+  { value: 'damaged', label: 'Damaged sheet — sheet is torn or unreadable' },
+  {
+    value: 'double-answer',
+    label: 'Double answer — student wrote two answers for same question',
+  },
+  { value: 'other', label: 'Other — specify in remarks below' },
 ];
 
 export default function EscalateModal({
@@ -24,37 +39,45 @@ export default function EscalateModal({
   onEscalate,
   onCancel,
 }: EscalateModalProps) {
-  const [reason, setReason] = useState("");
-  const [remarks, setRemarks] = useState("");
-  const [reasonError, setReasonError] = useState("");
-  const [remarksError, setRemarksError] = useState("");
+  const [reason, setReason] = useState('');
+  const [remarks, setRemarks] = useState('');
+  const [reasonError, setReasonError] = useState('');
+  const [remarksError, setRemarksError] = useState('');
 
-  const isOther = reason === "other";
-  const canEscalate = reason !== "" && (!isOther || remarks.trim() !== "");
+  const isOther = reason === 'other';
+  const canEscalate = reason !== '' && (!isOther || remarks.trim() !== '');
 
   const handleEscalate = useCallback(() => {
-    setReasonError("");
-    setRemarksError("");
+    setReasonError('');
+    setRemarksError('');
 
     if (!reason) {
-      setReasonError("Please select a reason");
+      setReasonError('Please select a reason');
       return;
     }
 
-    if (isOther && remarks.trim() === "") {
-      setRemarksError("Please add remarks for Other reason");
+    if (isOther && remarks.trim() === '') {
+      setRemarksError('Please add remarks for Other reason');
       return;
     }
 
-    onEscalate();
+    // ✅ Pass data to parent
+    const reasonLabel =
+      REASON_OPTIONS.find((r) => r.value === reason)?.label || reason;
+
+    onEscalate({
+      reason: reasonLabel,
+      escalateType: reason,
+      remarks: remarks.trim(),
+    });
   }, [reason, isOther, remarks, onEscalate]);
 
   const handleReasonChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       setReason(e.target.value);
-      setReasonError("");
-      if (e.target.value !== "other") {
-        setRemarksError("");
+      setReasonError('');
+      if (e.target.value !== 'other') {
+        setRemarksError('');
       }
     },
     [],
@@ -65,8 +88,8 @@ export default function EscalateModal({
       const val = e.target.value;
       if (val.length <= 500) {
         setRemarks(val);
-        if (val.trim() !== "") {
-          setRemarksError("");
+        if (val.trim() !== '') {
+          setRemarksError('');
         }
       }
     },
@@ -118,15 +141,15 @@ export default function EscalateModal({
               onChange={handleReasonChange}
               className={`w-full h-9 px-2.5 text-xs rounded-lg border bg-white text-slate-700 outline-none cursor-pointer transition-colors ${
                 reasonError
-                  ? "border-red-400 focus:ring-1 focus:ring-red-400"
-                  : "border-slate-200 focus:ring-1 focus:ring-sky-400 focus:border-sky-400"
+                  ? 'border-red-400 focus:ring-1 focus:ring-red-400'
+                  : 'border-slate-200 focus:ring-1 focus:ring-sky-400 focus:border-sky-400'
               }`}
             >
               {REASON_OPTIONS.map((opt) => (
                 <option
                   key={opt.value}
                   value={opt.value}
-                  disabled={opt.value === ""}
+                  disabled={opt.value === ''}
                 >
                   {opt.label}
                 </option>
@@ -148,7 +171,7 @@ export default function EscalateModal({
                   Remarks <span className="text-red-500">*</span>
                 </>
               ) : (
-                "Remarks (optional)"
+                'Remarks (optional)'
               )}
             </label>
             <textarea
@@ -160,8 +183,8 @@ export default function EscalateModal({
               placeholder="Add any additional notes for the admin..."
               className={`w-full px-2.5 py-2 text-xs rounded-lg border bg-white text-slate-700 outline-none resize-none transition-colors placeholder:text-slate-400 ${
                 remarksError
-                  ? "border-red-400 focus:ring-1 focus:ring-red-400"
-                  : "border-slate-200 focus:ring-1 focus:ring-sky-400 focus:border-sky-400"
+                  ? 'border-red-400 focus:ring-1 focus:ring-red-400'
+                  : 'border-slate-200 focus:ring-1 focus:ring-sky-400 focus:border-sky-400'
               }`}
             />
             {remarksError && (
@@ -174,7 +197,10 @@ export default function EscalateModal({
             <span className="text-xs text-slate-500">Total marks awarded</span>
             <span className="text-sm font-bold text-slate-800 tabular-nums">
               {totalAwarded}
-              <span className="text-xs font-normal text-slate-400"> / {totalMax}</span>
+              <span className="text-xs font-normal text-slate-400">
+                {' '}
+                / {totalMax}
+              </span>
             </span>
           </div>
         </div>
