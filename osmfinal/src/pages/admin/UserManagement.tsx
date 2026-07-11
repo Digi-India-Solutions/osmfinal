@@ -1,4 +1,5 @@
-// pages/admin/UserManagement.tsx
+// src/pages/admin/UserManagement.tsx
+
 import { useState, useEffect, useRef } from 'react';
 import { userApi, CreateUserData } from '@/api/users';
 import { useAuth } from '@/context/AuthContext';
@@ -8,6 +9,7 @@ import { usePageLoading } from '@/hooks/usePageLoading';
 
 const roleOptions: { value: User['role']; label: string }[] = [
   { value: 'admin', label: 'Admin' },
+  { value: 'super_admin', label: 'Super Admin' }, // ✅ Add Super Admin
   { value: 'teacher', label: 'Teacher' },
   { value: 'checker', label: 'Checker' },
   { value: 'teacher_checker', label: 'Teacher + Checker' },
@@ -16,6 +18,7 @@ const roleOptions: { value: User['role']; label: string }[] = [
 
 const roleBadgeColors: Record<string, string> = {
   admin: 'bg-gray-900 text-white',
+  super_admin: 'bg-purple-900 text-white', // ✅ Super Admin color
   teacher: 'bg-emerald-100 text-emerald-700',
   checker: 'bg-amber-100 text-amber-700',
   teacher_checker: 'bg-sky-100 text-sky-700',
@@ -35,7 +38,7 @@ interface User {
 
 export default function UserManagement() {
   const loading = usePageLoading();
-  const { hasPermission } = useAuth();
+  const { hasPermission, currentUser } = useAuth();
   const [userList, setUserList] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -218,9 +221,26 @@ export default function UserManagement() {
 
   // ─── DELETE USER ──────────────────────────────────────────────
 
+  // ✅ Check if user can be deleted (Super Admin and Admin cannot be deleted)
+  const canDeleteUser = (user: User): boolean => {
+    // Super Admin ko delete nahi kar sakte
+    if (user.role === 'super_admin') return false;
+    // Admin ko delete nahi kar sakte
+    if (user.role === 'admin') return false;
+    // Current logged-in user ko delete nahi kar sakte
+    if (currentUser?.id === user.id) return false;
+    return true;
+  };
+
   const openDeleteModal = (user: User) => {
-    if (user.role === 'admin') {
-      showToast('Cannot delete admin user', 'error');
+    if (!canDeleteUser(user)) {
+      if (user.role === 'super_admin') {
+        showToast('Cannot delete Super Admin user', 'error');
+      } else if (user.role === 'admin') {
+        showToast('Cannot delete Admin user', 'error');
+      } else if (currentUser?.id === user.id) {
+        showToast('Cannot delete your own account', 'error');
+      }
       return;
     }
     setUserToDelete(user);
@@ -352,62 +372,76 @@ export default function UserManagement() {
                   </td>
                 </tr>
               ) : (
-                userList.map((user) => (
-                  <tr
-                    key={user.id}
-                    className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
-                  >
-                    <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
-                      {user.name}
-                    </td>
-                    <td className="py-3 px-4 text-gray-600 text-xs whitespace-nowrap">
-                      {user.email}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${roleBadgeColors[user.role]}`}
-                      >
-                        {roleOptions.find((r) => r.value === user.role)
-                          ?.label || user.role}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
-                      {user.subject || '—'}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${
-                          user.isActive
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-gray-100 text-gray-500'
-                        }`}
-                      >
-                        {user.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => openEdit(user)}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors cursor-pointer"
-                          title="Edit User"
-                        >
-                          <i className="ri-edit-line text-sm"></i>
-                        </button>
+                userList.map((user) => {
+                  const isSuperAdmin = user.role === 'super_admin';
+                  const isAdmin = user.role === 'admin';
+                  const isCurrentUser = currentUser?.id === user.id;
+                  const showDelete =
+                    !isSuperAdmin && !isAdmin && !isCurrentUser;
 
-                        {user.role !== 'admin' && (
-                          <button
-                            onClick={() => openDeleteModal(user)}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                            title="Delete Permanently"
-                          >
-                            <i className="ri-delete-bin-line text-sm"></i>
-                          </button>
+                  return (
+                    <tr
+                      key={user.id}
+                      className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
+                    >
+                      <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
+                        {user.name}
+                        {isCurrentUser && (
+                          <span className="ml-2 text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                            You
+                          </span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="py-3 px-4 text-gray-600 text-xs whitespace-nowrap">
+                        {user.email}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${roleBadgeColors[user.role]}`}
+                        >
+                          {roleOptions.find((r) => r.value === user.role)
+                            ?.label || user.role}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                        {user.subject || '—'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${
+                            user.isActive
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                        >
+                          {user.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openEdit(user)}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors cursor-pointer"
+                            title="Edit User"
+                          >
+                            <i className="ri-edit-line text-sm"></i>
+                          </button>
+
+                          {/* ✅ Delete button - only for non-admin, non-super-admin, non-current-user */}
+                          {showDelete && (
+                            <button
+                              onClick={() => openDeleteModal(user)}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Delete Permanently"
+                            >
+                              <i className="ri-delete-bin-line text-sm"></i>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -419,12 +453,12 @@ export default function UserManagement() {
       {showModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-          onClick={handleModalClose} // ✅ Click outside = close
+          onClick={handleModalClose}
         >
           <div
             ref={modalRef}
             className="bg-white rounded-2xl w-full max-w-lg mx-4 p-6"
-            onClick={(e) => e.stopPropagation()} // ✅ Prevent closing when clicking inside
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-5">
               <h4 className="text-base font-semibold text-gray-900">
@@ -590,12 +624,12 @@ export default function UserManagement() {
       {showDeleteModal && userToDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-          onClick={handleDeleteModalClose} // ✅ Click outside = close
+          onClick={handleDeleteModalClose}
         >
           <div
             ref={deleteModalRef}
             className="bg-white rounded-2xl w-full max-w-md mx-4 p-6"
-            onClick={(e) => e.stopPropagation()} // ✅ Prevent closing when clicking inside
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="text-center">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
