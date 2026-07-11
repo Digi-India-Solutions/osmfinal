@@ -4,8 +4,6 @@ import pool from '../pool.js';
 
 // ─── GET ALL SHEETS ─────────────────────────────────────────────
 
-// ─── GET ALL SHEETS ─────────────────────────────────────────────
-
 export const getSheets = async (req, res) => {
   try {
     const { examId, status, search, page = 1, limit = 50 } = req.query;
@@ -43,6 +41,7 @@ export const getSheets = async (req, res) => {
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // ✅ FIXED: Added assigned_to and assigned_to_name
     let query = `
       SELECT 
         s.id,
@@ -65,9 +64,11 @@ export const getSheets = async (req, res) => {
         s.escalate_remarks,
         s.escalated_by,
         s.escalated_at,
+        s.assigned_to,
         e.name AS exam_name,
         e.subject AS exam_subject,
         u.name AS uploaded_by_name,
+        assigned_user.name AS assigned_to_name,
         (
           SELECT COUNT(*) 
           FROM recheck_requests rr 
@@ -76,6 +77,7 @@ export const getSheets = async (req, res) => {
       FROM sheets s
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN users u ON s.uploaded_by = u.id
+      LEFT JOIN users assigned_user ON s.assigned_to = assigned_user.id
       ${whereClause}
       ORDER BY s.created_at DESC
     `;
@@ -94,7 +96,7 @@ export const getSheets = async (req, res) => {
     const countResult = await pool.query(countQuery, params);
     const total = countResult.rows[0]?.total || 0;
 
-    // ✅ Get status counts for tabs - WITH ESCALATED
+    // ✅ Get status counts for tabs
     let statsQuery = `
       SELECT 
         COUNT(*) AS all_count,
@@ -108,11 +110,11 @@ export const getSheets = async (req, res) => {
     if (whereClause) {
       statsQuery += ` ${whereClause}`;
     }
-    
+
     const statsResult = await pool.query(statsQuery, params);
     const stats = statsResult.rows[0] || {};
 
-    console.log('🔍 Stats:', stats); // Debug log
+    console.log('🔍 Stats:', stats);
 
     return res.status(200).json({
       success: true,
@@ -129,7 +131,7 @@ export const getSheets = async (req, res) => {
           checking: parseInt(stats.checking_count || 0),
           rechecking: parseInt(stats.rechecking_count || 0),
           completed: parseInt(stats.completed_count || 0),
-          escalated: parseInt(stats.escalated_count || 0), // ✅ New
+          escalated: parseInt(stats.escalated_count || 0),
         },
       },
     });
@@ -142,6 +144,7 @@ export const getSheets = async (req, res) => {
     });
   }
 };
+
 // ─── GET SINGLE SHEET ──────────────────────────────────────────
 
 export const getSheetById = async (req, res) => {
@@ -154,6 +157,7 @@ export const getSheetById = async (req, res) => {
         e.name AS exam_name,
         e.subject AS exam_subject,
         u.name AS uploaded_by_name,
+        assigned_user.name AS assigned_to_name,
         (
           SELECT COUNT(*) 
           FROM recheck_requests rr 
@@ -162,6 +166,7 @@ export const getSheetById = async (req, res) => {
       FROM sheets s
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN users u ON s.uploaded_by = u.id
+      LEFT JOIN users assigned_user ON s.assigned_to = assigned_user.id
       WHERE s.id = $1`,
       [id],
     );
@@ -193,8 +198,7 @@ export const getSheetById = async (req, res) => {
 export const updateSheetStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, marks } = req.body;
-    const userId = req.user.id;
+    const { status, marks, assigned_to } = req.body;
 
     const validStatuses = [
       'uploaded',
@@ -225,6 +229,20 @@ export const updateSheetStatus = async (req, res) => {
       updates.push(`marks = $${paramCount}`);
       values.push(marks);
       paramCount++;
+    }
+
+    // ✅ Handle assignment
+    if (assigned_to !== undefined) {
+      updates.push(`assigned_to = $${paramCount}`);
+      values.push(assigned_to);
+      paramCount++;
+
+      // Agar assigned_to set hai toh status bhi 'assigned' karo
+      if (assigned_to && !status) {
+        updates.push(`status = $${paramCount}`);
+        values.push('assigned');
+        paramCount++;
+      }
     }
 
     if (updates.length === 0) {
@@ -345,9 +363,14 @@ export const flagForRecheck = async (req, res) => {
           [sheetId, sheet.exam_id, reason, userId, assignTo, 'pending'],
         );
 
+        // ✅ Update sheet status AND assigned_to
         await client.query(
-          `UPDATE sheets SET status = 'recheck', updated_at = NOW() WHERE id = $1`,
-          [sheetId],
+          `UPDATE sheets 
+           SET status = 'recheck', 
+               assigned_to = $1,
+               updated_at = NOW() 
+           WHERE id = $2`,
+          [assignTo, sheetId],
         );
       }
 
@@ -542,6 +565,14 @@ export const updateRecheckRequestStatus = async (req, res) => {
       });
     }
 
+    // ✅ If recheck is completed, update sheet status
+    if (status === 'completed') {
+      await pool.query(
+        `UPDATE sheets SET status = 'rechecked', updated_at = NOW() WHERE id = $1`,
+        [rows[0].sheet_id],
+      );
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Recheck request updated successfully',
@@ -578,6 +609,75 @@ export const getRecheckUsers = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get recheck users',
+      error: error.message,
+    });
+  }
+};
+
+// ─── ASSIGN SHEET TO CHECKER ──────────────────────────────────
+
+export const assignSheet = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { assigned_to } = req.body;
+
+    if (!assigned_to) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please select a checker to assign',
+      });
+    }
+
+    // Check if sheet exists
+    const sheetResult = await pool.query(
+      `SELECT id, status FROM sheets WHERE id = $1`,
+      [id],
+    );
+
+    if (sheetResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sheet not found',
+      });
+    }
+
+    // Check if user exists and has checker role or admin
+    const userResult = await pool.query(
+      `SELECT id, name FROM users 
+       WHERE id = $1 AND (role = 'checker' OR role = 'admin') AND is_active = true`,
+      [assigned_to],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid checker selected',
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE sheets 
+       SET assigned_to = $1, 
+           status = 'assigned',
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [assigned_to, id],
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Sheet assigned successfully',
+      data: {
+        sheet: result.rows[0],
+        assigned_to_name: userResult.rows[0].name,
+      },
+    });
+  } catch (error) {
+    console.error('assignSheet error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to assign sheet',
       error: error.message,
     });
   }

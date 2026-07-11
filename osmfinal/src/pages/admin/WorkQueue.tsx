@@ -1,3 +1,5 @@
+// src/pages/admin/WorkQueue.tsx
+
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import Breadcrumb from '@/components/ui/Breadcrumb';
 import StatusBadge from '@/components/ui/StatusBadge';
@@ -98,11 +100,6 @@ export default function WorkQueue() {
 
   // ─── FETCH EXAMS ────────────────────────────────────────────
 
-  // WorkQueue.tsx
-  // ─── FETCH EXAMS ────────────────────────────────────────────
-
-  // ─── FETCH EXAMS ────────────────────────────────────────────
-
   useEffect(() => {
     const fetchExams = async () => {
       try {
@@ -111,12 +108,10 @@ export default function WorkQueue() {
           limit: 1000,
           excludeArchived: true,
         });
-        // ✅ Frontend me bhi filter karo (safety)
         const activeExams = res.data.filter(
           (exam) => exam.status !== 'archived',
         );
         setExams(activeExams);
-        console.log('🔍 Active exams:', activeExams);
       } catch (error) {
         console.error('Failed to fetch exams:', error);
       } finally {
@@ -125,6 +120,7 @@ export default function WorkQueue() {
     };
     fetchExams();
   }, []);
+
   // ─── FETCH SHEETS ────────────────────────────────────────────
 
   const fetchSheets = useCallback(async () => {
@@ -133,43 +129,49 @@ export default function WorkQueue() {
       const params: any = { limit: 1000 };
 
       if (filterExam) params.examId = filterExam;
-      console.log('🔍 Filtering by exam:', filterExam); // ✅ Debug
       if (searchName) params.search = searchName;
 
-      // ✅ Status filter
+      // ✅ Status filter - EXCLUDING 'assigned'
       if (activeTab !== 'all') {
         const statusMap: Record<Exclude<TabKey, 'all'>, string> = {
-          pending: 'uploaded,assigned',
+          pending: 'uploaded,linked', // ✅ Removed 'assigned' from pending
           checking: 'checking',
           rechecking: 'recheck',
           completed: 'checked,rechecked',
           escalated: 'escalated',
         };
         params.status = statusMap[activeTab as Exclude<TabKey, 'all'>];
+      } else {
+        // ✅ 'All' tab mein bhi 'assigned' exclude karo
+        // Sirf wo sheets dikhao jo actual work me hain
+        params.status =
+          'checking,recheck,escalated,uploaded,linked,checked,rechecked';
+        // 'assigned' ko intentionally exclude kiya
       }
-
-      console.log('🔍 Active Tab:', activeTab);
-      console.log('🔍 Params:', params);
 
       const response = await workQueueService.getSheets(params);
 
-      console.log('🔍 Response:', response);
-
       if (response.success) {
-        setSheets(response.data.items || []);
+        // ✅ Frontend me bhi filter karo - 'assigned' status wali sheets hatao
+        let filteredSheets = response.data.items || [];
+
+        // 🔥 CRITICAL: Remove 'assigned' status sheets
+        filteredSheets = filteredSheets.filter(
+          (sheet: Sheet) => sheet.status !== 'assigned',
+        );
+
+        setSheets(filteredSheets);
 
         const statsData = response.data.stats || {};
 
         setStats({
-          all: parseInt(statsData.all || 0),
+          all: filteredSheets.length, // ✅ Sirf filtered count
           pending: parseInt(statsData.pending || 0),
           checking: parseInt(statsData.checking || 0),
           rechecking: parseInt(statsData.rechecking || 0),
           completed: parseInt(statsData.completed || 0),
           escalated: parseInt(statsData.escalated || 0),
         });
-
-        console.log('📊 Stats set:', statsData);
       } else {
         showToast(response.message || 'Failed to load sheets', 'error');
       }
@@ -263,7 +265,7 @@ export default function WorkQueue() {
 
   const getTabCount = (key: TabKey): number => {
     const map: Record<TabKey, number> = {
-      all: stats.all,
+      all: sheets.length, // ✅ Filtered count
       pending: stats.pending,
       checking: stats.checking,
       rechecking: stats.rechecking,
@@ -366,17 +368,13 @@ export default function WorkQueue() {
             </div>
             <select
               value={filterExam}
-              onChange={
-                (e) => setFilterExam(e.target.value) // ✅ Number() remove karo
-              }
+              onChange={(e) => setFilterExam(e.target.value)}
               className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer"
               disabled={examsLoading}
             >
               <option value="">All Exams</option>
               {exams.map((exam) => (
                 <option key={exam.id} value={exam.id}>
-                  {' '}
-                  {/* ✅ ID string hai */}
                   {exam.name}
                 </option>
               ))}
@@ -420,7 +418,6 @@ export default function WorkQueue() {
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Status
                   </th>
-                  {/* ✅ Show Escalation Reason in separate column for escalated tab */}
                   {activeTab === 'escalated' && (
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                       Escalation Reason
@@ -469,14 +466,12 @@ export default function WorkQueue() {
                             {sheet.pending_recheck_count} recheck
                           </span>
                         )}
-                        {/* ✅ Show escalation badge with reason */}
                         {isEscalated && sheet.escalate_reason && (
                           <div className="mt-1 text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full inline-block max-w-[150px] truncate">
                             {getEscalationReasonDisplay(sheet)}
                           </div>
                         )}
                       </td>
-                      {/* ✅ Escalation Reason column */}
                       {activeTab === 'escalated' && (
                         <td className="py-3 px-4 text-xs text-gray-600 whitespace-nowrap max-w-[200px] truncate">
                           {sheet.escalate_reason || '—'}

@@ -107,6 +107,8 @@ export const getAvailableCheckers = async (req, res) => {
 
 // ─── ASSIGN SHEETS TO CHECKER ──────────────────────────────────
 
+// src/assignments/assignment-controller.js
+
 export const assignSheets = async (req, res) => {
   try {
     const { examId } = req.params;
@@ -126,7 +128,7 @@ export const assignSheets = async (req, res) => {
     }
 
     const checkerResult = await pool.query(
-      `SELECT id, role, subject FROM users 
+      `SELECT id, name, role, subject FROM users 
        WHERE id = $1 AND is_active = true 
        AND (role = 'checker' OR role = 'teacher_checker')`,
       [checkerId],
@@ -148,7 +150,6 @@ export const assignSheets = async (req, res) => {
 
     const examSubject = examResult.rows[0]?.subject || null;
 
-    // ✅ FIX: Case-insensitive comparison
     if (checker.role === 'teacher_checker' && checker.subject && examSubject) {
       if (!isSubjectMatch(checker.subject, examSubject)) {
         return res.status(400).json({
@@ -185,6 +186,7 @@ export const assignSheets = async (req, res) => {
             continue;
           }
 
+          // ✅ Insert into assignments table
           await client.query(
             `INSERT INTO assignments (
               exam_id, sheet_id, checker_id, assigned_by, status
@@ -192,9 +194,14 @@ export const assignSheets = async (req, res) => {
             [examId, sheetId, checkerId, userId],
           );
 
+          // ✅ CRITICAL: Update sheets table with assigned_to
           await client.query(
-            `UPDATE sheets SET status = 'assigned' WHERE id = $1`,
-            [sheetId],
+            `UPDATE sheets 
+             SET status = 'assigned', 
+                 assigned_to = $1,
+                 updated_at = NOW()
+             WHERE id = $2`,
+            [checkerId, sheetId],
           );
 
           assignedCount++;
@@ -214,6 +221,7 @@ export const assignSheets = async (req, res) => {
           checker: {
             id: checker.id,
             name: checker.name,
+            role: checker.role,
           },
         },
       });
@@ -232,6 +240,8 @@ export const assignSheets = async (req, res) => {
     });
   }
 };
+
+// ─── RANDOM ASSIGNMENT ──────────────────────────────────────────
 
 // ─── RANDOM ASSIGNMENT ──────────────────────────────────────────
 
@@ -280,7 +290,6 @@ export const randomAssignment = async (req, res) => {
 
     let eligibleCheckers = checkersResult.rows;
 
-    // ✅ FIX: Case-insensitive comparison
     if (examSubject) {
       eligibleCheckers = eligibleCheckers.filter((checker) => {
         if (checker.role === 'teacher_checker' && checker.subject) {
@@ -325,9 +334,14 @@ export const randomAssignment = async (req, res) => {
             [examId, sheetId, checker.id, userId],
           );
 
+          // ✅ CRITICAL: Update sheets table with assigned_to
           await client.query(
-            `UPDATE sheets SET status = 'assigned' WHERE id = $1`,
-            [sheetId],
+            `UPDATE sheets 
+             SET status = 'assigned', 
+                 assigned_to = $1,
+                 updated_at = NOW()
+             WHERE id = $2`,
+            [checker.id, sheetId],
           );
 
           assignments.push({
