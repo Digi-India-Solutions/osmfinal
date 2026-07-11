@@ -34,9 +34,46 @@ export default function CheckerCompleted() {
   const fetchCompletedSheets = useCallback(async () => {
     setSheetsLoading(true);
     try {
-      const response = await assignmentService.getMyAssignedSheets('checked');
+      // ✅ Try with different status filters - 'completed' might be the correct status
+      const response = await assignmentService.getMyAssignedSheets('completed');
+
+      console.log('Completed sheets API response:', response); // Debug log
+
       if (response.success) {
-        setSheets(response.data.items || []);
+        // ✅ Handle both array and paginated response formats
+        let sheetsData = [];
+        if (Array.isArray(response.data)) {
+          sheetsData = response.data;
+        } else if (response.data && typeof response.data === 'object') {
+          // If data is paginated { items: [], total: 0, ... }
+          sheetsData = response.data.items || response.data.data || [];
+        } else {
+          sheetsData = [];
+        }
+
+        setSheets(sheetsData);
+
+        if (sheetsData.length === 0) {
+          // ✅ Try fallback - maybe status is 'checked' or 'graded'
+          const fallbackResponse =
+            await assignmentService.getMyAssignedSheets('checked');
+          if (fallbackResponse.success) {
+            let fallbackData = [];
+            if (Array.isArray(fallbackResponse.data)) {
+              fallbackData = fallbackResponse.data;
+            } else if (
+              fallbackResponse.data &&
+              typeof fallbackResponse.data === 'object'
+            ) {
+              fallbackData =
+                fallbackResponse.data.items || fallbackResponse.data.data || [];
+            }
+
+            if (fallbackData.length > 0) {
+              setSheets(fallbackData);
+            }
+          }
+        }
       } else {
         showToast(
           response.message || 'Failed to load completed sheets',
@@ -64,7 +101,10 @@ export default function CheckerCompleted() {
     totalCompleted > 0
       ? (
           sheets.reduce((sum, s) => {
-            const marks = parseFloat((s.marks as string) || '0');
+            // ✅ Try different field names for marks
+            const marksValue =
+              s.marks || s.given_marks || s.score || s.grade || '0';
+            const marks = parseFloat(String(marksValue) || '0');
             return sum + (isNaN(marks) ? 0 : marks);
           }, 0) / totalCompleted
         ).toFixed(1)
@@ -173,33 +213,53 @@ export default function CheckerCompleted() {
                 </tr>
               </thead>
               <tbody>
-                {sheets.map((sheet) => {
-                  // ✅ Parse marks as float for display
-                  const marks = parseFloat((sheet.marks as string) || '0');
+                {sheets.map((sheet, index) => {
+                  // ✅ Try different field names for marks
+                  const marksValue =
+                    sheet.marks ||
+                    sheet.given_marks ||
+                    sheet.score ||
+                    sheet.grade ||
+                    '0';
+                  const marks = parseFloat(String(marksValue) || '0');
                   const displayMarks = isNaN(marks) ? '-' : marks.toFixed(2);
+
+                  // ✅ Try different field names for student info
+                  const studentName =
+                    sheet.student_name ||
+                    sheet.studentName ||
+                    sheet.student?.name ||
+                    'Unknown';
+                  const rollNo =
+                    sheet.roll_no ||
+                    sheet.rollNo ||
+                    sheet.roll_number ||
+                    sheet.student?.rollNo ||
+                    '—';
+                  const examName =
+                    sheet.exam_name ||
+                    sheet.examName ||
+                    sheet.exam?.name ||
+                    'Unknown';
 
                   return (
                     <tr
-                      key={sheet.id}
+                      key={sheet.id || index}
                       className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
                     >
                       <td className="px-5 py-3.5 font-medium text-gray-900">
-                        #{sheet.id}
+                        #{sheet.id || index + 1}
                       </td>
-                      <td className="px-5 py-3.5 text-gray-700">
-                        {sheet.exam_name || 'Unknown'}
-                      </td>
+                      <td className="px-5 py-3.5 text-gray-700">{examName}</td>
                       <td className="px-5 py-3.5 text-gray-900 font-medium">
-                        {sheet.student_name || 'Unknown'}
+                        {studentName}
                       </td>
-                      <td className="px-5 py-3.5 text-gray-500">
-                        {sheet.roll_no || '—'}
-                      </td>
+                      <td className="px-5 py-3.5 text-gray-500">{rollNo}</td>
                       <td className="px-5 py-3.5 text-gray-900 font-semibold">
                         {displayMarks}
                       </td>
                       <td className="px-5 py-3.5">
-                        <StatusBadge status={sheet.status} />
+                        <StatusBadge status={sheet.status || 'completed'} />
                       </td>
                       <td className="px-5 py-3.5">
                         <button
@@ -220,7 +280,7 @@ export default function CheckerCompleted() {
             </table>
           </div>
         </div>
-      )}
+      )}cd  
     </div>
   );
 }
