@@ -1,3 +1,5 @@
+// src/checker/checkerMarkingCont.js
+
 import pool from '../pool.js';
 
 // ─── SAVE DRAFT MARKS ──────────────────────────────────────────
@@ -6,8 +8,14 @@ export const saveDraft = async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user.id;
-    const { marksData, annotationsData, stampsData, totalMarks, remarks } =
-      req.body;
+    const {
+      marksData,
+      annotationsData,
+      stampsData,
+      totalMarks,
+      remarks,
+      timeSpent,
+    } = req.body;
 
     // Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
@@ -27,14 +35,13 @@ export const saveDraft = async (req, res) => {
 
     const examId = assignmentCheck.rows[0].exam_id;
 
-    // ✅ CRITICAL FIX: Check if already submitted
+    // Check if already submitted
     const existing = await pool.query(
       `SELECT id, is_submitted FROM checker_markings 
        WHERE sheet_id = $1 AND checker_id = $2`,
       [sheetId, userId],
     );
 
-    // ✅ If already submitted, don't allow draft save
     if (existing.rows.length > 0 && existing.rows[0].is_submitted === true) {
       return res.status(400).json({
         success: false,
@@ -45,7 +52,7 @@ export const saveDraft = async (req, res) => {
     let result;
 
     if (existing.rows.length > 0) {
-      // Update existing - always save as draft, don't change submitted status
+      // Update existing - always save as draft
       result = await pool.query(
         `UPDATE checker_markings 
          SET marks_data = $1,
@@ -53,9 +60,10 @@ export const saveDraft = async (req, res) => {
              stamps_data = $3,
              total_marks = $4,
              remarks = $5,
+             time_spent = $6,
              is_draft = true,
              updated_at = CURRENT_TIMESTAMP
-         WHERE sheet_id = $6 AND checker_id = $7
+         WHERE sheet_id = $7 AND checker_id = $8
          RETURNING *`,
         [
           JSON.stringify(marksData || {}),
@@ -63,6 +71,7 @@ export const saveDraft = async (req, res) => {
           JSON.stringify(stampsData || []),
           totalMarks || 0,
           remarks || null,
+          timeSpent || 0,
           sheetId,
           userId,
         ],
@@ -73,8 +82,8 @@ export const saveDraft = async (req, res) => {
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
           marks_data, annotations_data, stamps_data,
-          total_marks, remarks, is_draft
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+          total_marks, remarks, time_spent, is_draft
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
         RETURNING *`,
         [
           sheetId,
@@ -85,6 +94,7 @@ export const saveDraft = async (req, res) => {
           JSON.stringify(stampsData || []),
           totalMarks || 0,
           remarks || null,
+          timeSpent || 0,
         ],
       );
     }
@@ -94,9 +104,10 @@ export const saveDraft = async (req, res) => {
       `UPDATE sheets 
        SET marks = $1, 
            status = 'checking', 
+           checking_time_spent = $2,
            updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $2`,
-      [totalMarks || 0, sheetId],
+       WHERE id = $3`,
+      [totalMarks || 0, timeSpent || 0, sheetId],
     );
 
     return res.status(200).json({
@@ -120,8 +131,14 @@ export const submitMarks = async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user.id;
-    const { marksData, annotationsData, stampsData, totalMarks, remarks } =
-      req.body;
+    const {
+      marksData,
+      annotationsData,
+      stampsData,
+      totalMarks,
+      remarks,
+      timeSpent,
+    } = req.body;
 
     // Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
@@ -150,8 +167,11 @@ export const submitMarks = async (req, res) => {
 
     let result;
 
+    // ✅ Calculate final time spent (if provided)
+    const finalTimeSpent = timeSpent || 0;
+
     if (existing.rows.length > 0) {
-      // Update existing record - allow overwriting previous submission
+      // Update existing record
       result = await pool.query(
         `UPDATE checker_markings 
          SET marks_data = $1,
@@ -159,11 +179,12 @@ export const submitMarks = async (req, res) => {
              stamps_data = $3,
              total_marks = $4,
              remarks = $5,
+             time_spent = $6,
              is_draft = false,
              is_submitted = true,
              submitted_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
-         WHERE sheet_id = $6 AND checker_id = $7
+         WHERE sheet_id = $7 AND checker_id = $8
          RETURNING *`,
         [
           JSON.stringify(marksData || {}),
@@ -171,6 +192,7 @@ export const submitMarks = async (req, res) => {
           JSON.stringify(stampsData || []),
           totalMarks || 0,
           remarks || null,
+          finalTimeSpent,
           sheetId,
           userId,
         ],
@@ -181,8 +203,9 @@ export const submitMarks = async (req, res) => {
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
           marks_data, annotations_data, stamps_data,
-          total_marks, remarks, is_draft, is_submitted, submitted_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, CURRENT_TIMESTAMP)
+          total_marks, remarks, time_spent,
+          is_draft, is_submitted, submitted_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, true, CURRENT_TIMESTAMP)
         RETURNING *`,
         [
           sheetId,
@@ -193,24 +216,29 @@ export const submitMarks = async (req, res) => {
           JSON.stringify(stampsData || []),
           totalMarks || 0,
           remarks || null,
+          finalTimeSpent,
         ],
       );
     }
 
-    // Update sheet marks and status
+    // ✅ Update sheet marks, status AND time spent
     await pool.query(
       `UPDATE sheets 
        SET marks = $1, 
            status = 'checked', 
+           checking_time_spent = $2,
            updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $2`,
-      [totalMarks || 0, sheetId],
+       WHERE id = $3`,
+      [totalMarks || 0, finalTimeSpent, sheetId],
     );
 
     return res.status(200).json({
       success: true,
       message: 'Marks submitted successfully',
-      data: result.rows[0],
+      data: {
+        ...result.rows[0],
+        time_spent: finalTimeSpent,
+      },
     });
   } catch (error) {
     console.error('submitMarks error:', error);
@@ -236,7 +264,8 @@ export const getDraft = async (req, res) => {
         s.student_name,
         s.roll_no,
         e.name AS exam_name,
-        e.subject AS exam_subject
+        e.subject AS exam_subject,
+        e."spentTime" AS exam_spent_time
        FROM checker_markings cm
        JOIN sheets s ON cm.sheet_id = s.id
        JOIN exams e ON cm.exam_id = e.id
@@ -267,6 +296,7 @@ export const getDraft = async (req, res) => {
         stamps_data: row.stamps_data || [],
         total_marks: row.total_marks,
         remarks: row.remarks,
+        time_spent: row.time_spent || 0, // ✅ Return time spent
         is_draft: row.is_draft,
         is_submitted: row.is_submitted,
         submitted_at: row.submitted_at,
@@ -277,6 +307,7 @@ export const getDraft = async (req, res) => {
         roll_no: row.roll_no,
         exam_name: row.exam_name,
         exam_subject: row.exam_subject,
+        exam_spent_time: row.exam_spent_time || 0,
       },
     });
   } catch (error) {
@@ -302,6 +333,7 @@ export const getSubmittedMarks = async (req, res) => {
         s.status AS sheet_status,
         s.student_name,
         s.roll_no,
+        s.checking_time_spent,
         e.name AS exam_name,
         e.subject AS exam_subject,
         u.name AS checker_name
@@ -337,19 +369,21 @@ export const getSubmittedMarks = async (req, res) => {
 
 // ─── ESCALATE SHEET ─────────────────────────────────────────────
 
-// ─── ESCALATE SHEET ─────────────────────────────────────────────
-
-// ─── ESCALATE SHEET ─────────────────────────────────────────────
-
 export const escalateSheet = async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user.id;
-    const { reason, escalateType, remarks } = req.body;
+    const { reason, escalateType, remarks, timeSpent } = req.body;
 
-    console.log('🔍 Escalate request:', { sheetId, userId, reason, escalateType, remarks });
+    console.log('🔍 Escalate request:', {
+      sheetId,
+      userId,
+      reason,
+      escalateType,
+      remarks,
+      timeSpent,
+    });
 
-    // Validation
     if (!reason) {
       return res.status(400).json({
         success: false,
@@ -357,7 +391,6 @@ export const escalateSheet = async (req, res) => {
       });
     }
 
-    // Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
       `SELECT sheet_id, exam_id FROM assignments 
        WHERE sheet_id = $1 AND checker_id = $2 AND status = 'assigned'`,
@@ -373,7 +406,7 @@ export const escalateSheet = async (req, res) => {
 
     const examId = assignmentCheck.rows[0].exam_id;
 
-    // ✅ Update sheet status to 'escalated' with all details
+    // ✅ Update sheet status to 'escalated' with time spent
     const result = await pool.query(
       `UPDATE sheets 
        SET status = 'escalated',
@@ -382,10 +415,18 @@ export const escalateSheet = async (req, res) => {
            escalate_remarks = $3,
            escalated_by = $4,
            escalated_at = CURRENT_TIMESTAMP,
+           checking_time_spent = $5,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5
+       WHERE id = $6
        RETURNING *`,
-      [reason, escalateType || 'other', remarks || null, userId, sheetId],
+      [
+        reason,
+        escalateType || 'other',
+        remarks || null,
+        userId,
+        timeSpent || 0,
+        sheetId,
+      ],
     );
 
     if (result.rows.length === 0) {
@@ -395,31 +436,39 @@ export const escalateSheet = async (req, res) => {
       });
     }
 
-    // ✅ COMMENT OUT OR REMOVE - checker_markings update (columns don't exist)
-    // const markingExists = await pool.query(
-    //   `SELECT id FROM checker_markings 
-    //    WHERE sheet_id = $1 AND checker_id = $2`,
-    //   [sheetId, userId],
-    // );
-    //
-    // if (markingExists.rows.length > 0) {
-    //   await pool.query(
-    //     `UPDATE checker_markings 
-    //      SET is_escalated = true,
-    //          escalated_at = CURRENT_TIMESTAMP,
-    //          escalate_reason = $1,
-    //          escalate_type = $2,
-    //          escalate_remarks = $3,
-    //          updated_at = CURRENT_TIMESTAMP
-    //      WHERE sheet_id = $4 AND checker_id = $5`,
-    //     [reason, escalateType || 'other', remarks || null, sheetId, userId],
-    //   );
-    // }
+    // ✅ Also update checker_markings with time_spent
+    const markingExists = await pool.query(
+      `SELECT id FROM checker_markings 
+       WHERE sheet_id = $1 AND checker_id = $2`,
+      [sheetId, userId],
+    );
+
+    if (markingExists.rows.length > 0) {
+      await pool.query(
+        `UPDATE checker_markings 
+         SET time_spent = $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE sheet_id = $2 AND checker_id = $3`,
+        [timeSpent || 0, sheetId, userId],
+      );
+    } else {
+      // Insert if not exists
+      await pool.query(
+        `INSERT INTO checker_markings (
+          sheet_id, checker_id, exam_id,
+          time_spent, is_draft, is_submitted
+        ) VALUES ($1, $2, $3, $4, true, false)`,
+        [sheetId, userId, examId, timeSpent || 0],
+      );
+    }
 
     return res.status(200).json({
       success: true,
       message: 'Sheet escalated successfully',
-      data: result.rows[0],
+      data: {
+        ...result.rows[0],
+        time_spent: timeSpent || 0,
+      },
     });
   } catch (error) {
     console.error('escalateSheet error:', error);
@@ -449,6 +498,7 @@ export const getEscalatedSheets = async (req, res) => {
         s.escalate_remarks,
         s.escalated_by,
         s.escalated_at,
+        s.checking_time_spent,
         e.name AS exam_name,
         e.subject AS exam_subject,
         u.name AS escalated_by_name

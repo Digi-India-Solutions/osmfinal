@@ -280,7 +280,7 @@ export default function CheckerCompleted() {
             </table>
           </div>
         </div>
-      )}cd  
+      )}
     </div>
   );
 }

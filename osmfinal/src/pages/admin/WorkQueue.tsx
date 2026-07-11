@@ -1,3 +1,5 @@
+// src/pages/admin/WorkQueue.tsx
+
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import Breadcrumb from '@/components/ui/Breadcrumb';
 import StatusBadge from '@/components/ui/StatusBadge';
@@ -24,23 +26,18 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: 'escalated', label: 'Escalated' },
 ];
 
-function getDraftTimestamp(sheetId: number): string | null {
-  try {
-    const raw = localStorage.getItem(`osm_draft_sheet_${sheetId}`);
-    if (!raw) return null;
-    const draft = JSON.parse(raw);
-    if (draft.marks && draft.marks.length > 0 && draft.savedAt) {
-      const savedTime = new Date(draft.savedAt);
-      return savedTime.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-    }
-    return null;
-  } catch {
-    return null;
+// ✅ Format time spent in seconds to MM:SS or HH:MM:SS
+function formatTimeSpent(seconds: number | null | undefined): string {
+  if (!seconds || seconds === 0) return '—';
+
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (hrs > 0) {
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 export default function WorkQueue() {
@@ -98,11 +95,6 @@ export default function WorkQueue() {
 
   // ─── FETCH EXAMS ────────────────────────────────────────────
 
-  // WorkQueue.tsx
-  // ─── FETCH EXAMS ────────────────────────────────────────────
-
-  // ─── FETCH EXAMS ────────────────────────────────────────────
-
   useEffect(() => {
     const fetchExams = async () => {
       try {
@@ -111,12 +103,10 @@ export default function WorkQueue() {
           limit: 1000,
           excludeArchived: true,
         });
-        // ✅ Frontend me bhi filter karo (safety)
         const activeExams = res.data.filter(
           (exam) => exam.status !== 'archived',
         );
         setExams(activeExams);
-        console.log('🔍 Active exams:', activeExams);
       } catch (error) {
         console.error('Failed to fetch exams:', error);
       } finally {
@@ -125,6 +115,7 @@ export default function WorkQueue() {
     };
     fetchExams();
   }, []);
+
   // ─── FETCH SHEETS ────────────────────────────────────────────
 
   const fetchSheets = useCallback(async () => {
@@ -133,43 +124,45 @@ export default function WorkQueue() {
       const params: any = { limit: 1000 };
 
       if (filterExam) params.examId = filterExam;
-      console.log('🔍 Filtering by exam:', filterExam); // ✅ Debug
       if (searchName) params.search = searchName;
 
-      // ✅ Status filter
+      // ✅ Status filter - EXCLUDING 'assigned'
       if (activeTab !== 'all') {
         const statusMap: Record<Exclude<TabKey, 'all'>, string> = {
-          pending: 'uploaded,assigned',
+          pending: 'uploaded,linked',
           checking: 'checking',
           rechecking: 'recheck',
           completed: 'checked,rechecked',
           escalated: 'escalated',
         };
         params.status = statusMap[activeTab as Exclude<TabKey, 'all'>];
+      } else {
+        params.status =
+          'checking,recheck,escalated,uploaded,linked,checked,rechecked';
       }
-
-      console.log('🔍 Active Tab:', activeTab);
-      console.log('🔍 Params:', params);
 
       const response = await workQueueService.getSheets(params);
 
-      console.log('🔍 Response:', response);
-
       if (response.success) {
-        setSheets(response.data.items || []);
+        let filteredSheets = response.data.items || [];
+
+        // Remove 'assigned' status sheets
+        filteredSheets = filteredSheets.filter(
+          (sheet: Sheet) => sheet.status !== 'assigned',
+        );
+
+        setSheets(filteredSheets);
 
         const statsData = response.data.stats || {};
 
         setStats({
-          all: parseInt(statsData.all || 0),
+          all: filteredSheets.length,
           pending: parseInt(statsData.pending || 0),
           checking: parseInt(statsData.checking || 0),
           rechecking: parseInt(statsData.rechecking || 0),
           completed: parseInt(statsData.completed || 0),
           escalated: parseInt(statsData.escalated || 0),
         });
-
-        console.log('📊 Stats set:', statsData);
       } else {
         showToast(response.message || 'Failed to load sheets', 'error');
       }
@@ -263,7 +256,7 @@ export default function WorkQueue() {
 
   const getTabCount = (key: TabKey): number => {
     const map: Record<TabKey, number> = {
-      all: stats.all,
+      all: sheets.length,
       pending: stats.pending,
       checking: stats.checking,
       rechecking: stats.rechecking,
@@ -366,17 +359,13 @@ export default function WorkQueue() {
             </div>
             <select
               value={filterExam}
-              onChange={
-                (e) => setFilterExam(e.target.value) // ✅ Number() remove karo
-              }
+              onChange={(e) => setFilterExam(e.target.value)}
               className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer"
               disabled={examsLoading}
             >
               <option value="">All Exams</option>
               {exams.map((exam) => (
                 <option key={exam.id} value={exam.id}>
-                  {' '}
-                  {/* ✅ ID string hai */}
                   {exam.name}
                 </option>
               ))}
@@ -420,14 +409,14 @@ export default function WorkQueue() {
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Status
                   </th>
-                  {/* ✅ Show Escalation Reason in separate column for escalated tab */}
                   {activeTab === 'escalated' && (
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                       Escalation Reason
                     </th>
                   )}
+                  {/* ✅ Changed from "Last Saved" to "Time Spent" */}
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Last Saved
+                    Time Spent
                   </th>
                   <th className="text-right py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Actions
@@ -436,11 +425,16 @@ export default function WorkQueue() {
               </thead>
               <tbody>
                 {sheets.map((sheet) => {
-                  const draftTime = getDraftTimestamp(sheet.id);
                   const hasPendingRecheck = sheet.pending_recheck_count > 0;
                   const isRecheckDisabled =
                     sheet.status === 'recheck' || sheet.status === 'rechecked';
                   const isEscalated = sheet.status === 'escalated';
+
+                  // ✅ Get time_spent from sheet data
+                  const timeSpent =
+                    (sheet as any).time_spent ||
+                    (sheet as any).checking_time_spent ||
+                    0;
 
                   return (
                     <tr
@@ -469,14 +463,12 @@ export default function WorkQueue() {
                             {sheet.pending_recheck_count} recheck
                           </span>
                         )}
-                        {/* ✅ Show escalation badge with reason */}
                         {isEscalated && sheet.escalate_reason && (
                           <div className="mt-1 text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full inline-block max-w-[150px] truncate">
                             {getEscalationReasonDisplay(sheet)}
                           </div>
                         )}
                       </td>
-                      {/* ✅ Escalation Reason column */}
                       {activeTab === 'escalated' && (
                         <td className="py-3 px-4 text-xs text-gray-600 whitespace-nowrap max-w-[200px] truncate">
                           {sheet.escalate_reason || '—'}
@@ -487,14 +479,15 @@ export default function WorkQueue() {
                           )}
                         </td>
                       )}
+                      {/* ✅ Show Time Spent instead of Last Saved */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        {draftTime ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 font-medium">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
-                            {draftTime}
+                        {timeSpent > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-blue-400 font-medium">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
+                            {formatTimeSpent(timeSpent)}
                           </span>
                         ) : (
-                          <span className="text-xs text-gray-300">—</span>
+                          <span className="text-xs text-gray-400">—</span>
                         )}
                       </td>
                       <td className="py-3 px-4 text-right">

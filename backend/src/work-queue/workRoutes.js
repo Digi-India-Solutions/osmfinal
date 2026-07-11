@@ -10,6 +10,7 @@ import {
   getRecheckUsers,
   getRecheckRequestById,
   updateRecheckRequestStatus,
+  assignSheet, // ✅ New
 } from './workController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
@@ -28,6 +29,9 @@ router.patch('/sheets/:id/status', verifyToken, updateSheetStatus);
 
 // Flag sheet for recheck
 router.post('/sheets/:id/flag-for-recheck', verifyToken, flagForRecheck);
+
+// ✅ Assign sheet to checker
+router.post('/sheets/:id/assign', verifyToken, assignSheet);
 
 // ─── RECHECK ROUTES ─────────────────────────────────────────────
 
