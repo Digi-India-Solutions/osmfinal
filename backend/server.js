@@ -26,7 +26,7 @@ app.use(
           'http://localhost:3001',
           'https://osm.digiindiasolutions.com', // ✅ ADD
         ],
-        frameSrc: ["'self'", 'http://localhost:7000'],
+        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com/'],
         imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com'],
       },
     },
@@ -65,7 +65,7 @@ const allowedOrigins = [
   'http://192.168.166.80:3001',
   // Production
   'https://osm.digiindiasolutions.com',
-  'http://localhost:7000',
+  'https://osm.digiindiasolutions.com/',
 ];
 
 app.use(
@@ -109,8 +109,10 @@ import workQueueRoutes from './src/work-queue/workRoutes.js';
 import recheckRoutes from './src/recheck-queue/recheckRoute.js';
 import MarkscheckerRoutes from './src/checker-marking-controller/checkerMarkingRoutes.js';
 import TeacherRoutes from './src/teacherController/teacherRoutes.js';
+import AdminDashboardRoutes from './src/adminDashboard/adminDashboardROute.js';
 
 app.use('/api/v1/reports', reportsRouter);
+app.use('/api/v1/adminDashboard', AdminDashboardRoutes);
 app.use('/api/v1/auth', adminRouter);
 app.use('/api/v1/hash', hashRouter);
 app.use('/api/v1/setting', settingRoutes);

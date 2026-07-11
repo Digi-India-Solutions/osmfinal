@@ -395,7 +395,8 @@ export const startRecheckMarking = async (req, res) => {
     }
 
     // Build full file URL
-    const baseUrl = process.env.API_URL || 'http://localhost:7000';
+    const baseUrl =
+      process.env.API_URL || 'https://osm.digiindiasolutions.com/';
     const buildFullUrl = (path) => {
       if (!path) return null;
       if (path.startsWith('http://') || path.startsWith('https://'))
@@ -531,7 +532,7 @@ export const completeRecheck = async (req, res) => {
       annotationsData,
       stampsData,
       finalMarksRule,
-      timeSpent,  // ✅ timeSpent from frontend (rechecker ka time)
+      timeSpent, // ✅ timeSpent from frontend (rechecker ka time)
     } = req.body;
     const userId = req.user.id;
 
@@ -544,7 +545,8 @@ export const completeRecheck = async (req, res) => {
     if (checkResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Recheck request not found, not assigned to you, or already processed',
+        message:
+          'Recheck request not found, not assigned to you, or already processed',
       });
     }
 
@@ -671,7 +673,14 @@ export const saveRecheckDraft = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const { marksData, annotationsData, stampsData, totalMarks, remarks, timeSpent } = req.body;
+    const {
+      marksData,
+      annotationsData,
+      stampsData,
+      totalMarks,
+      remarks,
+      timeSpent,
+    } = req.body;
 
     const checkResult = await pool.query(
       `SELECT sheet_id, exam_id FROM recheck_requests 
@@ -682,7 +691,8 @@ export const saveRecheckDraft = async (req, res) => {
     if (checkResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Recheck request not found, not assigned to you, or already processed',
+        message:
+          'Recheck request not found, not assigned to you, or already processed',
       });
     }
 
@@ -882,7 +892,14 @@ export const escalateRecheckRequest = async (req, res) => {
            time_spent = COALESCE($5, time_spent, 0),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $6`,
-      [reason, escalateType || 'other', remarks || null, userId, timeSpent || 0, id],
+      [
+        reason,
+        escalateType || 'other',
+        remarks || null,
+        userId,
+        timeSpent || 0,
+        id,
+      ],
     );
 
     // ✅ Update sheet status to 'escalated' with time_spent
@@ -898,7 +915,14 @@ export const escalateRecheckRequest = async (req, res) => {
              checking_time_spent = COALESCE($5, checking_time_spent, 0),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $6`,
-        [reason, escalateType || 'other', remarks || null, userId, timeSpent || 0, sheetId],
+        [
+          reason,
+          escalateType || 'other',
+          remarks || null,
+          userId,
+          timeSpent || 0,
+          sheetId,
+        ],
       );
     }
 

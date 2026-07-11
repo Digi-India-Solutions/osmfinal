@@ -374,10 +374,10 @@ export default function UserManagement() {
               ) : (
                 userList.map((user) => {
                   const isSuperAdmin = user.role === 'super_admin';
-                  const isAdmin = user.role === 'admin';
+                  // const isAdmin = user.role === 'admin';
                   const isCurrentUser = currentUser?.id === user.id;
                   const showDelete =
-                    !isSuperAdmin && !isAdmin && !isCurrentUser;
+                    !isSuperAdmin  && !isCurrentUser;
 
                   return (
                     <tr
