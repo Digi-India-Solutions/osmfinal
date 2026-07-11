@@ -26,7 +26,7 @@ app.use(
           'http://localhost:3001',
           'https://osm.digiindiasolutions.com', // ✅ ADD
         ],
-        frameSrc: ["'self'", 'http://localhost:7000'],
+        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com/'],
         imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com'],
       },
     },
@@ -65,7 +65,7 @@ const allowedOrigins = [
   'http://192.168.166.80:3001',
   // Production
   'https://osm.digiindiasolutions.com',
-  'http://localhost:7000',
+  'https://osm.digiindiasolutions.com/',
 ];
 
 app.use(

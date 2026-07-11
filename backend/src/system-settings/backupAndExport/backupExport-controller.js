@@ -109,7 +109,8 @@ export const triggerBackup = async (req, res, next) => {
     }
 
     const fileSize = fs.statSync(filepath).size;
-    const baseUrl = process.env.BASE_URL || 'http://localhost:7000';
+    const baseUrl =
+      process.env.BASE_URL || 'https://osm.digiindiasolutions.com/';
     const downloadUrl = `${baseUrl}/backups/${filename}`;
 
     // 7. Audit log
