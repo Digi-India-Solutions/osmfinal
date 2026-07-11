@@ -1,5 +1,3 @@
-// src/pages/admin/ExamManagement.tsx
-
 import { useEffect, useState } from 'react';
 import Breadcrumb from '@/components/ui/Breadcrumb';
 import StatusBadge from '@/components/ui/StatusBadge';
@@ -37,6 +35,11 @@ export default function ExamManagement() {
   const [user, setUser] = useState(
     JSON.parse(localStorage.getItem('osm_user') || 'null'),
   );
+
+  // ─── SELECTION & DELETE STATE ────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'single'; id: number; name: string } | { type: 'bulk' } | null > (null);
+  const [deleting, setDeleting] = useState(false);
 
   const detailExam = detailExamId
     ? examList.find((e) => e.id === detailExamId) || null
@@ -204,6 +207,67 @@ export default function ExamManagement() {
     setDetailExamId(null);
   };
 
+  // ─── SELECTION HANDLERS ──────────────────────────────────────
+  const isAllSelected =
+    examList.length > 0 && selectedIds.length === examList.length;
+  const isSomeSelected = selectedIds.length > 0 && !isAllSelected;
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(examList.map((e) => e.id));
+    }
+  };
+
+  const toggleSelectOne = (id: number) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const clearSelection = () => setSelectedIds([]);
+
+  // ─── DELETE HANDLERS ─────────────────────────────────────────
+  const requestDeleteSingle = (exam: ExamResponse) => {
+    setDeleteTarget({ type: 'single', id: exam.id, name: exam.name });
+  };
+
+  const requestDeleteBulk = () => {
+    if (selectedIds.length === 0) return;
+    setDeleteTarget({ type: 'bulk' });
+  };
+
+  const cancelDelete = () => {
+    if (deleting) return;
+    setDeleteTarget(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.type === 'single') {
+        await examApi.deleteExam(deleteTarget.id);
+        setExamList((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+        setSelectedIds((prev) => prev.filter((id) => id !== deleteTarget.id));
+        showToast('Exam deleted successfully');
+      } else {
+        // Bulk delete — run in parallel
+        await Promise.all(selectedIds.map((id) => examApi.deleteExam(id)));
+        setExamList((prev) => prev.filter((e) => !selectedIds.includes(e.id)));
+        showToast(`${selectedIds.length} exam(s) deleted successfully`);
+        setSelectedIds([]);
+      }
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error('Failed to delete exam(s):', error);
+      showToast('Failed to delete. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading) return <LoadingSpinner fullPage />;
 
   return (
@@ -241,11 +305,47 @@ export default function ExamManagement() {
         </button>
       </div>
 
+      {/* ─── BULK ACTION BAR ────────────────────────────────── */}
+      {selectedIds.length > 0 && (
+        <div className="flex items-center justify-between bg-gray-900 text-white px-4 py-3 rounded-xl">
+          <p className="text-sm font-medium">
+            {selectedIds.length} exam{selectedIds.length > 1 ? 's' : ''} selected
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={clearSelection}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Clear
+            </button>
+            <button
+              onClick={requestDeleteBulk}
+              className="flex items-center gap-1.5 text-xs font-medium bg-rose-500 hover:bg-rose-600 px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <i className="ri-delete-bin-line text-sm"></i>
+              Delete Selected
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/50">
+                <th className="py-3 px-4 w-10">
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = isSomeSelected;
+                    }}
+                    onChange={toggleSelectAll}
+                    disabled={examList.length === 0}
+                    className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
+                  />
+                </th>
                 <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                   Exam Name
                 </th>
@@ -276,7 +376,7 @@ export default function ExamManagement() {
               {examsLoading ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="py-8 text-center text-sm text-gray-400"
                   >
                     Loading exams...
@@ -285,7 +385,7 @@ export default function ExamManagement() {
               ) : examList.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="py-8 text-center text-sm text-gray-400"
                   >
                     No exams found
@@ -295,8 +395,17 @@ export default function ExamManagement() {
                 examList.map((exam) => (
                   <tr
                     key={exam.id}
-                    className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
+                    className={`border-b border-gray-50 hover:bg-gray-50/30 transition-colors ${selectedIds.includes(exam.id) ? 'bg-gray-50/60' : ''
+                      }`}
                   >
+                    <td className="py-3 px-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(exam.id)}
+                        onChange={() => toggleSelectOne(exam.id)}
+                        className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
+                      />
+                    </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       <button
                         onClick={() => openDetail(exam.id)}
@@ -334,11 +443,10 @@ export default function ExamManagement() {
                         </button>
                         <button
                           onClick={() => toggleArchive(exam)}
-                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
-                            exam.status === 'archived'
-                              ? 'text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50'
-                              : 'text-gray-400 hover:text-rose-600 hover:bg-rose-50'
-                          }`}
+                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${exam.status === 'archived'
+                            ? 'text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50'
+                            : 'text-gray-400 hover:text-rose-600 hover:bg-rose-50'
+                            }`}
                           title={
                             exam.status === 'archived' ? 'Restore' : 'Archive'
                           }
@@ -346,6 +454,13 @@ export default function ExamManagement() {
                           <i
                             className={`${exam.status === 'archived' ? 'ri-arrow-go-back-line' : 'ri-archive-line'} text-sm`}
                           ></i>
+                        </button>
+                        <button
+                          onClick={() => requestDeleteSingle(exam)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                          title="Delete"
+                        >
+                          <i className="ri-delete-bin-line text-sm"></i>
                         </button>
                       </div>
                     </td>
@@ -500,7 +615,6 @@ export default function ExamManagement() {
                 </div>
               </div>
 
-              {/* ✅ Spent Time - New Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   Spent Time (minutes)
@@ -557,6 +671,55 @@ export default function ExamManagement() {
         </div>
       )}
 
+      {/* ─── DELETE CONFIRMATION MODAL ──────────────────────── */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-sm mx-4 p-6">
+            <div className="w-12 h-12 rounded-full bg-rose-50 flex items-center justify-center mb-4">
+              <i className="ri-delete-bin-line text-xl text-rose-500"></i>
+            </div>
+            <h4 className="text-base font-semibold text-gray-900 mb-2">
+              {deleteTarget.type === 'single' ? 'Delete Exam?' : 'Delete Selected Exams?'}
+            </h4>
+            <p className="text-sm text-gray-500 mb-6">
+              {deleteTarget.type === 'single' ? (
+                <>
+                  Are you sure you want to delete{' '}
+                  <span className="font-medium text-gray-700">
+                    "{deleteTarget.name}"
+                  </span>
+                  ? This action cannot be undone.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to delete{' '}
+                  <span className="font-medium text-gray-700">
+                    {selectedIds.length} exam{selectedIds.length > 1 ? 's' : ''}
+                  </span>
+                  ? This action cannot be undone.
+                </>
+              )}
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={cancelDelete}
+                disabled={deleting}
+                className="flex-1 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="flex-1 py-2.5 text-sm font-medium text-white bg-rose-500 rounded-lg hover:bg-rose-600 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {detailExam && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col">
@@ -580,21 +743,19 @@ export default function ExamManagement() {
             <div className="flex border-b border-gray-100 px-6">
               <button
                 onClick={() => setDetailTab('details')}
-                className={`py-3 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap mr-6 ${
-                  detailTab === 'details'
-                    ? 'text-gray-900 border-b-2 border-gray-900'
-                    : 'text-gray-400 hover:text-gray-600'
-                }`}
+                className={`py-3 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap mr-6 ${detailTab === 'details'
+                  ? 'text-gray-900 border-b-2 border-gray-900'
+                  : 'text-gray-400 hover:text-gray-600'
+                  }`}
               >
                 Details
               </button>
               <button
                 onClick={() => setDetailTab('students')}
-                className={`py-3 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                  detailTab === 'students'
-                    ? 'text-gray-900 border-b-2 border-gray-900'
-                    : 'text-gray-400 hover:text-gray-600'
-                }`}
+                className={`py-3 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${detailTab === 'students'
+                  ? 'text-gray-900 border-b-2 border-gray-900'
+                  : 'text-gray-400 hover:text-gray-600'
+                  }`}
               >
                 Students
               </button>

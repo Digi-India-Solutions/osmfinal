@@ -167,15 +167,15 @@ export default function CheckerCompleted() {
                   <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  {/* <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                     Action
-                  </th>
+                  </th> */}
                 </tr>
               </thead>
               <tbody>
                 {sheets.map((sheet) => {
                   // ✅ Parse marks as float for display
-                  const marks = parseFloat((sheet.marks as string) || '0');
+                  const marks = parseFloat((sheet?.marks as string) || '0');
                   const displayMarks = isNaN(marks) ? '-' : marks.toFixed(2);
 
                   return (
@@ -201,7 +201,7 @@ export default function CheckerCompleted() {
                       <td className="px-5 py-3.5">
                         <StatusBadge status={sheet.status} />
                       </td>
-                      <td className="px-5 py-3.5">
+                      {/* <td className="px-5 py-3.5">
                         <button
                           onClick={() =>
                             navigate(
@@ -212,7 +212,7 @@ export default function CheckerCompleted() {
                         >
                           View
                         </button>
-                      </td>
+                      </td> */}
                     </tr>
                   );
                 })}
