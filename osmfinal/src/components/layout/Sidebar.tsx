@@ -1,3 +1,5 @@
+// src/components/Sidebar.tsx
+
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { NavLink } from 'react-router-dom';
@@ -53,7 +55,9 @@ const teacherLinks = [
   { label: 'Results', path: '/teacher/results', icon: 'ri-award-line' },
 ];
 
+// ✅ Checker Links - Dashboard ADD KARO
 const checkerLinks = [
+  { label: 'Dashboard', path: '/checker/dashboard', icon: 'ri-dashboard-line' }, // ✅ ADD
   { label: 'My Queue', path: '/checker/queue', icon: 'ri-inbox-line' },
   {
     label: 'Completed',
@@ -259,7 +263,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </>
         ) : (
           <>
-            {isAdminOrSuperAdmin && ( // ✅ Admin + Super Admin — same section
+            {isAdminOrSuperAdmin && (
               <NavSection
                 label="Navigation"
                 links={resolvedAdminLinks}

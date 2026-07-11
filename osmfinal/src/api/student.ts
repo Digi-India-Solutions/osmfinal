@@ -153,7 +153,7 @@ class StudentService {
     }
   }
 
-  // Delete student
+  // ✅ Delete single student (cascades to sheets)
   async deleteStudent(id: number): Promise<any> {
     try {
       const response = await api.delete(`/api/v1/Students/students/${id}`);
@@ -167,7 +167,8 @@ class StudentService {
     }
   }
 
-    async autoLinkStudents(): Promise<any> {
+  // ✅ Auto-link students to exams
+  async autoLinkStudents(): Promise<any> {
     try {
       const response = await api.post('/api/v1/Students/students/auto-link');
       return response.data;
@@ -175,15 +176,13 @@ class StudentService {
       console.error('Auto-link students error:', error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to link students to exams',
+        message:
+          error.response?.data?.message || 'Failed to link students to exams',
       };
     }
   }
 
-  
-  
-
-  // Bulk delete students
+  // ✅ Bulk delete students (cascades to sheets)
   async bulkDeleteStudents(ids: number[]): Promise<any> {
     try {
       const response = await api.post('/api/v1/Students/students/bulk-delete', {
@@ -198,8 +197,26 @@ class StudentService {
       };
     }
   }
+
+  // ✅ Get deletion preview
+  async getDeletionPreview(ids: string): Promise<any> {
+    try {
+      const response = await api.get(
+        '/api/v1/Students/students/deletion-preview',
+        {
+          params: { ids },
+        },
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Deletion preview error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get deletion preview',
+      };
+    }
+  }
 }
-
-
 
 export default new StudentService();
