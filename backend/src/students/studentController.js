@@ -63,7 +63,6 @@ const mapRowToRecord = (row) => {
     normalizedRow['barcode_no'] ||
     normalizedRow['barcodeno'];
 
-  // ✅ EXAM NAME - Not UUID
   const examName =
     normalizedRow['exam'] ||
     normalizedRow['exam_name'] ||
@@ -79,11 +78,10 @@ const mapRowToRecord = (row) => {
     semester: semester,
     subject: subject,
     barcode: barcode,
-    exam_name: examName, // ✅ Store exam name, not UUID
+    exam_name: examName,
   };
 };
 
-// ✅ Get exam UUID by name and subject
 const getExamIdByNameAndSubject = async (examName, subject) => {
   if (!examName) return null;
 
@@ -158,7 +156,6 @@ export const uploadAndPreview = async (req, res) => {
     const validRecords = [];
     const barcodes = new Set();
 
-    // ✅ Pre-fetch all exams for quick lookup
     const examsResult = await pool.query(`SELECT id, name, subject FROM exams`);
     const examMap = {};
     examsResult.rows.forEach((exam) => {
@@ -181,7 +178,6 @@ export const uploadAndPreview = async (req, res) => {
       }
       barcodes.add(row.barcode.toString());
 
-      // ✅ Get exam ID from exam name + subject
       let examId = null;
       let examName = row.exam_name;
 
@@ -207,7 +203,7 @@ export const uploadAndPreview = async (req, res) => {
         subject: row.subject.toString(),
         barcode: row.barcode.toString(),
         exam_id: examId,
-        exam_name: examName, // For preview only
+        exam_name: examName,
         sheet_status: 'pending',
       });
     }
@@ -266,7 +262,6 @@ export const importStudents = async (req, res) => {
     let skippedCount = 0;
     const errors = [];
 
-    // ✅ Pre-fetch all exams
     const examsResult = await client.query(
       `SELECT id, name, subject FROM exams`,
     );
@@ -288,7 +283,6 @@ export const importStudents = async (req, res) => {
             continue;
           }
 
-          // Check duplicate barcode
           const existing = await client.query(
             `SELECT id FROM student_records WHERE barcode = $1`,
             [row.barcode.toString()],
@@ -299,7 +293,6 @@ export const importStudents = async (req, res) => {
             continue;
           }
 
-          // ✅ Get exam ID from exam name + subject
           let examId = null;
           let examName = row.exam_name;
 
@@ -429,7 +422,8 @@ export const getStudents = async (req, res) => {
         s.id, s.roll_no, s.student_name, s.course, s.branch, s.semester, 
         s.subject, s.barcode, s.exam_id, s.sheet_status,
         s.created_at, s.updated_at,
-        e.name AS exam_name
+        e.name AS exam_name,
+        (SELECT COUNT(*) FROM sheets WHERE student_id = s.id) AS sheet_count
       FROM student_records s
       LEFT JOIN exams e ON s.exam_id = e.id
       ${whereClause}
@@ -506,7 +500,8 @@ export const getStudentById = async (req, res) => {
         s.id, s.roll_no, s.student_name, s.course, s.branch, s.semester, 
         s.subject, s.barcode, s.exam_id, s.sheet_status,
         s.created_at, s.updated_at,
-        e.name AS exam_name
+        e.name AS exam_name,
+        (SELECT COUNT(*) FROM sheets WHERE student_id = s.id) AS sheet_count
       FROM student_records s
       LEFT JOIN exams e ON s.exam_id = e.id
       WHERE s.id = $1`,
@@ -660,41 +655,84 @@ export const autoLinkStudentsToExams = async (req, res) => {
   }
 };
 
-// ─── DELETE STUDENT ─────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// ✅ UPDATED DELETE FUNCTIONS WITH CASCADE
+// ════════════════════════════════════════════════════════════════
+
+// ─── DELETE STUDENT (WITH CASCADE) ─────────────────────────────
 
 export const deleteStudent = async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { id } = req.params;
 
-    const result = await pool.query(
-      `DELETE FROM student_records WHERE id = $1 RETURNING id`,
+    // Start transaction
+    await client.query('BEGIN');
+
+    // 1️⃣ First, check if student exists
+    const studentResult = await client.query(
+      `SELECT id, barcode FROM student_records WHERE id = $1`,
       [id],
     );
 
-    if (result.rows.length === 0) {
+    if (studentResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({
         success: false,
         message: 'Student not found',
       });
     }
 
+    const student = studentResult.rows[0];
+
+    // 2️⃣ Get all sheets associated with this student
+    const sheetsResult = await client.query(
+      `SELECT id, file_url FROM sheets WHERE student_id = $1`,
+      [id],
+    );
+
+    const sheetIds = sheetsResult.rows.map((s) => s.id);
+    const sheetCount = sheetIds.length;
+
+    // 3️⃣ Delete sheets (this will cascade to marks, etc.)
+    if (sheetCount > 0) {
+      await client.query(`DELETE FROM sheets WHERE student_id = $1`, [id]);
+    }
+
+    // 4️⃣ Delete the student record
+    await client.query(`DELETE FROM student_records WHERE id = $1`, [id]);
+
+    // Commit transaction
+    await client.query('COMMIT');
+
     return res.status(200).json({
       success: true,
-      message: 'Student deleted successfully',
+      message: `Student deleted successfully. ${sheetCount} associated sheet(s) also deleted.`,
+      data: {
+        studentId: id,
+        deletedSheets: sheetCount,
+        sheetIds: sheetIds,
+      },
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Delete student error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to delete student',
       error: error.message,
     });
+  } finally {
+    client.release();
   }
 };
 
-// ─── BULK DELETE STUDENTS ──────────────────────────────────────
+// ─── BULK DELETE STUDENTS (WITH CASCADE) ──────────────────────
 
 export const bulkDeleteStudents = async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { ids } = req.body;
 
@@ -705,24 +743,264 @@ export const bulkDeleteStudents = async (req, res) => {
       });
     }
 
-    const result = await pool.query(
-      `DELETE FROM student_records WHERE id = ANY($1::int[]) RETURNING id`,
+    // Start transaction
+    await client.query('BEGIN');
+
+    // 1️⃣ Get all students that exist
+    const studentsResult = await client.query(
+      `SELECT id, barcode FROM student_records WHERE id = ANY($1::int[])`,
       [ids],
     );
 
+    const existingStudentIds = studentsResult.rows.map((s) => s.id);
+    const notFoundIds = ids.filter((id) => !existingStudentIds.includes(id));
+
+    if (existingStudentIds.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        message: 'No students found with the provided IDs',
+      });
+    }
+
+    // 2️⃣ Get all sheets for these students
+    const sheetsResult = await client.query(
+      `SELECT id, student_id, file_url FROM sheets WHERE student_id = ANY($1::int[])`,
+      [existingStudentIds],
+    );
+
+    const sheetIds = sheetsResult.rows.map((s) => s.id);
+    const sheetCount = sheetIds.length;
+
+    // 3️⃣ Delete all sheets for these students
+    if (sheetCount > 0) {
+      await client.query(
+        `DELETE FROM sheets WHERE student_id = ANY($1::int[])`,
+        [existingStudentIds],
+      );
+    }
+
+    // 4️⃣ Delete all students
+    await client.query(
+      `DELETE FROM student_records WHERE id = ANY($1::int[])`,
+      [existingStudentIds],
+    );
+
+    // Commit transaction
+    await client.query('COMMIT');
+
     return res.status(200).json({
       success: true,
-      message: `${result.rows.length} students deleted successfully`,
+      message: `${existingStudentIds.length} student(s) deleted successfully. ${sheetCount} associated sheet(s) also deleted.`,
       data: {
-        deletedCount: result.rows.length,
-        deletedIds: result.rows.map((row) => row.id),
+        deletedCount: existingStudentIds.length,
+        deletedIds: existingStudentIds,
+        deletedSheets: sheetCount,
+        notFoundIds: notFoundIds,
       },
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Bulk delete error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to delete students',
+      error: error.message,
+    });
+  } finally {
+    client.release();
+  }
+};
+
+// ─── DELETE ALL STUDENTS BY FILTER ─────────────────────────────
+// ✅ NEW: Delete students with filters (e.g., all students in a subject)
+
+export const deleteStudentsByFilter = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { subject, semester, branch, exam_id } = req.query;
+
+    if (!subject && !semester && !branch && !exam_id) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Please provide at least one filter (subject, semester, branch, or exam_id)',
+      });
+    }
+
+    // Build WHERE clause
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+
+    if (subject) {
+      conditions.push(`subject = $${paramCount}`);
+      params.push(subject);
+      paramCount++;
+    }
+
+    if (semester) {
+      conditions.push(`semester = $${paramCount}`);
+      params.push(parseInt(semester));
+      paramCount++;
+    }
+
+    if (branch) {
+      conditions.push(`branch = $${paramCount}`);
+      params.push(branch);
+      paramCount++;
+    }
+
+    if (exam_id) {
+      conditions.push(`exam_id = $${paramCount}`);
+      params.push(parseInt(exam_id));
+      paramCount++;
+    }
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    // Start transaction
+    await client.query('BEGIN');
+
+    // 1️⃣ Get students to delete
+    const studentsResult = await client.query(
+      `SELECT id FROM student_records ${whereClause}`,
+      params,
+    );
+
+    const studentIds = studentsResult.rows.map((s) => s.id);
+
+    if (studentIds.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        message: 'No students found with the given filters',
+      });
+    }
+
+    // 2️⃣ Get associated sheets
+    const sheetsResult = await client.query(
+      `SELECT id FROM sheets WHERE student_id = ANY($1::int[])`,
+      [studentIds],
+    );
+
+    const sheetIds = sheetsResult.rows.map((s) => s.id);
+    const sheetCount = sheetIds.length;
+
+    // 3️⃣ Delete sheets
+    if (sheetCount > 0) {
+      await client.query(
+        `DELETE FROM sheets WHERE student_id = ANY($1::int[])`,
+        [studentIds],
+      );
+    }
+
+    // 4️⃣ Delete students
+    await client.query(
+      `DELETE FROM student_records WHERE id = ANY($1::int[])`,
+      [studentIds],
+    );
+
+    // Commit transaction
+    await client.query('COMMIT');
+
+    return res.status(200).json({
+      success: true,
+      message: `${studentIds.length} student(s) deleted successfully. ${sheetCount} associated sheet(s) also deleted.`,
+      data: {
+        deletedCount: studentIds.length,
+        deletedIds: studentIds,
+        deletedSheets: sheetCount,
+        filters: { subject, semester, branch, exam_id },
+      },
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Delete students by filter error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete students',
+      error: error.message,
+    });
+  } finally {
+    client.release();
+  }
+};
+
+// ─── GET STUDENT DELETION PREVIEW ──────────────────────────────
+// ✅ NEW: Preview what will be deleted before confirming
+
+export const getDeletionPreview = async (req, res) => {
+  try {
+    const { ids } = req.query;
+
+    if (!ids) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide student IDs',
+      });
+    }
+
+    const idArray = ids.split(',').map((id) => parseInt(id.trim()));
+
+    if (idArray.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid student IDs provided',
+      });
+    }
+
+    // Get students
+    const studentsResult = await pool.query(
+      `SELECT id, roll_no, student_name, subject, semester, branch 
+       FROM student_records 
+       WHERE id = ANY($1::int[])`,
+      [idArray],
+    );
+
+    // Get sheet count for each student
+    const sheetsResult = await pool.query(
+      `SELECT student_id, COUNT(*) AS sheet_count 
+       FROM sheets 
+       WHERE student_id = ANY($1::int[])
+       GROUP BY student_id`,
+      [idArray],
+    );
+
+    const sheetCountMap = {};
+    sheetsResult.rows.forEach((row) => {
+      sheetCountMap[row.student_id] = parseInt(row.sheet_count);
+    });
+
+    const studentsWithSheets = studentsResult.rows.map((student) => ({
+      ...student,
+      sheet_count: sheetCountMap[student.id] || 0,
+    }));
+
+    const totalSheets = studentsWithSheets.reduce(
+      (sum, s) => sum + s.sheet_count,
+      0,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Deletion preview retrieved successfully',
+      data: {
+        students: studentsWithSheets,
+        totalStudents: studentsWithSheets.length,
+        totalSheets: totalSheets,
+        willDelete: {
+          students: studentsWithSheets.length,
+          sheets: totalSheets,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Deletion preview error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get deletion preview',
       error: error.message,
     });
   }
