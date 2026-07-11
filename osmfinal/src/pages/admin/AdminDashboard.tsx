@@ -1,17 +1,8 @@
 // src/pages/admin/AdminDashboard.tsx
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import {
-  adminStats,
-  sheets,
-  exams,
-  users,
-  getStatusBadge,
-  mockRecheckRequests,
-  mockCheckerStats,
-} from '@/mock/mockData';
 import {
   BarChart,
   Bar,
@@ -26,11 +17,68 @@ import Breadcrumb from '@/components/ui/Breadcrumb';
 import StatusBadge from '@/components/ui/StatusBadge';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { usePageLoading } from '@/hooks/usePageLoading';
+import dashboardService from '@/api/admindashboard';
+
+interface DashboardStats {
+  totalSheets: number;
+  totalExams: number;
+  totalUsers: number;
+  totalStudents: number;
+  uploaded: number;
+  checking: number;
+  checked: number;
+  recheck: number;
+  rechecked: number;
+  escalated: number;
+  pendingRechecks: number;
+  teacherDisputes: number;
+  completedByCheckers: number;
+}
+
+interface StatusChartData {
+  status: string;
+  count: number;
+  fill: string;
+}
+
+interface RecentSheet {
+  id: number;
+  student_name: string;
+  exam_name: string;
+  status: string;
+  assigned_to_name: string | null;
+  created_at: string;
+}
 
 export default function AdminDashboard() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const loading = usePageLoading();
+
+  // ─── STATE ──────────────────────────────────────────────────
+  const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardStats>({
+    totalSheets: 0,
+    totalExams: 0,
+    totalUsers: 0,
+    totalStudents: 0,
+    uploaded: 0,
+    checking: 0,
+    checked: 0,
+    recheck: 0,
+    rechecked: 0,
+    escalated: 0,
+    pendingRechecks: 0,
+    teacherDisputes: 0,
+    completedByCheckers: 0,
+  });
+  const [statusChartData, setStatusChartData] = useState<StatusChartData[]>([]);
+  const [recentSheets, setRecentSheets] = useState<RecentSheet[]>([]);
+  const [quickStats, setQuickStats] = useState([
+    { label: 'Checking Progress', value: 0 },
+    { label: 'Upload Queue', value: 0 },
+    { label: 'Completion Rate', value: 0 },
+  ]);
 
   // ─── ✅ ADMIN + SUPER ADMIN ACCESS CHECK ──────────────────────
   useEffect(() => {
@@ -39,56 +87,100 @@ export default function AdminDashboard() {
       return;
     }
 
-    // ✅ Admin aur Super Admin dono allowed
     if (currentUser.role !== 'admin' && currentUser.role !== 'super_admin') {
       navigate('/login?error=unauthorized');
       return;
     }
   }, [currentUser, navigate]);
 
-  const recentSheets = [...sheets].sort((a, b) => b.id - a.id).slice(0, 8);
+  // ─── FETCH DASHBOARD DATA ──────────────────────────────────
 
-  const getExamName = (examId: number) =>
-    exams.find((e) => e.id === examId)?.name || 'Unknown';
-  const getUserName = (userId: number | null) => {
-    if (!userId) return 'Unassigned';
-    return users.find((u) => u.id === userId)?.name || 'Unknown';
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      setIsLoading(true);
+      try {
+        // Fetch all data in parallel
+        const [statsRes, chartRes, sheetsRes] = await Promise.all([
+          dashboardService.getStats(),
+          dashboardService.getStatusChart(),
+          dashboardService.getRecentSheets(8),
+        ]);
+
+        setStats(statsRes);
+        setStatusChartData(chartRes);
+        setRecentSheets(sheetsRes);
+
+        // Calculate quick stats
+        const total = statsRes.totalSheets || 1;
+        const completed = statsRes.checked + statsRes.rechecked;
+        const checking = statsRes.checking || 0;
+        const uploaded = statsRes.uploaded || 0;
+
+        setQuickStats([
+          {
+            label: 'Checking Progress',
+            value: Math.round((checking / total) * 100),
+          },
+          {
+            label: 'Upload Queue',
+            value: Math.round((uploaded / total) * 100),
+          },
+          {
+            label: 'Completion Rate',
+            value: Math.round((completed / total) * 100),
+          },
+        ]);
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
+  // ─── RENDER HELPERS ──────────────────────────────────────────
+
+  const getStatusBadgeVariant = (status: string) => {
+    const map: Record<string, string> = {
+      uploaded: 'uploaded',
+      assigned: 'assigned',
+      checking: 'checking',
+      checked: 'checked',
+      recheck: 'recheck',
+      rechecked: 'rechecked',
+      escalated: 'escalated',
+    };
+    return map[status] || 'pending';
   };
 
-  const statusChartData = (
-    ['uploaded', 'checking', 'checked', 'recheck', 'done'] as const
-  ).map((status) => {
-    let count = 0;
-    if (status === 'done') {
-      count = sheets.filter(
-        (s) => s.status === 'done' || s.status === 'rechecked',
-      ).length;
-    } else {
-      count = sheets.filter((s) => s.status === status).length;
-    }
-    const badge = getStatusBadge(status === 'done' ? 'rechecked' : status);
-    return {
-      status: badge.label,
-      count,
-      fill:
-        status === 'uploaded'
-          ? '#9ca3af'
-          : status === 'checking'
-            ? '#f59e0b'
-            : status === 'checked'
-              ? '#34d399'
-              : status === 'recheck'
-                ? '#a78bfa'
-                : '#059669',
-    };
-  });
-
-  const pendingRechecks = mockRecheckRequests.filter(
-    (r) => r.status === 'pending',
-  ).length;
-  const teacherDisputes = mockRecheckRequests.filter(
-    (r) => r.status === 'requested_by_teacher',
-  ).length;
+  const statItems = [
+    {
+      label: 'Total Sheets',
+      value: stats.totalSheets,
+      icon: 'ri-file-copy-2-line',
+      color: 'bg-blue-50 text-blue-600',
+    },
+    {
+      label: 'Total Exams',
+      value: stats.totalExams,
+      icon: 'ri-book-open-line',
+      color: 'bg-emerald-50 text-emerald-600',
+    },
+    {
+      label: 'Total Users',
+      value: stats.totalUsers,
+      icon: 'ri-team-line',
+      color: 'bg-violet-50 text-violet-600',
+    },
+    {
+      label: 'Total Students',
+      value: stats.totalStudents,
+      icon: 'ri-user-line',
+      color: 'bg-amber-50 text-amber-600',
+    },
+  ];
 
   const quickLinks = [
     {
@@ -111,7 +203,7 @@ export default function AdminDashboard() {
     },
   ];
 
-  if (loading) return <LoadingSpinner fullPage />;
+  if (loading || isLoading) return <LoadingSpinner fullPage />;
 
   return (
     <div className="space-y-6">
@@ -144,11 +236,13 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* ─── STATS CARDS ──────────────────────────────────────── */}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {adminStats.map((stat) => (
+        {statItems.map((stat) => (
           <div
             key={stat.label}
-            className="bg-white rounded-2xl p-5 hover:bg-gray-50/50 transition-colors duration-150 cursor-pointer"
+            className="bg-white rounded-2xl p-5 hover:bg-gray-50/50 transition-colors duration-150"
           >
             <div className="flex items-start justify-between">
               <div className="space-y-1.5">
@@ -167,49 +261,59 @@ export default function AdminDashboard() {
         ))}
       </div>
 
+      {/* ─── STATUS CHART ────────────────────────────────────── */}
+
       <div className="bg-white rounded-2xl p-6">
         <h4 className="text-sm font-semibold text-gray-900 mb-4">
           Sheet Status Overview
         </h4>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart
-            data={statusChartData}
-            margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
-          >
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="#f1f5f9"
-              vertical={false}
-            />
-            <XAxis
-              dataKey="status"
-              tick={{ fontSize: 11, fill: '#94a3b8' }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              tick={{ fontSize: 11, fill: '#94a3b8' }}
-              axisLine={false}
-              tickLine={false}
-              allowDecimals={false}
-            />
-            <Tooltip
-              cursor={{ fill: '#f8fafc' }}
-              contentStyle={{
-                borderRadius: '10px',
-                border: '1px solid #e2e8f0',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
-                fontSize: '12px',
-              }}
-            />
-            <Bar dataKey="count" radius={[4, 4, 0, 0]} barSize={36}>
-              {statusChartData.map((entry, idx) => (
-                <Cell key={`cell-${idx}`} fill={entry.fill} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        {statusChartData.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-4">
+            No data available
+          </p>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart
+              data={statusChartData}
+              margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+            >
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="#f1f5f9"
+                vertical={false}
+              />
+              <XAxis
+                dataKey="status"
+                tick={{ fontSize: 11, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: '#94a3b8' }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+              />
+              <Tooltip
+                cursor={{ fill: '#f8fafc' }}
+                contentStyle={{
+                  borderRadius: '10px',
+                  border: '1px solid #e2e8f0',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+                  fontSize: '12px',
+                }}
+              />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]} barSize={36}>
+                {statusChartData.map((entry, idx) => (
+                  <Cell key={`cell-${idx}`} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </div>
+
+      {/* ─── RECHECK STATS ─────────────────────────────────────── */}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl p-5">
@@ -221,7 +325,9 @@ export default function AdminDashboard() {
               Pending Rechecks
             </p>
           </div>
-          <p className="text-3xl font-bold text-gray-900">{pendingRechecks}</p>
+          <p className="text-3xl font-bold text-gray-900">
+            {stats.pendingRechecks}
+          </p>
           <p className="text-xs text-gray-400 mt-1">
             Awaiting recheck evaluation
           </p>
@@ -236,7 +342,9 @@ export default function AdminDashboard() {
               Teacher Disputes
             </p>
           </div>
-          <p className="text-3xl font-bold text-gray-900">{teacherDisputes}</p>
+          <p className="text-3xl font-bold text-gray-900">
+            {stats.teacherDisputes}
+          </p>
           <p className="text-xs text-gray-400 mt-1">
             Flagged by subject teachers
           </p>
@@ -251,7 +359,7 @@ export default function AdminDashboard() {
               <p className="text-sm font-medium text-gray-900">Completed</p>
             </div>
             <p className="text-2xl font-bold text-gray-900">
-              {mockCheckerStats.reduce((sum, c) => sum + c.sheetsCompleted, 0)}
+              {stats.completedByCheckers}
             </p>
             <p className="text-xs text-gray-400 mt-1">
               Sheets finished by checkers
@@ -265,6 +373,8 @@ export default function AdminDashboard() {
           </button>
         </div>
       </div>
+
+      {/* ─── QUICK LINKS ───────────────────────────────────────── */}
 
       <div>
         <h4 className="text-sm font-semibold text-gray-900 mb-3">
@@ -298,57 +408,67 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* ─── RECENT SHEETS & QUICK OVERVIEW ────────────────────── */}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl p-6">
           <h4 className="text-sm font-semibold text-gray-900 mb-4">
             Recent Sheet Activity
           </h4>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Sheet ID
-                  </th>
-                  <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Student
-                  </th>
-                  <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Exam
-                  </th>
-                  <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Status
-                  </th>
-                  <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Assigned To
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentSheets.map((sheet) => (
-                  <tr
-                    key={sheet.id}
-                    className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors cursor-pointer"
-                  >
-                    <td className="py-2.5 px-2 font-medium text-gray-900 whitespace-nowrap">
-                      #{sheet.id}
-                    </td>
-                    <td className="py-2.5 px-2 text-gray-700 whitespace-nowrap">
-                      {sheet.studentName}
-                    </td>
-                    <td className="py-2.5 px-2 text-gray-500 whitespace-nowrap text-xs">
-                      {getExamName(sheet.examId)}
-                    </td>
-                    <td className="py-2.5 px-2">
-                      <StatusBadge status={sheet.status} />
-                    </td>
-                    <td className="py-2.5 px-2 text-gray-500 text-xs whitespace-nowrap">
-                      {getUserName(sheet.assignedTo)}
-                    </td>
+            {recentSheets.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">
+                No recent activity
+              </p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                      Sheet ID
+                    </th>
+                    <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                      Student
+                    </th>
+                    <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                      Exam
+                    </th>
+                    <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                      Status
+                    </th>
+                    <th className="text-left py-2.5 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                      Assigned To
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {recentSheets.map((sheet) => (
+                    <tr
+                      key={sheet.id}
+                      className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors cursor-pointer"
+                    >
+                      <td className="py-2.5 px-2 font-medium text-gray-900 whitespace-nowrap">
+                        #{sheet.id}
+                      </td>
+                      <td className="py-2.5 px-2 text-gray-700 whitespace-nowrap">
+                        {sheet.student_name || 'Unknown'}
+                      </td>
+                      <td className="py-2.5 px-2 text-gray-500 whitespace-nowrap text-xs">
+                        {sheet.exam_name || 'Unknown'}
+                      </td>
+                      <td className="py-2.5 px-2">
+                        <StatusBadge
+                          status={getStatusBadgeVariant(sheet.status)}
+                        />
+                      </td>
+                      <td className="py-2.5 px-2 text-gray-500 text-xs whitespace-nowrap">
+                        {sheet.assigned_to_name || 'Unassigned'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
@@ -357,11 +477,7 @@ export default function AdminDashboard() {
             Quick Overview
           </h4>
           <div className="space-y-4">
-            {[
-              { label: 'Checking Progress', value: 68 },
-              { label: 'Upload Queue', value: 42 },
-              { label: 'Reports Generated', value: 91 },
-            ].map((item) => (
+            {quickStats.map((item) => (
               <div key={item.label}>
                 <div className="flex justify-between text-sm mb-1.5">
                   <span className="text-gray-500">{item.label}</span>
@@ -372,7 +488,7 @@ export default function AdminDashboard() {
                 <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gray-900 rounded-full transition-all duration-500"
-                    style={{ width: `${item.value}%` }}
+                    style={{ width: `${Math.min(item.value, 100)}%` }}
                   ></div>
                 </div>
               </div>
@@ -384,19 +500,10 @@ export default function AdminDashboard() {
               Status Distribution
             </h4>
             <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  'uploaded',
-                  'assigned',
-                  'checking',
-                  'checked',
-                  'recheck',
-                  'rechecked',
-                ] as const
-              ).map((status) => (
+              {statusChartData.map((item) => (
                 <StatusBadge
-                  key={status}
-                  status={status}
+                  key={item.status}
+                  status={getStatusBadgeVariant(item.status.toLowerCase())}
                   className="text-[11px]"
                 />
               ))}

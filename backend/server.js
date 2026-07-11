@@ -109,8 +109,10 @@ import workQueueRoutes from './src/work-queue/workRoutes.js';
 import recheckRoutes from './src/recheck-queue/recheckRoute.js';
 import MarkscheckerRoutes from './src/checker-marking-controller/checkerMarkingRoutes.js';
 import TeacherRoutes from './src/teacherController/teacherRoutes.js';
+import AdminDashboardRoutes from './src/adminDashboard/adminDashboardROute.js';
 
 app.use('/api/v1/reports', reportsRouter);
+app.use('/api/v1/adminDashboard', AdminDashboardRoutes);
 app.use('/api/v1/auth', adminRouter);
 app.use('/api/v1/hash', hashRouter);
 app.use('/api/v1/setting', settingRoutes);

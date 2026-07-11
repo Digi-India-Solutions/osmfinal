@@ -1,4 +1,5 @@
 // src/pages/admin/SheetUpload.tsx
+
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Breadcrumb from '@/components/ui/Breadcrumb';
@@ -37,6 +38,17 @@ interface StudentLinkingStatus {
   is_linked: boolean;
 }
 
+// ✅ Subject mismatch interface
+interface SubjectMismatch {
+  filename: string;
+  barcode: string;
+  student_name: string;
+  roll_no: string;
+  student_subject: string;
+  exam_subject: string;
+  message: string;
+}
+
 export default function SheetUpload() {
   const loading = usePageLoading();
   const navigate = useNavigate();
@@ -62,6 +74,9 @@ export default function SheetUpload() {
   );
   const [isUploading, setIsUploading] = useState(false);
   const [isLinking, setIsLinking] = useState(false);
+
+  // ✅ Subject mismatch state
+  const [subjectMismatch, setSubjectMismatch] = useState<SubjectMismatch[]>([]);
 
   // ─── LINKING ──────────────────────────────────────────────────
 
@@ -186,6 +201,7 @@ export default function SheetUpload() {
     setSelectedExam(val);
     setUploadedFiles([]);
     setLinkingResults(null);
+    setSubjectMismatch([]); // ✅ Reset subject mismatch
     setManualLinkOpen(null);
     setWarningMsg(null);
   };
@@ -210,6 +226,7 @@ export default function SheetUpload() {
 
     setUploadedFiles((prev) => [...prev, ...newFiles]);
     setLinkingResults(null);
+    setSubjectMismatch([]); // ✅ Reset subject mismatch
     setWarningMsg(null);
   };
 
@@ -233,118 +250,150 @@ export default function SheetUpload() {
   const handleClearFiles = () => {
     setUploadedFiles([]);
     setLinkingResults(null);
+    setSubjectMismatch([]); // ✅ Reset subject mismatch
     setWarningMsg(null);
   };
 
   const removeFile = (index: number) => {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
     setLinkingResults(null);
+    setSubjectMismatch([]); // ✅ Reset subject mismatch
   };
 
   // ─── AUTO-LINK ────────────────────────────────────────────────
 
- const handleAutoLink = async () => {
-   if (!selectedExam || uploadedFiles.length === 0) return;
+  const handleAutoLink = async () => {
+    if (!selectedExam || uploadedFiles.length === 0) return;
 
-   setIsLinking(true);
-   try {
-     // First upload files to get sheet IDs
-     const files = uploadedFiles
-       .map((f) => f.file!)
-       .filter((f) => f !== undefined);
+    setIsLinking(true);
+    setSubjectMismatch([]); // ✅ Reset subject mismatch
 
-     const uploadResponse = await sheetService.uploadSheets(
-       selectedExam,
-       files,
-     );
+    try {
+      const files = uploadedFiles
+        .map((f) => f.file!)
+        .filter((f) => f !== undefined);
 
-     // ─── CHECK FOR DUPLICATES ──────────────────────────────
-     if (!uploadResponse.success) {
-       showToast(uploadResponse.message || 'Failed to upload files', 'error');
-       return;
-     }
+      const uploadResponse = await sheetService.uploadSheets(
+        selectedExam,
+        files,
+      );
 
-     const uploadedSheets = uploadResponse.data.sheets || [];
-     const duplicates = uploadResponse.data.duplicates || [];
-     const invalidFiles = uploadResponse.data.invalidFiles || [];
+      if (!uploadResponse.success) {
+        showToast(uploadResponse.message || 'Failed to upload files', 'error');
+        return;
+      }
 
-     // ─── SHOW WARNING FOR DUPLICATES ────────────────────────
-     if (duplicates.length > 0) {
-       const duplicateNames = duplicates.map((d: any) => d.filename).join(', ');
-       showWarning(
-         `${duplicates.length} file${duplicates.length > 1 ? 's' : ''} skipped (already uploaded): ${duplicateNames}`,
-       );
-     }
+      const uploadedSheets = uploadResponse.data.sheets || [];
+      const duplicates = uploadResponse.data.duplicates || [];
+      const invalidFiles = uploadResponse.data.invalidFiles || [];
+      const mismatchFiles = uploadResponse.data.subjectMismatch || []; // ✅ Get subject mismatch
 
-     if (invalidFiles.length > 0) {
-       const invalidNames = invalidFiles.map((d: any) => d.filename).join(', ');
-       showWarning(
-         `${invalidFiles.length} file${invalidFiles.length > 1 ? 's' : ''} skipped (invalid barcode format): ${invalidNames}`,
-       );
-     }
+      // ✅ Set subject mismatch state
+      if (mismatchFiles.length > 0) {
+        setSubjectMismatch(mismatchFiles);
+        const mismatchDetails = mismatchFiles
+          .map(
+            (f: any) =>
+              `${f.filename} (${f.student_subject} → ${f.exam_subject})`,
+          )
+          .join('; ');
+        showWarning(
+          `⚠️ ${mismatchFiles.length} file(s) skipped due to subject mismatch: ${mismatchDetails}`,
+        );
+      }
 
-     // ─── IF NO SHEETS UPLOADED ─────────────────────────────
-     if (uploadedSheets.length === 0) {
-       if (duplicates.length > 0 || invalidFiles.length > 0) {
-         // Already showed warnings, just return
-         setIsLinking(false);
-         return;
-       }
-       showToast('No sheets were uploaded', 'error');
-       setIsLinking(false);
-       return;
-     }
+      if (duplicates.length > 0) {
+        const duplicateNames = duplicates
+          .map((d: any) => d.filename)
+          .join(', ');
+        showWarning(
+          `${duplicates.length} file(s) skipped (already uploaded): ${duplicateNames}`,
+        );
+      }
 
-     const sheetIds = uploadedSheets.map((s: any) => s.id);
+      if (invalidFiles.length > 0) {
+        const invalidNames = invalidFiles
+          .map((d: any) => d.filename)
+          .join(', ');
+        showWarning(
+          `${invalidFiles.length} file(s) skipped (invalid barcode format): ${invalidNames}`,
+        );
+      }
 
-     // Now auto-link
-     const linkResponse = await sheetService.autoLinkSheets(
-       selectedExam,
-       sheetIds,
-     );
+      if (uploadedSheets.length === 0) {
+        if (
+          mismatchFiles.length > 0 ||
+          duplicates.length > 0 ||
+          invalidFiles.length > 0
+        ) {
+          setIsLinking(false);
+          return;
+        }
+        showToast('No sheets were uploaded', 'error');
+        setIsLinking(false);
+        return;
+      }
 
-     if (linkResponse.success) {
-       const results = linkResponse.data.results || [];
+      const sheetIds = uploadedSheets.map((s: any) => s.id);
 
-       const linkingResults: LinkingResult[] = uploadedFiles.map(
-         (file, index) => {
-           const result = results.find((r: any) => r.barcode === file.barcode);
-           return {
-             fileName: file.name,
-             barcode: file.barcode,
-             studentName: result?.student?.student_name || null,
-             studentRoll: result?.student?.roll_no || null,
-             linked: result?.matched || false,
-             sheetId: uploadedSheets[index]?.id,
-           };
-         },
-       );
+      const linkResponse = await sheetService.autoLinkSheets(
+        selectedExam,
+        sheetIds,
+      );
 
-       setLinkingResults(linkingResults);
+      if (linkResponse.success) {
+        const results = linkResponse.data.results || [];
 
-       const linkedCount = linkingResults.filter((r) => r.linked).length;
-       const unlinkedCount = linkingResults.length - linkedCount;
+        const linkingResults: LinkingResult[] = uploadedFiles.map(
+          (file, index) => {
+            const result = results.find((r: any) => r.barcode === file.barcode);
+            return {
+              fileName: file.name,
+              barcode: file.barcode,
+              studentName: result?.student?.student_name || null,
+              studentRoll: result?.student?.roll_no || null,
+              linked: result?.matched || false,
+              sheetId: uploadedSheets[index]?.id,
+            };
+          },
+        );
 
-       if (unlinkedCount > 0) {
-         showWarning(
-           `${unlinkedCount} file${unlinkedCount > 1 ? 's' : ''} could not be linked — check barcodes`,
-         );
-       }
+        setLinkingResults(linkingResults);
 
-       // Refresh data
-       await fetchSheets(selectedExam);
-       await fetchLinkingStatus(selectedExam);
-       await fetchUnlinkedSheets(selectedExam);
-     } else {
-       showToast(linkResponse.message || 'Failed to auto-link sheets', 'error');
-     }
-   } catch (error: any) {
-     console.error('Auto-link error:', error);
-     showToast(error.message || 'Failed to auto-link sheets', 'error');
-   } finally {
-     setIsLinking(false);
-   }
- };
+        const linkedCount = linkingResults.filter((r) => r.linked).length;
+        const unlinkedCount = linkingResults.length - linkedCount;
+
+        if (unlinkedCount > 0) {
+          const mismatchBarcodes = mismatchFiles.map((f: any) => f.barcode);
+          const mismatchUnlinked = linkingResults.filter(
+            (r) => r.barcode && mismatchBarcodes.includes(r.barcode),
+          );
+
+          if (mismatchUnlinked.length > 0) {
+            // Already showed warning above
+          } else {
+            showWarning(
+              `${unlinkedCount} file(s) could not be linked — check barcodes`,
+            );
+          }
+        }
+
+        await fetchSheets(selectedExam);
+        await fetchLinkingStatus(selectedExam);
+        await fetchUnlinkedSheets(selectedExam);
+      } else {
+        showToast(
+          linkResponse.message || 'Failed to auto-link sheets',
+          'error',
+        );
+      }
+    } catch (error: any) {
+      console.error('Auto-link error:', error);
+      showToast(error.message || 'Failed to auto-link sheets', 'error');
+    } finally {
+      setIsLinking(false);
+    }
+  };
 
   // ─── CONFIRM UPLOAD ──────────────────────────────────────────
 
@@ -378,6 +427,7 @@ export default function SheetUpload() {
 
       setUploadedFiles([]);
       setLinkingResults(null);
+      setSubjectMismatch([]); // ✅ Reset subject mismatch
 
       await fetchSheets(selectedExam);
       await fetchLinkingStatus(selectedExam);
@@ -667,6 +717,11 @@ export default function SheetUpload() {
                           {totalCount}
                         </span>{' '}
                         files linked successfully
+                        {totalCount - linkedCount > 0 && (
+                          <span className="text-rose-500 ml-2">
+                            ({totalCount - linkedCount} failed)
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="overflow-x-auto">
@@ -688,44 +743,59 @@ export default function SheetUpload() {
                           </tr>
                         </thead>
                         <tbody>
-                          {linkingResults.map((r, i) => (
-                            <tr
-                              key={i}
-                              className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
-                            >
-                              <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
-                                {r.fileName}
-                              </td>
-                              <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
-                                {r.barcode || '—'}
-                              </td>
-                              <td className="py-3 px-4 whitespace-nowrap">
-                                {r.linked ? (
-                                  <span className="text-gray-700">
-                                    {r.studentName}{' '}
-                                    <span className="text-gray-400">
-                                      Roll {r.studentRoll}
+                          {linkingResults.map((r, i) => {
+                            // ✅ Check if this file was subject mismatch
+                            const isSubjectMismatch = subjectMismatch.some(
+                              (f) => f.barcode === r.barcode,
+                            );
+
+                            return (
+                              <tr
+                                key={i}
+                                className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
+                              >
+                                <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
+                                  {r.fileName}
+                                </td>
+                                <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
+                                  {r.barcode || '—'}
+                                </td>
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  {r.linked ? (
+                                    <span className="text-gray-700">
+                                      {r.studentName}{' '}
+                                      <span className="text-gray-400">
+                                        Roll {r.studentRoll}
+                                      </span>
                                     </span>
-                                  </span>
-                                ) : (
-                                  <span className="text-rose-500 text-xs font-medium">
-                                    No match found
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-3 px-4 text-center">
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                    r.linked
-                                      ? 'bg-emerald-100 text-emerald-700'
-                                      : 'bg-rose-100 text-rose-700'
-                                  }`}
-                                >
-                                  {r.linked ? 'Linked' : 'Unlinked'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
+                                  ) : isSubjectMismatch ? (
+                                    <span className="text-amber-600 text-xs font-medium">
+                                      Subject mismatch: {r.barcode}
+                                    </span>
+                                  ) : (
+                                    <span className="text-rose-500 text-xs font-medium">
+                                      No match found
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  {r.linked ? (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                                      Linked
+                                    </span>
+                                  ) : isSubjectMismatch ? (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                                      Subject Mismatch
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-700">
+                                      Unlinked
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

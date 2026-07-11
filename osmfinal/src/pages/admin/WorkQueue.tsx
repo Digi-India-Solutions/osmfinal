@@ -118,6 +118,8 @@ export default function WorkQueue() {
 
   // ─── FETCH SHEETS ────────────────────────────────────────────
 
+  // src/pages/admin/WorkQueue.tsx - fetchSheets
+
   const fetchSheets = useCallback(async () => {
     setSheetsLoading(true);
     try {
@@ -126,10 +128,10 @@ export default function WorkQueue() {
       if (filterExam) params.examId = filterExam;
       if (searchName) params.search = searchName;
 
-      // ✅ Status filter - EXCLUDING 'assigned'
+      // ✅ Always send status filter (never empty)
       if (activeTab !== 'all') {
         const statusMap: Record<Exclude<TabKey, 'all'>, string> = {
-          pending: 'uploaded,linked',
+          pending: 'linked',
           checking: 'checking',
           rechecking: 'recheck',
           completed: 'checked,rechecked',
@@ -137,8 +139,8 @@ export default function WorkQueue() {
         };
         params.status = statusMap[activeTab as Exclude<TabKey, 'all'>];
       } else {
-        params.status =
-          'checking,recheck,escalated,uploaded,linked,checked,rechecked';
+        // ✅ For 'all' tab, send statuses we want (exclude uploaded/assigned/unlinked)
+        params.status = 'checking,recheck,escalated,linked,checked,rechecked';
       }
 
       const response = await workQueueService.getSheets(params);
@@ -146,9 +148,12 @@ export default function WorkQueue() {
       if (response.success) {
         let filteredSheets = response.data.items || [];
 
-        // Remove 'assigned' status sheets
+        // ✅ Double filter: Remove 'assigned', 'uploaded', and 'unlinked'
         filteredSheets = filteredSheets.filter(
-          (sheet: Sheet) => sheet.status !== 'assigned',
+          (sheet: Sheet) =>
+            sheet.status !== 'assigned' &&
+            sheet.status !== 'uploaded' &&
+            sheet.status !== 'unlinked',
         );
 
         setSheets(filteredSheets);
@@ -414,7 +419,6 @@ export default function WorkQueue() {
                       Escalation Reason
                     </th>
                   )}
-                  {/* ✅ Changed from "Last Saved" to "Time Spent" */}
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Time Spent
                   </th>
@@ -430,7 +434,6 @@ export default function WorkQueue() {
                     sheet.status === 'recheck' || sheet.status === 'rechecked';
                   const isEscalated = sheet.status === 'escalated';
 
-                  // ✅ Get time_spent from sheet data
                   const timeSpent =
                     (sheet as any).time_spent ||
                     (sheet as any).checking_time_spent ||
@@ -479,7 +482,6 @@ export default function WorkQueue() {
                           )}
                         </td>
                       )}
-                      {/* ✅ Show Time Spent instead of Last Saved */}
                       <td className="py-3 px-4 whitespace-nowrap">
                         {timeSpent > 0 ? (
                           <span className="inline-flex items-center gap-1 text-[11px] text-blue-400 font-medium">

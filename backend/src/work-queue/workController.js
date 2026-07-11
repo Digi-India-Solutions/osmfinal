@@ -8,6 +8,10 @@ import pool from '../pool.js';
 
 // src/work-queue/workController.js - getSheets
 
+// src/work-queue/workController.js - getSheets function
+
+// src/work-queue/workController.js - getSheets function
+
 export const getSheets = async (req, res) => {
   try {
     const { examId, status, search, page = 1, limit = 50 } = req.query;
@@ -23,7 +27,8 @@ export const getSheets = async (req, res) => {
       paramCount++;
     }
 
-    if (status) {
+    // ✅ IMPORTANT: Only add status condition if status is provided AND not empty
+    if (status && status.trim() !== '') {
       const statuses = status.split(',');
       const placeholders = statuses
         .map((_, i) => `$${paramCount + i}`)
@@ -31,6 +36,9 @@ export const getSheets = async (req, res) => {
       conditions.push(`s.status IN (${placeholders})`);
       params.push(...statuses);
       paramCount += statuses.length;
+    } else {
+      // ✅ If no status filter, exclude 'uploaded', 'assigned', 'unlinked'
+      conditions.push(`s.status NOT IN ('uploaded', 'assigned', 'unlinked')`);
     }
 
     if (search) {
@@ -44,7 +52,6 @@ export const getSheets = async (req, res) => {
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // ✅ CRITICAL FIX: Priority - Rechecker time > Checker time > Sheets time
     let query = `
       SELECT 
         s.id,
@@ -69,9 +76,9 @@ export const getSheets = async (req, res) => {
         s.escalated_at,
         s.assigned_to,
         COALESCE(
-          rr.time_spent,           -- ✅ Priority 1: Rechecker ka time (latest)
-          cm.time_spent,           -- ✅ Priority 2: Checker ka time
-          s.checking_time_spent,   -- ✅ Priority 3: Sheets table ka time
+          rr.time_spent,
+          cm.time_spent,
+          s.checking_time_spent,
           0
         ) AS time_spent,
         e.name AS exam_name,
@@ -109,7 +116,7 @@ export const getSheets = async (req, res) => {
     let statsQuery = `
       SELECT 
         COUNT(*) AS all_count,
-        COUNT(*) FILTER (WHERE s.status IN ('uploaded', 'assigned')) AS pending_count,
+        COUNT(*) FILTER (WHERE s.status IN ('linked')) AS pending_count,
         COUNT(*) FILTER (WHERE s.status = 'checking') AS checking_count,
         COUNT(*) FILTER (WHERE s.status = 'recheck') AS rechecking_count,
         COUNT(*) FILTER (WHERE s.status IN ('checked', 'rechecked')) AS completed_count,

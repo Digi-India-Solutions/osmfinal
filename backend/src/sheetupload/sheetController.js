@@ -20,11 +20,28 @@ export const uploadSheets = async (req, res) => {
       });
     }
 
+    // ✅ Get exam subject
+    const examResult = await pool.query(
+      `SELECT id, name, subject FROM exams WHERE id = $1`,
+      [examId],
+    );
+
+    if (examResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found',
+      });
+    }
+
+    const exam = examResult.rows[0];
+    const examSubject = exam.subject;
+
     const uploadedSheets = [];
     let linkedCount = 0;
     let unlinkedCount = 0;
     const duplicateSheets = [];
     const invalidFiles = [];
+    const subjectMismatchFiles = []; // ✅ New: Subject mismatch tracking
 
     for (const file of req.files) {
       const fileName = path.parse(file.originalname).name;
@@ -55,16 +72,38 @@ export const uploadSheets = async (req, res) => {
         continue;
       }
 
-      // ✅ LOCAL URL (not Cloudinary)
-      const fileUrl = `/uploads/sheets/${file.filename}`;
-
-      // ✅ Find student
+      // ✅ Find student with subject
       const studentResult = await pool.query(
         `SELECT id, roll_no, student_name, subject FROM student_records WHERE barcode = $1`,
         [barcode],
       );
 
       const student = studentResult.rows[0];
+
+      // ✅ CRITICAL: Subject match validation
+      if (student) {
+        const studentSubject = student.subject;
+        const isSubjectMatch =
+          studentSubject &&
+          studentSubject.trim().toLowerCase() ===
+            examSubject.trim().toLowerCase();
+
+        if (!isSubjectMatch) {
+          subjectMismatchFiles.push({
+            filename: file.originalname,
+            barcode: barcode,
+            student_name: student.student_name,
+            roll_no: student.roll_no,
+            student_subject: studentSubject || 'Unknown',
+            exam_subject: examSubject,
+            message: `Subject mismatch: Sheet belongs to "${studentSubject || 'Unknown'}" but exam is "${examSubject}"`,
+          });
+          continue; // ❌ Skip this file - don't upload
+        }
+      }
+
+      // ✅ LOCAL URL
+      const fileUrl = `/uploads/sheets/${file.filename}`;
 
       // ✅ Insert sheet
       const sheetResult = await pool.query(
@@ -100,10 +139,20 @@ export const uploadSheets = async (req, res) => {
       });
     }
 
+    // ✅ Build message with subject mismatch details
     let message = `${uploadedSheets.length} sheets uploaded successfully`;
+
+    if (subjectMismatchFiles.length > 0) {
+      const mismatchNames = subjectMismatchFiles
+        .map((f) => f.filename)
+        .join(', ');
+      message += `, ${subjectMismatchFiles.length} file(s) skipped (subject mismatch): ${mismatchNames}`;
+    }
+
     if (invalidFiles.length > 0) {
       message += `, ${invalidFiles.length} files skipped (invalid barcode)`;
     }
+
     if (duplicateSheets.length > 0) {
       message += `, ${duplicateSheets.length} files skipped (duplicates)`;
     }
@@ -120,6 +169,8 @@ export const uploadSheets = async (req, res) => {
         invalidCount: invalidFiles.length,
         duplicates: duplicateSheets,
         duplicateCount: duplicateSheets.length,
+        subjectMismatch: subjectMismatchFiles, // ✅ New field
+        subjectMismatchCount: subjectMismatchFiles.length,
       },
     });
   } catch (error) {
