@@ -7,6 +7,7 @@ import {
   getDraft,
   getSubmittedMarks,
   escalateSheet,
+  getEscalatedSheets,
 } from './checkerMarkingCont.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
@@ -28,5 +29,8 @@ router.get('/sheet/:sheetId/submitted', verifyToken, getSubmittedMarks);
 
 // Escalate sheet
 router.post('/sheet/:sheetId/escalate', verifyToken, escalateSheet);
+
+// Get escalated sheets
+router.get('/escalated', verifyToken, getEscalatedSheets);
 
 export default router;

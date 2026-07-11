@@ -1,6 +1,6 @@
 // src/pages/admin/ExamManagement.tsx
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Breadcrumb from '@/components/ui/Breadcrumb';
 import StatusBadge from '@/components/ui/StatusBadge';
@@ -442,13 +442,11 @@ export default function ExamManagement() {
     }
   };
 
-  // ─── DELETE FUNCTIONS ──────────────────────────────────────
-
   // ─── SELECT ALL / DESELECT ALL ──────────────────────────────
 
   const handleSelectAll = () => {
     const activeExams = examList.filter((e) => e.status !== 'archived');
-    if (selectedIds.length === activeExams.length) {
+    if (selectedIds.length === activeExams.length && activeExams.length > 0) {
       setSelectedIds([]);
     } else {
       setSelectedIds(activeExams.map((e) => e.id));
@@ -539,6 +537,11 @@ export default function ExamManagement() {
         setShowSingleDeleteModal(false);
         setSingleDeletePreview(null);
         setSingleDeleteData(null);
+        // ✅ Remove from list and clear selection
+        setExamList((prev) => prev.filter((e) => e.id !== singleDeleteData.id));
+        setSelectedIds((prev) =>
+          prev.filter((id) => id !== singleDeleteData.id),
+        );
         await fetchExams();
       } else {
         showToast(response.message || 'Failed to delete exam', 'error');
@@ -567,6 +570,11 @@ export default function ExamManagement() {
   if (loading) return <LoadingSpinner fullPage />;
 
   const activeExams = examList.filter((e) => e.status !== 'archived');
+
+  // ✅ Calculate selection state
+  const isAllSelected =
+    activeExams.length > 0 && selectedIds.length === activeExams.length;
+  const isSomeSelected = selectedIds.length > 0 && !isAllSelected;
 
   // ─── RENDER ──────────────────────────────────────────────────
 
@@ -656,12 +664,15 @@ export default function ExamManagement() {
                 <th className="py-3 px-4 w-10">
                   <input
                     type="checkbox"
-                    checked={
-                      selectedIds.length === activeExams.length &&
-                      activeExams.length > 0
-                    }
+                    checked={isAllSelected}
+                    ref={(el) => {
+                      if (el) {
+                        el.indeterminate = isSomeSelected;
+                      }
+                    }}
                     onChange={handleSelectAll}
-                    className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-200 cursor-pointer"
+                    disabled={activeExams.length === 0}
+                    className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-200 cursor-pointer disabled:opacity-50"
                   />
                 </th>
                 <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
@@ -717,6 +728,8 @@ export default function ExamManagement() {
                       key={exam.id}
                       className={`border-b border-gray-50 hover:bg-gray-50/30 transition-colors ${
                         isArchived ? 'opacity-60' : ''
+                      } ${
+                        selectedIds.includes(exam.id) ? 'bg-gray-50/60' : ''
                       }`}
                     >
                       <td className="py-3 px-4">
@@ -781,7 +794,7 @@ export default function ExamManagement() {
                               } text-sm`}
                             ></i>
                           </button>
-                          {/* ✅ DELETE BUTTON */}
+                          {/* ✅ DELETE BUTTON - only for non-archived */}
                           {!isArchived && (
                             <button
                               onClick={() =>
@@ -1101,14 +1114,6 @@ export default function ExamManagement() {
                     <div className="bg-gray-50 rounded-xl p-4">
                       <p className="text-xs text-gray-500 mb-1">Status</p>
                       <StatusBadge status={detailExam.status} />
-                    </div>
-                    <div className="bg-gray-50 rounded-xl p-4 col-span-2">
-                      <p className="text-xs text-gray-500 mb-1">
-                        Students Registered
-                      </p>
-                      <p className="text-sm font-medium text-gray-900">
-                        {examStudents.length}
-                      </p>
                     </div>
                   </div>
                 </div>

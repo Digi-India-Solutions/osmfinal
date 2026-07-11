@@ -4,6 +4,10 @@ import pool from '../pool.js';
 
 // ─── GET ALL SHEETS ─────────────────────────────────────────────
 
+// src/work-queue/workController.js
+
+// src/work-queue/workController.js - getSheets
+
 export const getSheets = async (req, res) => {
   try {
     const { examId, status, search, page = 1, limit = 50 } = req.query;
@@ -13,7 +17,6 @@ export const getSheets = async (req, res) => {
     const params = [];
     let paramCount = 1;
 
-    // Apply filters
     if (examId) {
       conditions.push(`s.exam_id = $${paramCount}`);
       params.push(examId);
@@ -41,7 +44,7 @@ export const getSheets = async (req, res) => {
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // ✅ FIXED: Added assigned_to and assigned_to_name
+    // ✅ CRITICAL FIX: Priority - Rechecker time > Checker time > Sheets time
     let query = `
       SELECT 
         s.id,
@@ -65,19 +68,27 @@ export const getSheets = async (req, res) => {
         s.escalated_by,
         s.escalated_at,
         s.assigned_to,
+        COALESCE(
+          rr.time_spent,           -- ✅ Priority 1: Rechecker ka time (latest)
+          cm.time_spent,           -- ✅ Priority 2: Checker ka time
+          s.checking_time_spent,   -- ✅ Priority 3: Sheets table ka time
+          0
+        ) AS time_spent,
         e.name AS exam_name,
         e.subject AS exam_subject,
         u.name AS uploaded_by_name,
         assigned_user.name AS assigned_to_name,
         (
           SELECT COUNT(*) 
-          FROM recheck_requests rr 
-          WHERE rr.sheet_id = s.id AND rr.status IN ('pending', 'assigned')
+          FROM recheck_requests rr2 
+          WHERE rr2.sheet_id = s.id AND rr2.status IN ('pending', 'assigned')
         ) AS pending_recheck_count
       FROM sheets s
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN users u ON s.uploaded_by = u.id
       LEFT JOIN users assigned_user ON s.assigned_to = assigned_user.id
+      LEFT JOIN checker_markings cm ON s.id = cm.sheet_id AND cm.is_submitted = true
+      LEFT JOIN recheck_requests rr ON s.id = rr.sheet_id AND rr.status = 'completed'
       ${whereClause}
       ORDER BY s.created_at DESC
     `;
@@ -88,7 +99,6 @@ export const getSheets = async (req, res) => {
 
     const { rows } = await pool.query(query, dataParams);
 
-    // ✅ Get total count
     let countQuery = `SELECT COUNT(*)::int AS total FROM sheets s`;
     if (whereClause) {
       countQuery += ` ${whereClause}`;
@@ -96,7 +106,6 @@ export const getSheets = async (req, res) => {
     const countResult = await pool.query(countQuery, params);
     const total = countResult.rows[0]?.total || 0;
 
-    // ✅ Get status counts for tabs
     let statsQuery = `
       SELECT 
         COUNT(*) AS all_count,
@@ -113,8 +122,6 @@ export const getSheets = async (req, res) => {
 
     const statsResult = await pool.query(statsQuery, params);
     const stats = statsResult.rows[0] || {};
-
-    console.log('🔍 Stats:', stats);
 
     return res.status(200).json({
       success: true,

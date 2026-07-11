@@ -26,23 +26,18 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: 'escalated', label: 'Escalated' },
 ];
 
-function getDraftTimestamp(sheetId: number): string | null {
-  try {
-    const raw = localStorage.getItem(`osm_draft_sheet_${sheetId}`);
-    if (!raw) return null;
-    const draft = JSON.parse(raw);
-    if (draft.marks && draft.marks.length > 0 && draft.savedAt) {
-      const savedTime = new Date(draft.savedAt);
-      return savedTime.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-    }
-    return null;
-  } catch {
-    return null;
+// ✅ Format time spent in seconds to MM:SS or HH:MM:SS
+function formatTimeSpent(seconds: number | null | undefined): string {
+  if (!seconds || seconds === 0) return '—';
+
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (hrs > 0) {
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 export default function WorkQueue() {
@@ -134,7 +129,7 @@ export default function WorkQueue() {
       // ✅ Status filter - EXCLUDING 'assigned'
       if (activeTab !== 'all') {
         const statusMap: Record<Exclude<TabKey, 'all'>, string> = {
-          pending: 'uploaded,linked', // ✅ Removed 'assigned' from pending
+          pending: 'uploaded,linked',
           checking: 'checking',
           rechecking: 'recheck',
           completed: 'checked,rechecked',
@@ -142,20 +137,16 @@ export default function WorkQueue() {
         };
         params.status = statusMap[activeTab as Exclude<TabKey, 'all'>];
       } else {
-        // ✅ 'All' tab mein bhi 'assigned' exclude karo
-        // Sirf wo sheets dikhao jo actual work me hain
         params.status =
           'checking,recheck,escalated,uploaded,linked,checked,rechecked';
-        // 'assigned' ko intentionally exclude kiya
       }
 
       const response = await workQueueService.getSheets(params);
 
       if (response.success) {
-        // ✅ Frontend me bhi filter karo - 'assigned' status wali sheets hatao
         let filteredSheets = response.data.items || [];
 
-        // 🔥 CRITICAL: Remove 'assigned' status sheets
+        // Remove 'assigned' status sheets
         filteredSheets = filteredSheets.filter(
           (sheet: Sheet) => sheet.status !== 'assigned',
         );
@@ -165,7 +156,7 @@ export default function WorkQueue() {
         const statsData = response.data.stats || {};
 
         setStats({
-          all: filteredSheets.length, // ✅ Sirf filtered count
+          all: filteredSheets.length,
           pending: parseInt(statsData.pending || 0),
           checking: parseInt(statsData.checking || 0),
           rechecking: parseInt(statsData.rechecking || 0),
@@ -265,7 +256,7 @@ export default function WorkQueue() {
 
   const getTabCount = (key: TabKey): number => {
     const map: Record<TabKey, number> = {
-      all: sheets.length, // ✅ Filtered count
+      all: sheets.length,
       pending: stats.pending,
       checking: stats.checking,
       rechecking: stats.rechecking,
@@ -423,8 +414,9 @@ export default function WorkQueue() {
                       Escalation Reason
                     </th>
                   )}
+                  {/* ✅ Changed from "Last Saved" to "Time Spent" */}
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Last Saved
+                    Time Spent
                   </th>
                   <th className="text-right py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Actions
@@ -433,11 +425,16 @@ export default function WorkQueue() {
               </thead>
               <tbody>
                 {sheets.map((sheet) => {
-                  const draftTime = getDraftTimestamp(sheet.id);
                   const hasPendingRecheck = sheet.pending_recheck_count > 0;
                   const isRecheckDisabled =
                     sheet.status === 'recheck' || sheet.status === 'rechecked';
                   const isEscalated = sheet.status === 'escalated';
+
+                  // ✅ Get time_spent from sheet data
+                  const timeSpent =
+                    (sheet as any).time_spent ||
+                    (sheet as any).checking_time_spent ||
+                    0;
 
                   return (
                     <tr
@@ -482,14 +479,15 @@ export default function WorkQueue() {
                           )}
                         </td>
                       )}
+                      {/* ✅ Show Time Spent instead of Last Saved */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        {draftTime ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 font-medium">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
-                            {draftTime}
+                        {timeSpent > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-blue-400 font-medium">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
+                            {formatTimeSpent(timeSpent)}
                           </span>
                         ) : (
-                          <span className="text-xs text-gray-300">—</span>
+                          <span className="text-xs text-gray-400">—</span>
                         )}
                       </td>
                       <td className="py-3 px-4 text-right">

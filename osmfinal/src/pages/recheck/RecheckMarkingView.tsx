@@ -117,7 +117,10 @@ export default function RecheckMarkingView() {
 
   const [minTimeRequired, setMinTimeRequired] = useState(0);
   const [isTimeRequirementMet, setIsTimeRequirementMet] = useState(true);
-  const [elapsed, setElapsed] = useState(0);
+
+  // ✅ Use ref for timer - never resets on re-render
+  const timerSecondsRef = useRef(0);
+  const [timerDisplay, setTimerDisplay] = useState('00:00:00');
 
   // ─── PDF PAGE STATE ──────────────────────────────────────────
 
@@ -165,7 +168,6 @@ export default function RecheckMarkingView() {
             question_paper: toFullUrl(data.pdfs?.question_paper),
           });
 
-          // ✅ Set minimum time requirement from exam
           const spentTime = data.exam?.spentTime || 0;
           setMinTimeRequired(spentTime);
           setIsTimeRequirementMet(spentTime === 0);
@@ -189,15 +191,70 @@ export default function RecheckMarkingView() {
     fetchData();
   }, [requestIdNum]);
 
+  // ─── ✅ FIXED TIMER WITH useRef ──────────────────────────────
+
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Load saved timer from localStorage on mount
+  useEffect(() => {
+    const savedTimer = localStorage.getItem(
+      `osm_recheck_timer_${requestIdNum}`,
+    );
+    if (savedTimer) {
+      const parsed = parseInt(savedTimer, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        timerSecondsRef.current = parsed;
+        setTimerDisplay(formatTime(parsed));
+      }
+    }
+  }, [requestIdNum]);
+
+  // Start/restart timer
+  useEffect(() => {
+    if (requestData?.isReadOnly) return;
+
+    // Clear existing timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // Start timer
+    timerRef.current = setInterval(() => {
+      timerSecondsRef.current += 1;
+      setTimerDisplay(formatTime(timerSecondsRef.current));
+
+      // ✅ Save to localStorage every 5 seconds
+      if (timerSecondsRef.current % 5 === 0) {
+        localStorage.setItem(
+          `osm_recheck_timer_${requestIdNum}`,
+          String(timerSecondsRef.current),
+        );
+      }
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      // ✅ Save final timer value on unmount
+      localStorage.setItem(
+        `osm_recheck_timer_${requestIdNum}`,
+        String(timerSecondsRef.current),
+      );
+    };
+  }, [requestIdNum, requestData?.isReadOnly]);
+
   // ─── CHECK TIME REQUIREMENT ──────────────────────────────────
 
   useEffect(() => {
     if (minTimeRequired > 0) {
       const requiredSeconds = minTimeRequired * 60;
-      const met = elapsed >= requiredSeconds;
+      const met = timerSecondsRef.current >= requiredSeconds;
       setIsTimeRequirementMet(met);
     }
-  }, [elapsed, minTimeRequired]);
+  }, [timerDisplay, minTimeRequired]);
 
   // ─── BUILD MARKS FROM MARK SCHEME ────────────────────────────
 
@@ -328,8 +385,6 @@ export default function RecheckMarkingView() {
 
   // ─── Click-to-place stamp state ───
 
-  // ─── Click-to-place stamp state ───
-
   const initialStamps = useMemo((): RecheckStamp[] => {
     return initialMarks.map((m) => ({
       markId: m.id,
@@ -352,7 +407,7 @@ export default function RecheckMarkingView() {
 
   useEffect(() => {
     if (initialStamps.length === 0) return;
-    if (stampsInitializedRef.current) return; // ✅ sirf ek baar chalega
+    if (stampsInitializedRef.current) return;
 
     if (requestData?.isReadOnly && recheckStampsData.length > 0) {
       setStamps(recheckStampsData);
@@ -446,18 +501,6 @@ export default function RecheckMarkingView() {
     requestData?.finalMarksRule || 'higher',
   );
 
-  // ─── Timer ───
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    timerRef.current = setInterval(() => {
-      setElapsed((prev) => prev + 1);
-    }, 1000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, []);
-
   const scrollToPage = useCallback((page: number) => {
     const el = pageRefs.current[page];
     if (el) {
@@ -526,7 +569,7 @@ export default function RecheckMarkingView() {
     saveDraftRef.current = saveDraft;
   }, [saveDraft]);
 
-  // ─── SAVE RECHECK DRAFT TO API ────────────────────────────────
+  // ─── ✅ SAVE RECHECK DRAFT TO API (with ref timer) ────────────
 
   const handleSaveDraft = useCallback(async () => {
     if (!requestIdNum || requestData?.isReadOnly) return;
@@ -555,16 +598,24 @@ export default function RecheckMarkingView() {
       height: a.height,
     }));
 
+    // ✅ Use ref for accurate time
+    const currentTime = timerSecondsRef.current;
+
     const payload = {
       marksData,
       annotationsData,
       stampsData,
       totalMarks: round2Total,
       remarks: '',
+      timeSpent: currentTime,
     };
 
     try {
       await recheckQueueService.saveDraft(requestIdNum, payload);
+      localStorage.setItem(
+        `osm_recheck_timer_${requestIdNum}`,
+        String(currentTime),
+      );
     } catch (error) {
       console.error('Save recheck draft error:', error);
     }
@@ -672,6 +723,16 @@ export default function RecheckMarkingView() {
       });
       manuallySetMarksRef.current = manualSet;
 
+      // ✅ Restore timer from draft
+      if (draft.timerSeconds) {
+        timerSecondsRef.current = draft.timerSeconds;
+        setTimerDisplay(formatTime(draft.timerSeconds));
+        localStorage.setItem(
+          `osm_recheck_timer_${requestIdNum}`,
+          String(draft.timerSeconds),
+        );
+      }
+
       setMarks(restoredMarks);
       setStamps(restoredStamps);
       setResumeBanner(null);
@@ -692,8 +753,11 @@ export default function RecheckMarkingView() {
 
   const handleStartFresh = useCallback(() => {
     localStorage.removeItem(`osm_recheck_draft_request_${requestIdNum}`);
+    localStorage.removeItem(`osm_recheck_timer_${requestIdNum}`);
     setResumeBanner(null);
     manuallySetMarksRef.current = new Set();
+    timerSecondsRef.current = 0;
+    setTimerDisplay('00:00:00');
   }, [requestIdNum]);
 
   // ─── Toolbar handlers ───
@@ -969,15 +1033,16 @@ export default function RecheckMarkingView() {
       .map((m) => m.criterion);
   }, [marks]);
 
-  // ─── ✅ SUBMIT RECHECK WITH TIME CHECK ───
+  // ─── ✅ SUBMIT RECHECK WITH TIME CHECK (using ref) ───
 
   const handleSubmitRecheck = useCallback(() => {
     if (requestData?.isReadOnly) return;
 
-    // ✅ Check minimum time requirement
     const requiredSeconds = minTimeRequired * 60;
-    if (minTimeRequired > 0 && elapsed < requiredSeconds) {
-      const remaining = requiredSeconds - elapsed;
+    const currentTime = timerSecondsRef.current;
+
+    if (minTimeRequired > 0 && currentTime < requiredSeconds) {
+      const remaining = requiredSeconds - currentTime;
       const remainingMinutes = Math.ceil(remaining / 60);
       setToastMessage(
         `⚠️ Please spend at least ${minTimeRequired} minutes. ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''} remaining.`,
@@ -992,17 +1057,18 @@ export default function RecheckMarkingView() {
       return;
     }
     setModalType('submit');
-  }, [checkIncomplete, requestData?.isReadOnly, minTimeRequired, elapsed]);
+  }, [checkIncomplete, requestData?.isReadOnly, minTimeRequired]);
 
-  // ─── ✅ ESCALATE FURTHER WITH TIME CHECK ───
+  // ─── ✅ ESCALATE FURTHER WITH TIME CHECK (using ref) ───
 
   const handleEscalateFurther = useCallback(() => {
     if (requestData?.isReadOnly) return;
 
-    // ✅ Check minimum time requirement before escalating
     const requiredSeconds = minTimeRequired * 60;
-    if (minTimeRequired > 0 && elapsed < requiredSeconds) {
-      const remaining = requiredSeconds - elapsed;
+    const currentTime = timerSecondsRef.current;
+
+    if (minTimeRequired > 0 && currentTime < requiredSeconds) {
+      const remaining = requiredSeconds - currentTime;
       const remainingMinutes = Math.ceil(remaining / 60);
       setToastMessage(
         `⚠️ Please spend at least ${minTimeRequired} minutes before escalating. ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''} remaining.`,
@@ -1012,7 +1078,7 @@ export default function RecheckMarkingView() {
     }
 
     setModalType('escalate');
-  }, [requestData?.isReadOnly, minTimeRequired, elapsed]);
+  }, [requestData?.isReadOnly, minTimeRequired]);
 
   const handleIncompleteGoBack = useCallback(() => {
     setIncompleteWarning(null);
@@ -1022,6 +1088,8 @@ export default function RecheckMarkingView() {
     setIncompleteWarning(null);
     setModalType('submit');
   }, []);
+
+  // ─── ✅ SUBMIT CONFIRM (with ref timer) ───
 
   const handleSubmitConfirm = useCallback(async () => {
     setModalType(null);
@@ -1050,16 +1118,20 @@ export default function RecheckMarkingView() {
         height: a.height,
       }));
 
+      const currentTime = timerSecondsRef.current;
+
       const response = await recheckQueueService.completeRecheck(requestIdNum, {
         marks: finalMarks,
         remarks: 'Recheck completed',
         marksData,
         annotationsData,
         stampsData,
+        timeSpent: currentTime, // ✅ Use ref
       });
 
       if (response.success) {
         localStorage.removeItem(`osm_recheck_draft_request_${requestIdNum}`);
+        localStorage.removeItem(`osm_recheck_timer_${requestIdNum}`);
         setToastMessage('Recheck submitted successfully');
         setTimeout(() => {
           navigate('/recheck/queue');
@@ -1075,15 +1147,26 @@ export default function RecheckMarkingView() {
     }
   }, [requestIdNum, finalMarks, marks, stamps, annotations, navigate]);
 
+  // ─── ✅ ESCALATE CONFIRM (with ref timer) ───
+
   const handleEscalateConfirm = useCallback(async () => {
     setModalType(null);
     try {
-      const response = await recheckQueueService.updateStatus(
+      const currentTime = timerSecondsRef.current;
+
+      const response = await recheckQueueService.escalateRecheckRequest(
         requestIdNum,
-        'escalated',
-        'Escalated for further review',
+        {
+          reason: escalateData?.reason || 'Escalated for further review',
+          escalateType: escalateData?.escalateType || 'other',
+          remarks: escalateData?.remarks || '',
+          timeSpent: currentTime, // ✅ Use ref
+        },
       );
+
       if (response.success) {
+        localStorage.removeItem(`osm_recheck_draft_request_${requestIdNum}`);
+        localStorage.removeItem(`osm_recheck_timer_${requestIdNum}`);
         setToastMessage('Sheet escalated successfully');
         setTimeout(() => {
           navigate('/recheck/queue');
@@ -1097,7 +1180,7 @@ export default function RecheckMarkingView() {
       setToastMessage(error.message || 'Failed to escalate');
       setTimeout(() => setToastMessage(null), 2500);
     }
-  }, [requestIdNum, navigate]);
+  }, [requestIdNum, navigate, escalateData]);
 
   const hasModelAnswer = !!pdfsData.model_answer;
 
@@ -1181,21 +1264,21 @@ export default function RecheckMarkingView() {
           {minTimeRequired > 0 && (
             <span
               className={`text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
-                elapsed >= minTimeRequired * 60
+                timerSecondsRef.current >= minTimeRequired * 60
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
               }`}
             >
               <i
                 className={`${
-                  elapsed >= minTimeRequired * 60
+                  timerSecondsRef.current >= minTimeRequired * 60
                     ? 'ri-check-line'
                     : 'ri-timer-line'
                 } text-xs`}
               ></i>
-              {elapsed >= minTimeRequired * 60
+              {timerSecondsRef.current >= minTimeRequired * 60
                 ? `✅ Min time ${minTimeRequired}m met`
-                : `⏱️ ${Math.floor(elapsed / 60)}/${minTimeRequired}m required`}
+                : `⏱️ ${Math.floor(timerSecondsRef.current / 60)}/${minTimeRequired}m required`}
             </span>
           )}
         </div>
@@ -1205,7 +1288,7 @@ export default function RecheckMarkingView() {
               <i className="ri-timer-line text-xs"></i>
             </span>
             <span className="font-mono text-emerald-400 tabular-nums">
-              {formatTime(elapsed)}
+              {timerDisplay}
             </span>
           </div>
         </div>

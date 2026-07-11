@@ -8,6 +8,7 @@ export interface ICheckerMarkingData {
   stampsData: any[];
   totalMarks: number;
   remarks?: string;
+  timeSpent?: number; // ✅ Add timeSpent (in seconds)
 }
 
 export interface ICheckerDraftResponse {
@@ -23,6 +24,7 @@ export interface ICheckerDraftResponse {
     stamps_data: any[];
     total_marks: number;
     remarks: string | null;
+    time_spent: number; // ✅ Add time_spent in response
     is_draft: boolean;
     is_submitted: boolean;
     submitted_at: string | null;
@@ -30,8 +32,6 @@ export interface ICheckerDraftResponse {
     updated_at: string;
   };
 }
-
-
 
 export const checkerApi = {
   // Save draft
@@ -74,7 +74,7 @@ export const checkerApi = {
     }
   },
 
-  // src/api/checker.ts
+  // Get submitted marks
   getSubmittedMarks: async (sheetId: number): Promise<any> => {
     try {
       const response = await api.get(
@@ -110,7 +110,7 @@ export const checkerApi = {
   // Escalate sheet
   escalateSheet: async (
     sheetId: number,
-    data: { reason: string; remarks?: string },
+    data: { reason: string; remarks?: string; timeSpent?: number }, // ✅ Add timeSpent
   ): Promise<any> => {
     try {
       const response = await api.post(
@@ -127,5 +127,3 @@ export const checkerApi = {
     }
   },
 };
-
-

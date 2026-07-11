@@ -28,7 +28,7 @@ export interface RecheckRequest {
   marks_data?: Record<string, number>;
   finalMarksRule?: string;
   completed_at?: string;
-  // ✅ Escalation fields
+  time_spent?: number; // ✅ ADD THIS
   escalate_reason?: string;
   escalate_type?: string;
   escalate_remarks?: string;
@@ -46,6 +46,7 @@ export interface RecheckMarkingData {
     finalMarksRule: 'higher' | 'recheck_marks' | 'average';
     isReadOnly?: boolean;
     created_at: string;
+    time_spent?: number; // ✅ ADD THIS
   };
   sheet: {
     id: number;
@@ -72,6 +73,32 @@ export interface RecheckMarkingData {
     model_answer: string | null;
     question_paper: string | null;
   };
+}
+
+export interface SaveDraftData {
+  marksData: Record<string, number>;
+  annotationsData: any[];
+  stampsData: any[];
+  totalMarks: number;
+  remarks?: string;
+  timeSpent?: number; // ✅ ADD THIS
+}
+
+export interface CompleteRecheckData {
+  marks?: number;
+  remarks?: string;
+  marksData?: Record<string, number>;
+  annotationsData?: any[];
+  stampsData?: any[];
+  finalMarksRule?: string;
+  timeSpent?: number; // ✅ ADD THIS
+}
+
+export interface EscalateRecheckData {
+  reason: string;
+  escalateType: string;
+  remarks?: string;
+  timeSpent?: number; // ✅ ADD THIS
 }
 
 class RecheckQueueService {
@@ -128,7 +155,7 @@ class RecheckQueueService {
   // Save recheck marks (draft)
   async saveMarks(
     id: number,
-    data: { marks: number; remarks?: string },
+    data: { marks: number; remarks?: string; timeSpent?: number }, // ✅ ADD timeSpent
   ): Promise<any> {
     try {
       const response = await api.post(
@@ -148,13 +175,7 @@ class RecheckQueueService {
   // Save recheck draft
   async saveDraft(
     id: number,
-    data: {
-      marksData: Record<string, number>;
-      annotationsData: any[];
-      stampsData: any[];
-      totalMarks: number;
-      remarks?: string;
-    },
+    data: SaveDraftData, // ✅ Using interface with timeSpent
   ): Promise<any> {
     try {
       const response = await api.post(
@@ -191,14 +212,7 @@ class RecheckQueueService {
   // Complete recheck
   async completeRecheck(
     id: number,
-    data: {
-      marks?: number;
-      remarks?: string;
-      marksData?: Record<string, number>;
-      annotationsData?: any[];
-      stampsData?: any[];
-      finalMarksRule?: string;
-    },
+    data: CompleteRecheckData, // ✅ Using interface with timeSpent
   ): Promise<any> {
     try {
       const response = await api.post(
@@ -220,6 +234,7 @@ class RecheckQueueService {
     id: number,
     status: string,
     remarks?: string,
+    timeSpent?: number, // ✅ ADD timeSpent
   ): Promise<any> {
     try {
       const response = await api.patch(
@@ -227,6 +242,7 @@ class RecheckQueueService {
         {
           status,
           remarks,
+          timeSpent, // ✅ Send timeSpent
         },
       );
       return response.data;
@@ -240,14 +256,10 @@ class RecheckQueueService {
     }
   }
 
-  // ✅ ESCALATE RECHECK REQUEST
+  // Escalate recheck request
   async escalateRecheckRequest(
     id: number,
-    data: {
-      reason: string;
-      escalateType: string;
-      remarks?: string;
-    },
+    data: EscalateRecheckData, // ✅ Using interface with timeSpent
   ): Promise<any> {
     try {
       const response = await api.patch(
