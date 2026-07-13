@@ -1829,6 +1829,9 @@ console.log('SheetData===>',sheetData)
   >(null);
   const [annotationDragId, setAnnotationDragId] = useState<number | null>(null);
 
+  // ─── Eraser size ───
+  const [eraserSize, setEraserSize] = useState(20);
+
   // ─── CROSS-PAGE MOVE ───
   const [pagePickerTarget, setPagePickerTarget] = useState<{
     type: 'stamp' | 'annotation';
@@ -2436,6 +2439,8 @@ console.log('SheetData===>',sheetData)
         setContextMenu(null);
         setPagePickerTarget(null);
         isDraggingRef.current = false;
+        setPlacingMarkId(null);
+        setInstructionBanner(null);
       }
     };
     document.addEventListener('keydown', handleKeyDown);
@@ -2458,6 +2463,8 @@ console.log('SheetData===>',sheetData)
   // ─── Toolbar handlers ───
   const handleToolSelect = useCallback((tool: AnnotationTool) => {
     setActiveTool(tool);
+    setPlacingMarkId(null);
+    setInstructionBanner(null);
   }, []);
 
   const handleZoomIn = useCallback(() => {
@@ -2468,8 +2475,16 @@ console.log('SheetData===>',sheetData)
     setZoom((prev) => Math.max(prev - 15, 50));
   }, []);
 
+  const FIT_PRESETS = [75, 100, 125, 150, 200];
+
   const handleFitWidth = useCallback(() => {
-    setZoom(100);
+    setZoom((prev) => {
+      const idx = FIT_PRESETS.indexOf(prev);
+      // If current zoom matches a preset, go to next; otherwise snap to 100%
+      return idx !== -1
+        ? FIT_PRESETS[(idx + 1) % FIT_PRESETS.length]
+        : 100;
+    });
   }, []);
 
   const handlePencilStroke = useCallback(() => {
@@ -2534,6 +2549,7 @@ console.log('SheetData===>',sheetData)
 
   const handleThumbnailClick = useCallback(
     (page: number) => {
+      setCurrentPage(page);
       scrollToPage(page);
     },
     [scrollToPage],
@@ -2563,14 +2579,8 @@ console.log('SheetData===>',sheetData)
 
   const handleActiveMarkChange = useCallback((id: string) => {
     setActiveMarkId(id);
-    const stamp = stampsRef.current.find((s) => s.markId === id);
-    if (stamp && !stamp.placed) {
-      setPlacingMarkId(id);
-      setInstructionBanner(`Click on sheet to place mark position for ${id}`);
-    } else {
-      setPlacingMarkId(null);
-      setInstructionBanner(null);
-    }
+    setPlacingMarkId(id);
+    setInstructionBanner(`Click on sheet to place mark position for ${id}`);
   }, []);
 
   const handleSheetClickForPlacement = useCallback(
@@ -2590,8 +2600,6 @@ console.log('SheetData===>',sheetData)
             : s,
         ),
       );
-      setPlacingMarkId(null);
-      setInstructionBanner(null);
     },
     [isReadOnly, placingMarkId],
   );
@@ -2889,7 +2897,7 @@ console.log('SheetData===>',sheetData)
           <button
             onClick={handleFitWidth}
             className="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
-            title="Fit Width"
+            title={`Cycle Zoom — next: ${FIT_PRESETS[(FIT_PRESETS.indexOf(zoom) + 1) % FIT_PRESETS.length] ?? 100}%`}
           >
             <i className="ri-aspect-ratio-line text-sm"></i>
           </button>
@@ -2902,12 +2910,15 @@ console.log('SheetData===>',sheetData)
             <>
               <div className="w-5 h-px bg-slate-600 my-1.5" />
 
-              {toolbarTools.map(({ tool, icon, label }) => (
+              {toolbarTools.map(({ tool, icon, label }) => {
+                const isSelectedAnnotTool = activeTool === "handSelect" && selectedAnnotationId && annotations.find(a => a.id === selectedAnnotationId)?.tool === tool;
+                const isActive = activeTool === tool || isSelectedAnnotTool;
+                return (
                 <button
                   key={tool}
                   onClick={() => handleToolSelect(tool)}
                   className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
-                    activeTool === tool
+                    isActive
                       ? tool === 'eraser'
                         ? 'bg-rose-500/25 text-rose-400'
                         : 'bg-sky-500/25 text-sky-400'
@@ -2917,7 +2928,31 @@ console.log('SheetData===>',sheetData)
                 >
                   <i className={`${icon} text-sm`}></i>
                 </button>
-              ))}
+                );
+              })}
+
+              {/* ─── Eraser size controls ─── */}
+              {activeTool === 'eraser' && (
+                <>
+                  <button
+                    onClick={() => setEraserSize((prev) => Math.max(10, prev - 5))}
+                    className="w-7 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer transition-colors text-[10px]"
+                    title="Decrease eraser size"
+                  >
+                    −
+                  </button>
+                  <span className="text-[9px] text-rose-400 font-mono tabular-nums leading-none select-none">
+                    {eraserSize}
+                  </span>
+                  <button
+                    onClick={() => setEraserSize((prev) => Math.min(50, prev + 5))}
+                    className="w-7 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer transition-colors text-[10px]"
+                    title="Increase eraser size"
+                  >
+                    +
+                  </button>
+                </>
+              )}
 
               <div className="w-5 h-px bg-slate-600 my-1.5" />
 
@@ -2930,10 +2965,33 @@ console.log('SheetData===>',sheetData)
                 <i className="ri-arrow-go-back-line text-sm"></i>
               </button>
               <button
-                onClick={handleDeleteAnnotations}
-                disabled={annotations.length === 0 && !hasPencilMarks}
-                className="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                title="Delete All"
+                onClick={() => {
+                  if (selectedStampId) {
+                    handleRemoveStamp(selectedStampId);
+                    setSelectedStampId(null);
+                    setToastMessage('Stamp removed');
+                    setTimeout(() => setToastMessage(null), 2500);
+                  } else if (selectedAnnotationId) {
+                    setAnnotations((prev) => prev.filter((a) => a.id !== selectedAnnotationId));
+                    setSelectedAnnotationId(null);
+                    setToastMessage('Annotation removed');
+                    setTimeout(() => setToastMessage(null), 2500);
+                  }
+                }}
+                disabled={!selectedStampId && !selectedAnnotationId}
+                className="w-7 h-7 rounded flex items-center justify-center transition-colors"
+                style={{
+                  opacity: selectedStampId || selectedAnnotationId ? 1 : 0.3,
+                  cursor: selectedStampId || selectedAnnotationId ? 'pointer' : 'not-allowed',
+                  pointerEvents: selectedStampId || selectedAnnotationId ? 'auto' : 'none',
+                  color: selectedStampId || selectedAnnotationId ? '#DC2626' : undefined,
+                  backgroundColor: selectedStampId || selectedAnnotationId ? '#FEE2E2' : 'transparent',
+                }}
+                title={
+                  selectedStampId || selectedAnnotationId
+                    ? 'Delete selected item'
+                    : 'Select a stamp, tick, or cross first'
+                }
               >
                 <i className="ri-delete-bin-line text-sm"></i>
               </button>
@@ -3009,6 +3067,7 @@ console.log('SheetData===>',sheetData)
           }}
           pageRefs={pageRefs}
           scrollToPage={scrollToPage}
+          eraserSize={eraserSize}
         />
 
         {/* ─── RIGHT SIDE: Resume banner + Mark Panel ─── */}

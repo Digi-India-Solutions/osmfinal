@@ -101,6 +101,7 @@ interface SheetViewerProps {
   onPageRender?: (pageNum: number, imageData: string) => void;
   pageRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   scrollToPage: (page: number) => void;
+  eraserSize?: number;
 }
 
 export interface SheetViewerHandle {
@@ -162,6 +163,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       onPageRender,
       pageRefs,
       scrollToPage,
+      eraserSize = 20,
     },
     ref,
   ) {
@@ -225,6 +227,9 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
     const isDrawingRef = useRef(false);
     const canvasHistoryRef = useRef<string[]>([]);
+    // Per-page pencil stroke storage (PDF mode: page N → dataURL)
+    const pageCanvasDataRef = useRef<Record<number, string>>({});
+    const prevPageRef = useRef<number>(-1);
 
     const isDraggingRef = useRef(false);
     const dragOffsetRef = useRef({ x: 0, y: 0 });
@@ -260,15 +265,19 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
     const [pdfError, setPdfError] = useState<string | null>(null);
     const [pdfDocument, setPdfDocument] = useState<any>(null);
     const [pdfPageCount, setPdfPageCount] = useState(0);
-    const [pdfRenderedPages, setPdfRenderedPages] = useState<Set<number>>(new Set());
     const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    // Tracks which page is currently drawn on the visible canvas (viewer)
+    const canvasCurrentPageRef = useRef<number>(-1);
+    // Tracks which pages have already been captured for thumbnails
+    const thumbnailRenderedRef = useRef<Set<number>>(new Set());
 
     useEffect(() => {
       if (!pdfUrl) {
         setPdfDocument(null);
         setPdfPageCount(0);
-        setPdfRenderedPages(new Set());
         setPdfError(null);
+        canvasCurrentPageRef.current = -1;
+        thumbnailRenderedRef.current = new Set();
         return;
       }
       let cancelled = false;
@@ -276,19 +285,18 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
         setPdfLoading(true);
         setPdfError(null);
         try {
-          // const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
           const pdf = await pdfjsLib.getDocument({
             url: pdfUrl,
             withCredentials: false,
             cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist/cmaps/',
             cMapPacked: true,
           }).promise;
-          console.log("pdfUrl===>", pdf)
           if (cancelled) return;
           setPdfDocument(pdf);
           setPdfPageCount(pdf.numPages);
           onPageCountRef.current?.(pdf.numPages);
-          setPdfRenderedPages(new Set());
+          canvasCurrentPageRef.current = -1;
+          thumbnailRenderedRef.current = new Set();
         } catch (err) {
           console.error("PDF load error:", err);
           if (!cancelled) setPdfError("Failed to load PDF. Please try reloading.");
@@ -300,9 +308,11 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       return () => { cancelled = true; };
     }, [pdfUrl]);
 
+    // ─── Render current page into the visible canvas (viewer) ────────────────
     useEffect(() => {
       if (!pdfDocument || !pdfCanvasRef.current) return;
-      if (pdfRenderedPages.has(currentPage)) return;
+      // Skip if the canvas is already showing this exact page
+      if (canvasCurrentPageRef.current === currentPage) return;
       let cancelled = false;
       const renderPage = async () => {
         try {
@@ -315,16 +325,51 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
           canvas.height = viewport.height;
           await page.render({ canvasContext: ctx, viewport }).promise;
           if (cancelled) return;
-          const imageData = canvas.toDataURL("image/jpeg", 0.6);
-          onPageRenderRef.current?.(currentPage, imageData);
-          setPdfRenderedPages((prev) => new Set([...prev, currentPage]));
+          canvasCurrentPageRef.current = currentPage;
+          // Also capture as thumbnail if not already done
+          if (!thumbnailRenderedRef.current.has(currentPage)) {
+            const imageData = canvas.toDataURL("image/jpeg", 0.6);
+            onPageRenderRef.current?.(currentPage, imageData);
+            thumbnailRenderedRef.current.add(currentPage);
+          }
         } catch (err) {
           console.error(`Error rendering PDF page ${currentPage}:`, err);
         }
       };
       renderPage();
       return () => { cancelled = true; };
-    }, [pdfDocument, currentPage, pdfRenderedPages]);
+    }, [pdfDocument, currentPage]);
+
+    // ─── Background-render ALL pages for thumbnails ───────────────────────────
+    useEffect(() => {
+      if (!pdfDocument || pdfPageCount === 0) return;
+      let cancelled = false;
+      const offscreenCanvas = document.createElement("canvas");
+      const renderAllPages = async () => {
+        for (let pageNum = 1; pageNum <= pdfPageCount; pageNum++) {
+          if (cancelled) return;
+          if (thumbnailRenderedRef.current.has(pageNum)) continue;
+          try {
+            const page = await pdfDocument.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 0.5 });
+            const ctx = offscreenCanvas.getContext("2d");
+            if (!ctx || cancelled) return;
+            offscreenCanvas.width = viewport.width;
+            offscreenCanvas.height = viewport.height;
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            if (cancelled) return;
+            const imageData = offscreenCanvas.toDataURL("image/jpeg", 0.5);
+            onPageRenderRef.current?.(pageNum, imageData);
+            thumbnailRenderedRef.current.add(pageNum);
+          } catch (err) {
+            console.error(`Error background-rendering PDF page ${pageNum}:`, err);
+          }
+        }
+      };
+      renderAllPages();
+      return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pdfDocument, pdfPageCount]);
 
     // ─── Highlight drag preview ──────────────────────────────────────────────
     const [highlightPreview, setHighlightPreview] = useState<{
@@ -373,7 +418,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       },
     }), []);
 
-    useEffect(() => {
+    const setupPencilCanvas = useCallback(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
@@ -388,6 +433,52 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       }
     }, []);
 
+    // Initialize pencil canvas for non-PDF (static) mode — canvas is in DOM at mount
+    useEffect(() => {
+      if (!pdfUrl) setupPencilCanvas();
+    }, [pdfUrl, setupPencilCanvas]);
+
+    // In PDF mode, the pencil canvas mounts after the PDF loads.
+    // After each page renders into pdfCanvasRef, resize the pencil canvas
+    // to match and (re)initialize the 2D context.
+    // We save/restore per-page stroke data so navigation doesn't lose pencil marks.
+    useEffect(() => {
+      if (!pdfDocument) return;
+      const timer = setTimeout(() => {
+        const pdfCanvas = pdfCanvasRef.current;
+        const pencilCanvas = canvasRef.current;
+        if (!pdfCanvas || !pencilCanvas) return;
+
+        // 1. Save current page's pencil content before we resize (which clears it)
+        const prev = prevPageRef.current;
+        if (prev !== -1 && prev !== currentPage) {
+          pageCanvasDataRef.current[prev] = pencilCanvas.toDataURL();
+        }
+
+        // 2. Resize pencil canvas to match the newly rendered PDF page (clears the canvas)
+        pencilCanvas.width = pdfCanvas.width;
+        pencilCanvas.height = pdfCanvas.height;
+
+        // 3. Re-initialize the 2D context (resize resets it)
+        setupPencilCanvas();
+
+        // 4. Restore this page's previously drawn strokes (if any)
+        const saved = pageCanvasDataRef.current[currentPage];
+        if (saved && ctxRef.current) {
+          const img = new Image();
+          img.onload = () => {
+            if (ctxRef.current && pencilCanvas) {
+              ctxRef.current.drawImage(img, 0, 0, pencilCanvas.width, pencilCanvas.height);
+            }
+          };
+          img.src = saved;
+        }
+
+        prevPageRef.current = currentPage;
+      }, 150); // slightly more than PDF render time
+      return () => clearTimeout(timer);
+    }, [pdfDocument, currentPage, setupPencilCanvas]);
+
     const getCanvasCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0 };
@@ -398,20 +489,58 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       };
     }, []);
 
+    // Eraser cursor position (CSS pixels relative to canvas element)
+    const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
+
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (activeTool !== "pencil" || placingMarkId) return;
       const ctx = ctxRef.current;
       if (!ctx) return;
+
+      if (activeTool === "eraser" && !placingMarkId) {
+        const { x, y } = getCanvasCoords(e);
+        isDrawingRef.current = true;
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = eraserSize * 2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        return;
+      }
+
+      if (activeTool !== "pencil" || placingMarkId) return;
       const { x, y } = getCanvasCoords(e);
       isDrawingRef.current = true;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(x, y);
-    }, [activeTool, placingMarkId, getCanvasCoords]);
+    }, [activeTool, placingMarkId, getCanvasCoords, eraserSize]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (activeTool !== "pencil" || !isDrawingRef.current || placingMarkId) return;
+      const canvas = canvasRef.current;
       const ctx = ctxRef.current;
-      if (!ctx) return;
+
+      // Update visual eraser cursor position
+      if (activeTool === "eraser") {
+        const rect = canvas?.getBoundingClientRect();
+        if (rect) setEraserCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      } else {
+        setEraserCursor(null);
+      }
+
+      if (!isDrawingRef.current || !ctx) return;
+
+      if (activeTool === "eraser" && !placingMarkId) {
+        const { x, y } = getCanvasCoords(e);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        return;
+      }
+
+      if (activeTool !== "pencil" || placingMarkId) return;
       const { x, y } = getCanvasCoords(e);
       ctx.lineTo(x, y);
       ctx.stroke();
@@ -423,16 +552,26 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       const history = canvasHistoryRef.current;
       if (history.length >= 20) history.shift();
       history.push(canvas.toDataURL());
-      onPencilStrokeRef.current();
+      // Only fire pencil stroke event for pencil (not eraser)
+      if (ctxRef.current?.globalCompositeOperation === "source-over") {
+        onPencilStrokeRef.current();
+      }
+      // Reset composite operation back to normal drawing
+      if (ctxRef.current) {
+        ctxRef.current.globalCompositeOperation = "source-over";
+        ctxRef.current.lineWidth = 2;
+      }
     }, []);
 
     const handleCanvasMouseUp = useCallback(() => {
-      if (activeTool !== "pencil" || !isDrawingRef.current) return;
+      if (!isDrawingRef.current) return;
+      if (activeTool !== "pencil" && activeTool !== "eraser") return;
       isDrawingRef.current = false;
       saveCanvasSnapshot();
     }, [activeTool, saveCanvasSnapshot]);
 
     const handleCanvasMouseLeave = useCallback(() => {
+      setEraserCursor(null);
       if (!isDrawingRef.current) return;
       isDrawingRef.current = false;
       saveCanvasSnapshot();
@@ -444,7 +583,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
         if (isDraggingRef.current) {
           const activeStampId = dragStampId || stampDragIdRef.current;
           if (activeStampId) {
-            const pageEl = document.getElementById(`page-${dragPageRef.current}`);
+            const pageEl = document.getElementById(`page-${dragPageRef.current}`) || pdfCanvasRef.current?.parentElement || null;
             if (!pageEl) return;
             const rect = pageEl.getBoundingClientRect();
             let newX = ((e.clientX - rect.left - dragOffsetRef.current.x) / rect.width) * 100;
@@ -457,7 +596,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
 
         const annotId = annotDragIdRef.current;
         if (isAnnotDraggingRef.current && annotId !== null) {
-          const pageEl = document.getElementById(`page-${annotDragPageRef.current}`);
+          const pageEl = document.getElementById(`page-${annotDragPageRef.current}`) || pdfCanvasRef.current?.parentElement || null;
           if (!pageEl) return;
           const rect = pageEl.getBoundingClientRect();
           const ann = annotationsRef.current.find((a) => a.id === annotId);
@@ -547,6 +686,12 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
 
     // ─── Stamp interaction ───────────────────────────────────────────────────
     const handleStampMouseDown = useCallback((e: React.MouseEvent, stamp: MarksStamp) => {
+      const getPageRect = (page: number): DOMRect | null => {
+        const byId = document.getElementById(`page-${page}`);
+        if (byId) return byId.getBoundingClientRect();
+        // PDF mode: single canvas container
+        return pdfCanvasRef.current?.parentElement?.getBoundingClientRect() ?? null;
+      };
       if (activeTool === "handSelect") {
         e.preventDefault();
         e.stopPropagation();
@@ -554,9 +699,8 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
         stampDragIdRef.current = stamp.markId;
         isDraggingRef.current = true;
         dragPageRef.current = stamp.page;
-        const pageEl = document.getElementById(`page-${stamp.page}`);
-        if (!pageEl) return;
-        const rect = pageEl.getBoundingClientRect();
+        const rect = getPageRect(stamp.page);
+        if (!rect) return;
         dragOffsetRef.current = {
           x: e.clientX - rect.left - (stamp.x / 100) * rect.width,
           y: e.clientY - rect.top - (stamp.y / 100) * rect.height,
@@ -570,9 +714,8 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       stampDragIdRef.current = stamp.markId;
       isDraggingRef.current = true;
       dragPageRef.current = stamp.page;
-      const pageEl = document.getElementById(`page-${stamp.page}`);
-      if (!pageEl) return;
-      const rect = pageEl.getBoundingClientRect();
+      const rect = getPageRect(stamp.page);
+      if (!rect) return;
       dragOffsetRef.current = {
         x: e.clientX - rect.left - (stamp.x / 100) * rect.width,
         y: e.clientY - rect.top - (stamp.y / 100) * rect.height,
@@ -614,7 +757,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       isAnnotDraggingRef.current = true;
       annotDragIdRef.current = ann.id;
       annotDragPageRef.current = ann.page;
-      const pageEl = document.getElementById(`page-${ann.page}`);
+      const pageEl = document.getElementById(`page-${ann.page}`) || pdfCanvasRef.current?.parentElement || null;
       if (!pageEl) return;
       const rect = pageEl.getBoundingClientRect();
       if (ann.tool === "tick" || ann.tool === "cross") {
@@ -679,26 +822,8 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       const y = (e.clientY - rect.top) / scale;
 
       if (activeTool === "eraser") {
-        const pageAnnotations = annotations.filter((ann) => ann.page === page);
-        for (const ann of pageAnnotations) {
-          if (ann.tool === "highlight" && ann.width && ann.height) {
-            if (x >= ann.x && x <= ann.x + ann.width && y >= ann.y && y <= ann.y + ann.height) {
-              onAnnotationDelete(ann.id);
-              return;
-            }
-          }
-        }
-        for (const ann of pageAnnotations) {
-          if (ann.tool === "tick" || ann.tool === "cross") {
-            const ax = (ann.x / 100) * rect.width;
-            const ay = (ann.y / 100) * rect.height;
-            if (Math.hypot(x - ax, y - ay) < 20) {
-              onAnnotationDelete(ann.id);
-              return;
-            }
-          }
-        }
-        onEraserNoHit();
+        // Eraser now works only on the pencil canvas via canvas events.
+        // No annotation deletion on overlay click.
         return;
       }
 
@@ -850,139 +975,188 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                 </div>
               </div>
             ) : (
-              <div className="relative w-full max-w-4xl">
-                <canvas
-                  ref={pdfCanvasRef}
-                  className="mx-auto shadow-lg rounded-lg"
-                  style={{ width: "100%", height: "auto", backgroundColor: "white", display: "block" }}
-                />
-                <div className="absolute inset-0 z-10" style={{ pointerEvents: "none" }}>
-                  <div
-                    className="absolute inset-0 z-20"
-                    style={{
-                      pointerEvents: isPlacing || activeTool !== "pencil" ? "auto" : "none",
-                      cursor: isPlacing ? "crosshair" : activeTool === "eraser" ? "not-allowed" : "crosshair",
-                    }}
-                    onClick={isPlacing ? (e) => handlePlaceClick(currentPage, e) : undefined}
-                    onMouseDown={!isPlacing ? (e) => handleOverlayMouseDown(currentPage, e) : undefined}
-                    onMouseMove={!isPlacing ? (e) => handleOverlayMouseMove(currentPage, e) : undefined}
-                    onMouseUp={!isPlacing ? (e) => handleOverlayMouseUp(currentPage, e) : undefined}
+              <div
+                style={{
+                  width: `${zoom}%`,
+                  maxWidth: `${zoom * 9}px`,
+                  margin: "0 auto",
+                  transform: `scale(${zoom / 100})`,
+                  transformOrigin: "top center",
+                  transition: "transform 0.15s ease",
+                }}
+              >
+                <div className="relative w-full" id={`page-${currentPage}`}>
+                  <canvas
+                    ref={pdfCanvasRef}
+                    className="mx-auto shadow-lg rounded-lg"
+                    style={{ width: "100%", height: "auto", backgroundColor: "white", display: "block" }}
                   />
-
-                  {highlightPreview?.page === currentPage && (
+                  {/* Pencil / eraser canvas — sits directly over the PDF canvas */}
+                  <canvas
+                    ref={canvasRef}
+                    className="absolute inset-0 w-full h-full z-10"
+                    style={{
+                      pointerEvents: (isPencilActive || activeTool === "eraser") && !isPlacing ? "auto" : "none",
+                      cursor: activeTool === "eraser" ? "none" : isPencilActive && !isPlacing ? "crosshair" : undefined,
+                    }}
+                    onMouseDown={handleCanvasMouseDown}
+                    onMouseMove={handleCanvasMouseMove}
+                    onMouseUp={handleCanvasMouseUp}
+                    onMouseLeave={handleCanvasMouseLeave}
+                  />
+                  {/* Eraser visual cursor */}
+                  {activeTool === "eraser" && eraserCursor && (
                     <div
-                      className="absolute pointer-events-none"
+                      className="absolute pointer-events-none z-30"
                       style={{
-                        left: highlightPreview.x,
-                        top: highlightPreview.y,
-                        width: highlightPreview.width,
-                        height: highlightPreview.height,
-                        backgroundColor: "rgba(255,235,59,0.4)",
-                        border: "1px dashed #D97706",
+                        left: eraserCursor.x,
+                        top: eraserCursor.y,
+                        width: eraserSize * 2,
+                        height: eraserSize * 2,
+                        borderRadius: "50%",
+                        border: "2px solid #000",
+                        backgroundColor: "rgba(255,255,255,0.15)",
+                        transform: "translate(-50%, -50%)",
+                        pointerEvents: "none",
                       }}
                     />
                   )}
+                  <div className="absolute inset-0 z-20" style={{ pointerEvents: "none" }}>
+                    <div
+                      className="absolute inset-0 z-30"
+                      style={{
+                        pointerEvents: isPlacing || (!isPencilActive && activeTool !== "eraser" && activeTool !== "handSelect") ? "auto" : "none",
+                        cursor: isPlacing ? "crosshair" : activeTool === "handSelect" ? "default" : "crosshair",
+                      }}
+                      onClick={isPlacing ? (e) => handlePlaceClick(currentPage, e) : undefined}
+                      onMouseDown={!isPlacing ? (e) => handleOverlayMouseDown(currentPage, e) : undefined}
+                      onMouseMove={!isPlacing ? (e) => handleOverlayMouseMove(currentPage, e) : undefined}
+                      onMouseUp={!isPlacing ? (e) => handleOverlayMouseUp(currentPage, e) : undefined}
+                    />
 
-                  {pageStamps.map((stamp) => {
-                    const isSelected = stamp.markId === selectedStampId;
-                    const isDragging = stamp.markId === dragStampId;
-                    const hasValue = stamp.value !== null && stamp.value !== undefined;
-                    const canvas = pdfCanvasRef.current;
-                    if (!canvas) return null;
-                    const rect = canvas.getBoundingClientRect();
-                    const xPos = (stamp.x / 100) * rect.width;
-                    const yPos = (stamp.y / 100) * rect.height;
-                    const size = isSelected ? 38 : 34;
+                    {highlightPreview?.page === currentPage && (
+                      <div
+                        className="absolute pointer-events-none"
+                        style={{
+                          left: highlightPreview.x,
+                          top: highlightPreview.y,
+                          width: highlightPreview.width,
+                          height: highlightPreview.height,
+                          backgroundColor: "rgba(255,235,59,0.4)",
+                          border: "1px dashed #D97706",
+                        }}
+                      />
+                    )}
 
-                    return (
-                      <div key={stamp.markId}>
-                        {isSelected && !isDragging && (
+                    {pageStamps.map((stamp) => {
+                      const isSelected = stamp.markId === selectedStampId;
+                      const isDragging = stamp.markId === dragStampId;
+                      const hasValue = stamp.value !== null && stamp.value !== undefined;
+                      const canvas = pdfCanvasRef.current;
+                      if (!canvas) return null;
+                      const rect = canvas.getBoundingClientRect();
+                      const xPos = (stamp.x / 100) * rect.width;
+                      const yPos = (stamp.y / 100) * rect.height;
+                      const size = isSelected ? 38 : 34;
+
+                      return (
+                        <div key={stamp.markId}>
+                          {isSelected && !isDragging && (
+                            <div
+                              className="absolute z-30 flex gap-1 p-1 rounded-lg"
+                              style={{
+                                left: xPos, top: yPos,
+                                transform: "translate(-50%, calc(-100% - 44px))",
+                                backgroundColor: "white",
+                                boxShadow: "0 2px 12px rgba(0,0,0,0.18)",
+                                pointerEvents: "auto",
+                              }}
+                            >
+                              <button
+                                className="w-7 h-7 rounded flex items-center justify-center text-xs"
+                                style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}
+                                onClick={(e) => { e.stopPropagation(); onStampRemove?.(stamp.markId); }}
+                                title="Remove stamp (Delete)"
+                              >✕</button>
+                              <button
+                                className="w-7 h-7 rounded flex items-center justify-center text-xs"
+                                style={{ backgroundColor: "#DBEAFE", color: "#1D4ED8" }}
+                                onClick={(e) => { e.stopPropagation(); onStampDoubleClick?.(stamp.markId); }}
+                                title="Reposition"
+                              >⤢</button>
+                            </div>
+                          )}
                           <div
-                            className="absolute z-30 flex gap-1 p-1 rounded-lg"
+                            className="absolute rounded-full flex items-center justify-center font-bold select-none cursor-pointer z-25"
                             style={{
-                              left: xPos, top: yPos,
-                              transform: "translate(-50%, calc(-100% - 44px))",
+                              width: size, height: size,
+                              border: hasValue ? `2px solid ${stampColor}` : `2px dashed ${stampColor}`,
+                              color: hasValue ? stampColor : "#94a3b8",
+                              fontSize: isSelected ? 15 : 14,
                               backgroundColor: "white",
-                              boxShadow: "0 2px 12px rgba(0,0,0,0.18)",
+                              top: yPos - size / 2,
+                              left: xPos - size / 2,
+                              opacity: isDragging ? 0.6 : 1,
+                              boxShadow: isSelected ? `0 0 0 4px ${stampRgba(0.3)}` : undefined,
+                              animation: isSelected ? `${pulseAnimationName} 1.5s ease-in-out infinite` : undefined,
                               pointerEvents: "auto",
                             }}
+                            onClick={(e) => handleStampClick(e, stamp)}
+                            onDoubleClick={(e) => handleStampDoubleClick(e, stamp)}
+                            onMouseDown={(e) => handleStampMouseDown(e, stamp)}
+                            onContextMenu={(e) => handleStampRightClick(e, stamp)}
+                            title={hasValue ? `${stamp.markId}: ${stamp.value}` : `${stamp.markId}: not marked`}
                           >
-                            <button
-                              className="w-7 h-7 rounded flex items-center justify-center text-xs"
-                              style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}
-                              onClick={(e) => { e.stopPropagation(); onStampRemove?.(stamp.markId); }}
-                              title="Remove stamp (Delete)"
-                            >✕</button>
-                            <button
-                              className="w-7 h-7 rounded flex items-center justify-center text-xs"
-                              style={{ backgroundColor: "#DBEAFE", color: "#1D4ED8" }}
-                              onClick={(e) => { e.stopPropagation(); onStampDoubleClick?.(stamp.markId); }}
-                              title="Reposition"
-                            >⤢</button>
+                            {hasValue ? stamp.value : "—"}
                           </div>
-                        )}
-                        <div
-                          className="absolute rounded-full flex items-center justify-center font-bold select-none cursor-pointer z-25"
-                          style={{
-                            width: size, height: size,
-                            border: hasValue ? `2px solid ${stampColor}` : `2px dashed ${stampColor}`,
-                            color: hasValue ? stampColor : "#94a3b8",
-                            fontSize: isSelected ? 15 : 14,
-                            backgroundColor: "white",
-                            top: yPos - size / 2,
-                            left: xPos - size / 2,
-                            opacity: isDragging ? 0.6 : 1,
-                            boxShadow: isSelected ? `0 0 0 4px ${stampRgba(0.3)}` : undefined,
-                            animation: isSelected ? `${pulseAnimationName} 1.5s ease-in-out infinite` : undefined,
-                            pointerEvents: "auto",
-                          }}
-                          onClick={(e) => handleStampClick(e, stamp)}
-                          onDoubleClick={(e) => handleStampDoubleClick(e, stamp)}
-                          onMouseDown={(e) => handleStampMouseDown(e, stamp)}
-                          onContextMenu={(e) => handleStampRightClick(e, stamp)}
-                          title={hasValue ? `${stamp.markId}: ${stamp.value}` : `${stamp.markId}: not marked`}
-                        >
-                          {hasValue ? stamp.value : "—"}
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
 
-                  {annotations.filter((ann) => ann.page === currentPage).map((ann) => {
-                    const canvas = pdfCanvasRef.current;
-                    if (!canvas) return null;
-                    const rect = canvas.getBoundingClientRect();
-                    const scaleX = rect.width / canvas.width;
-                    const scaleY = rect.height / canvas.height;
-                    const isTickCross = ann.tool === "tick" || ann.tool === "cross";
+                    {annotations.filter((ann) => ann.page === currentPage).map((ann) => {
+                      const canvas = pdfCanvasRef.current;
+                      if (!canvas) return null;
+                      const rect = canvas.getBoundingClientRect();
+                      const scaleX = rect.width / canvas.width;
+                      const scaleY = rect.height / canvas.height;
+                      const isTickCross = ann.tool === "tick" || ann.tool === "cross";
+                      const isAnnotSelected = ann.id === selectedAnnotationId;
 
-                    return (
-                      <div
-                        key={ann.id}
-                        className="absolute z-10 pointer-events-none"
-                        style={isTickCross
-                          ? { top: `${ann.y}%`, left: `${ann.x}%`, transform: "translate(-50%,-50%)" }
-                          : { left: ann.x * scaleX, top: ann.y * scaleY }}
-                      >
-                        {ann.tool === "tick" && (
-                          <span style={{ fontSize: `${28 * scaleX}px`, color: "#166534", fontFamily: "serif", lineHeight: 1 }}>✓</span>
-                        )}
-                        {ann.tool === "cross" && (
-                          <span style={{ fontSize: `${28 * scaleX}px`, color: "#DC2626", fontFamily: "serif", lineHeight: 1 }}>✗</span>
-                        )}
-                        {ann.tool === "highlight" && (
-                          <div
-                            className="rounded-sm"
-                            style={{
-                              width: (ann.width ?? 80) * scaleX,
-                              height: (ann.height ?? 20) * scaleY,
-                              backgroundColor: "rgba(250,204,21,0.45)",
-                            }}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
+                      return (
+                        <div
+                          key={ann.id}
+                          className={`absolute z-10 ${activeTool === "handSelect" ? "cursor-pointer z-25" : "pointer-events-none"}`}
+                          onMouseDown={(e) => handleAnnotationMouseDown(e, ann)}
+                          onClick={(e) => handleAnnotationClick(e, ann)}
+                          onContextMenu={(e) => handleAnnotationRightClick(e, ann)}
+                          style={isTickCross
+                            ? { top: `${ann.y}%`, left: `${ann.x}%`, transform: "translate(-50%,-50%)", userSelect: "none", pointerEvents: activeTool === "handSelect" ? "auto" : "none" }
+                            : { left: ann.x * scaleX, top: ann.y * scaleY, pointerEvents: activeTool === "handSelect" ? "auto" : "none" }}
+                        >
+                          {ann.tool === "tick" && (
+                            <div className="relative" style={{ borderRadius: "4px", boxShadow: isAnnotSelected ? "0 0 0 3px #93C5FD" : undefined }}>
+                              <span style={{ fontSize: `${28 * scaleX}px`, color: "#166534", fontFamily: "serif", lineHeight: 1, display: "inline-block" }}>✓</span>
+                            </div>
+                          )}
+                          {ann.tool === "cross" && (
+                            <div className="relative" style={{ borderRadius: "4px", boxShadow: isAnnotSelected ? "0 0 0 3px #93C5FD" : undefined }}>
+                              <span style={{ fontSize: `${28 * scaleX}px`, color: "#DC2626", fontFamily: "serif", lineHeight: 1, display: "inline-block" }}>✗</span>
+                            </div>
+                          )}
+                          {ann.tool === "highlight" && (
+                            <div
+                              className="rounded-sm"
+                              style={{
+                                width: (ann.width ?? 80) * scaleX,
+                                height: (ann.height ?? 20) * scaleY,
+                                backgroundColor: "rgba(250,204,21,0.45)",
+                              }}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             )}
@@ -1087,6 +1261,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                     {showOverlay && (
                       <div
                         className={`absolute inset-0 z-20 ${cursorClass}`}
+                        style={{ pointerEvents: isPlacing || (!isPencilActive && activeTool !== "handSelect") ? "auto" : "none" }}
                         onClick={isPlacing ? (e) => handlePlaceClick(page, e) : undefined}
                         onMouseDown={!isPlacing ? (e) => handleOverlayMouseDown(page, e) : undefined}
                         onMouseMove={!isPlacing ? (e) => handleOverlayMouseMove(page, e) : undefined}
