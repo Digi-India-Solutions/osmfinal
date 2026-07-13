@@ -26,7 +26,7 @@ app.use(
           'http://localhost:3001',
           'https://osm.digiindiasolutions.com', // ✅ ADD
         ],
-        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com'],
+        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com',],
         imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com'],
       },
     },
