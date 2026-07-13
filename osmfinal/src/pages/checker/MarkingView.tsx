@@ -1675,11 +1675,15 @@ export default function MarkingView() {
             path: string | null | undefined,
           ): string | null => {
             if (!path) return null;
-            if (path.startsWith('http://') || path.startsWith('https://'))
+            if (path.startsWith('https://') || path.startsWith('http://'))
               return path;
             return `${API_URL}${path}`;
           };
-
+console.log('DDDDDDDDDDD===>',{
+            ...data.sheet,
+            file_url: toFullUrl(data.sheet?.file_url),
+            is_submitted: data.sheet?.is_submitted || false,
+          })
           setSheetData({
             ...data.sheet,
             file_url: toFullUrl(data.sheet?.file_url),
@@ -1705,7 +1709,7 @@ export default function MarkingView() {
 
     fetchData();
   }, [sheetIdNum]);
-
+console.log('SheetData===>',sheetData)
   // ─── PAGE / TOOL / THUMBNAIL STATE ───────────────────────────
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTool, setActiveTool] = useState<AnnotationTool>('tick');
