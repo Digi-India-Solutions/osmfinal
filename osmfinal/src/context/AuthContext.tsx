@@ -34,7 +34,7 @@ interface AuthContextType {
 // ─── API CONFIG ────────────────────────────────────────────────────────
 
 const API_URL =
-  import.meta.env.VITE_API_URL || 'https://osm.digiindiasolutions.com/';
+  import.meta.env.VITE_API_URL || 'https://osmapi.digiindiasolutions.com';
 
 // Axios instance with credentials
 const api = axios.create({

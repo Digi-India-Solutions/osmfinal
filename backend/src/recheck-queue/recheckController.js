@@ -396,7 +396,7 @@ export const startRecheckMarking = async (req, res) => {
 
     // Build full file URL
     const baseUrl =
-      process.env.API_URL || 'https://osm.digiindiasolutions.com/';
+      process.env.API_URL || 'https://osmapi.digiindiasolutions.com';
     const buildFullUrl = (path) => {
       if (!path) return null;
       if (path.startsWith('http://') || path.startsWith('https://'))
