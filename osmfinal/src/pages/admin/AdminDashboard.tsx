@@ -19,6 +19,11 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { usePageLoading } from '@/hooks/usePageLoading';
 import dashboardService from '@/api/admindashboard';
 
+
+
+
+
+
 interface DashboardStats {
   totalSheets: number;
   totalExams: number;
@@ -494,6 +499,8 @@ export default function AdminDashboard() {
               </div>
             ))}
           </div>
+
+          {/* status Distribution */}
 
           <div className="mt-6 pt-5 border-t border-gray-100">
             <h4 className="text-sm font-semibold text-gray-900 mb-3">
