@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="Students">
+  <Table>
+   <Row>
+    <Cell><Data ss:Type="String">ROLL NO</Data></Cell>
+    <Cell><Data ss:Type="String">STUDENT NAME</Data></Cell>
+    <Cell><Data ss:Type="String">COURSE</Data></Cell>
+    <Cell><Data ss:Type="String">BRANCH</Data></Cell>
+    <Cell><Data ss:Type="String">SEM</Data></Cell>
+    <Cell><Data ss:Type="String">SUBJECT</Data></Cell>
+    <Cell><Data ss:Type="String">BARCODE</Data></Cell>
+    <Cell><Data ss:Type="String">EXAM</Data></Cell>
+   </Row>
+   <Row>
+    <Cell><Data ss:Type="String">101</Data></Cell>
+    <Cell><Data ss:Type="String">John Doe</Data></Cell>
+    <Cell><Data ss:Type="String">B.Tech</Data></Cell>
+    <Cell><Data ss:Type="String">CSE</Data></Cell>
+    <Cell><Data ss:Type="String">1</Data></Cell>
+    <Cell><Data ss:Type="String">Mathematics</Data></Cell>
+    <Cell><Data ss:Type="String">BAR001</Data></Cell>
+    <Cell><Data ss:Type="String">Maths-Mid-Term</Data></Cell>
+   </Row>
+  </Table>
+ </Worksheet>
+</Workbook>
