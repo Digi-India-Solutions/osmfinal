@@ -56,38 +56,38 @@ app.use(express.urlencoded({ limit: '1000mb', extended: true }));
 app.use(cookieParser());
 
 // ✅ UPDATED CORS CONFIGURATION
-const allowedOrigins = [
-  // Development
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://192.168.166.80:3001',
-  // Production
-  'https://osm.digiindiasolutions.com',
-'https://osmapi.digiindiasolutions.com',
-];
+// const allowedOrigins = [
+//   // Development
+//   'http://localhost:3000',
+//   'http://localhost:3001',
+//   'http://localhost:5173',
+//   'http://127.0.0.1:5173',
+//   'http://192.168.166.80:3001',
+//   // Production
+//   'https://osm.digiindiasolutions.com',
+// 'https://osmapi.digiindiasolutions.com',
+// ];
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // ✅ Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) {
-        return callback(null, true);
-      }
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        console.log('❌ CORS blocked for origin:', origin);
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-  }),
-);
-
+// app.use(
+//   cors({
+//     origin: function (origin, callback) {
+//       // ✅ Allow requests with no origin (like mobile apps or curl requests)
+//       if (!origin) {
+//         return callback(null, true);
+//       }
+//       if (allowedOrigins.includes(origin)) {
+//         callback(null, true);
+//       } else {
+//         console.log('❌ CORS blocked for origin:', origin);
+//         callback(new Error('Not allowed by CORS'));
+//       }
+//     },
+//     credentials: true,
+//     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+//     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+//   }),
+// );
+app.use(cors());
 // ✅ Static serving for uploads
 // app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
