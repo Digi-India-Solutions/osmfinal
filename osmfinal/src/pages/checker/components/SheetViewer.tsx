@@ -1232,8 +1232,11 @@ import * as pdfjsLib from "pdfjs-dist";
 //   ).toString();
 // }
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
-
+// REPLACE with this single line:
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).toString();
 // ─── API layer ──────────────────────────────────────────────────────────────
 
 interface SheetApiData {
@@ -1495,12 +1498,10 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
           // const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
           const pdf = await pdfjsLib.getDocument({
             url: pdfUrl,
-            httpHeaders: {
-              'Access-Control-Allow-Origin': '*',
-            },
             withCredentials: false,
+            cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist/cmaps/',
+            cMapPacked: true,
           }).promise;
-
           console.log("pdfUrl===>", pdf)
           if (cancelled) return;
           setPdfDocument(pdf);
@@ -2495,10 +2496,10 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                   key={p}
                   onClick={() => scrollToPage(p)}
                   className={`w-7 h-7 rounded text-xs flex items-center justify-center cursor-pointer transition-colors whitespace-nowrap shrink-0 ${p === currentPage
-                      ? "bg-sky-500 text-white font-semibold"
-                      : isBlankP
-                        ? "bg-amber-500/20 text-amber-400"
-                        : "text-slate-400 hover:text-white hover:bg-white/10"
+                    ? "bg-sky-500 text-white font-semibold"
+                    : isBlankP
+                      ? "bg-amber-500/20 text-amber-400"
+                      : "text-slate-400 hover:text-white hover:bg-white/10"
                     }`}
                 >
                   {p}
