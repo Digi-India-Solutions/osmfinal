@@ -26,7 +26,7 @@ app.use(
           'http://localhost:3001',
           'https://osm.digiindiasolutions.com', // ✅ ADD
         ],
-        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com/'],
+        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com'],
         imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com'],
       },
     },
@@ -65,7 +65,7 @@ const allowedOrigins = [
   'http://192.168.166.80:3001',
   // Production
   'https://osm.digiindiasolutions.com',
-  'https://osm.digiindiasolutions.com/',
+  'https://osmapi.digiindiasolutions.com',
 ];
 
 app.use(
@@ -136,7 +136,7 @@ app.get('/', (req, res) => {
 
 app.get('/developer', (req, res) => {
   res.send(
-    `<h1>It is great to see you on the server of <a href="https://www.linkedin.com/in/nitin-gupta-b7a9a02a1/">AASIB KHAN</a></h1>`,
+    `<h1>It is great to see you on the server of <a href="https://www.linkedin.com/in//">AASIB KHAN</a></h1>`,
   );
 });
 
