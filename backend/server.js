@@ -65,7 +65,7 @@ const allowedOrigins = [
   'http://192.168.166.80:3001',
   // Production
   'https://osm.digiindiasolutions.com',
-  'https://osmapi.digiindiasolutions.com',
+'https://osmapi.digiindiasolutions.com',
 ];
 
 app.use(
@@ -89,7 +89,12 @@ app.use(
 );
 
 // ✅ Static serving for uploads
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+// app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
+  setHeaders: (res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+  },
+}));
 app.use('/backups', express.static(path.join(process.cwd(), 'backups')));
 
 // ===== Routes =====
@@ -132,6 +137,13 @@ app.use('/api/v1/teacher', TeacherRoutes);
 // ===== Root Routes =====
 app.get('/', (req, res) => {
   res.send('Server is running');
+});
+
+// In your Express app, before routes:
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
 });
 
 app.get('/developer', (req, res) => {

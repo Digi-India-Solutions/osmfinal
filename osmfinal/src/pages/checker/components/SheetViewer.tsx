@@ -1222,15 +1222,17 @@ import {
 import type { AnnotationTool, Annotation, MarksStamp } from "../MarkingView";
 import * as pdfjsLib from "pdfjs-dist";
 
-if (import.meta.env.PROD) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.269/pdf.worker.min.js";
-} else {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url,
-  ).toString();
-}
+// if (import.meta.env.PROD) {
+//   pdfjsLib.GlobalWorkerOptions.workerSrc =
+//     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.269/pdf.worker.min.js";
+// } else {
+//   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+//     "pdfjs-dist/build/pdf.worker.min.mjs",
+//     import.meta.url,
+//   ).toString();
+// }
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 // ─── API layer ──────────────────────────────────────────────────────────────
 
@@ -1423,6 +1425,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
     }, [sheetId, pdfUrlProp, rollNoProp, studentNameProp]);
 
     const pdfUrl = pdfUrlProp !== undefined ? pdfUrlProp : sheetData?.pdfUrl ?? null;
+
     const rollNo = rollNoProp ?? sheetData?.rollNo ?? "—";
     const studentName = studentNameProp ?? sheetData?.studentName ?? "—";
     const pageContents = sheetData?.pageContents;
@@ -1489,7 +1492,16 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
         setPdfLoading(true);
         setPdfError(null);
         try {
-          const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+          // const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+          const pdf = await pdfjsLib.getDocument({
+            url: pdfUrl,
+            httpHeaders: {
+              'Access-Control-Allow-Origin': '*',
+            },
+            withCredentials: false,
+          }).promise;
+
+          console.log("pdfUrl===>", pdf)
           if (cancelled) return;
           setPdfDocument(pdf);
           setPdfPageCount(pdf.numPages);
@@ -2276,10 +2288,10 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                 const showOverlay = !isBlank && (activeTool !== "pencil" || isPlacing || !!dragStampId || isHandSelect);
                 const cursorClass = isPlacing ? "cursor-crosshair"
                   : isHandSelect ? "cursor-default"
-                  : dragStampId ? "cursor-default"
-                  : activeTool === "eraser" ? "cursor-not-allowed"
-                  : activeTool === "highlight" || activeTool === "tick" || activeTool === "cross" ? "cursor-crosshair"
-                  : "cursor-default";
+                    : dragStampId ? "cursor-default"
+                      : activeTool === "eraser" ? "cursor-not-allowed"
+                        : activeTool === "highlight" || activeTool === "tick" || activeTool === "cross" ? "cursor-crosshair"
+                          : "cursor-default";
 
                 return (
                   <div
@@ -2350,9 +2362,8 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                           )}
 
                           <div
-                            className={`absolute rounded-full flex items-center justify-center font-bold select-none transition-opacity ${
-                              isDragging ? "cursor-grabbing z-30" : "cursor-pointer z-25"
-                            }`}
+                            className={`absolute rounded-full flex items-center justify-center font-bold select-none transition-opacity ${isDragging ? "cursor-grabbing z-30" : "cursor-pointer z-25"
+                              }`}
                             style={{
                               width: `${size}px`, height: `${size}px`,
                               border: isDragging ? `2px dashed ${stampColor}` : hasValue ? `2px solid ${stampColor}` : `2px dashed ${stampColor}`,
@@ -2483,13 +2494,12 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                 <button
                   key={p}
                   onClick={() => scrollToPage(p)}
-                  className={`w-7 h-7 rounded text-xs flex items-center justify-center cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
-                    p === currentPage
+                  className={`w-7 h-7 rounded text-xs flex items-center justify-center cursor-pointer transition-colors whitespace-nowrap shrink-0 ${p === currentPage
                       ? "bg-sky-500 text-white font-semibold"
                       : isBlankP
                         ? "bg-amber-500/20 text-amber-400"
                         : "text-slate-400 hover:text-white hover:bg-white/10"
-                  }`}
+                    }`}
                 >
                   {p}
                 </button>
