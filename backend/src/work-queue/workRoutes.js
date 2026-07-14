@@ -1,5 +1,3 @@
-// src/routes/work-queue.routes.js
-
 import { Router } from 'express';
 import {
   getSheets,
@@ -10,8 +8,10 @@ import {
   getRecheckUsers,
   getRecheckRequestById,
   updateRecheckRequestStatus,
-  assignSheet, // ✅ New
-} from './workController.js';
+  assignSheet,
+  reassignRecheckRequests,
+  getAvailableRecheckers,
+} from '../work-queue/workController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
 const router = Router();
@@ -30,7 +30,7 @@ router.patch('/sheets/:id/status', verifyToken, updateSheetStatus);
 // Flag sheet for recheck
 router.post('/sheets/:id/flag-for-recheck', verifyToken, flagForRecheck);
 
-// ✅ Assign sheet to checker
+// Assign sheet to checker
 router.post('/sheets/:id/assign', verifyToken, assignSheet);
 
 // ─── RECHECK ROUTES ─────────────────────────────────────────────
@@ -46,5 +46,22 @@ router.patch('/recheck-requests/:id', verifyToken, updateRecheckRequestStatus);
 
 // Get recheck users
 router.get('/users/recheckers', verifyToken, getRecheckUsers);
+
+// ─── REASSIGN ROUTES ────────────────────────────────────────────
+
+// ✅ Reassign single sheet
+router.post('/recheck/:sheetId/reassign', verifyToken, reassignRecheckRequests);
+
+// ✅ Reassign multiple sheets (bulk)
+router.post('/recheck/bulk/reassign', verifyToken, reassignRecheckRequests);
+
+// ✅ Get available recheckers (excluding current)
+// Use two separate routes instead of optional parameter
+router.get('/recheckers/available', verifyToken, getAvailableRecheckers);
+router.get(
+  '/recheckers/available/:excludeId',
+  verifyToken,
+  getAvailableRecheckers,
+);
 
 export default router;

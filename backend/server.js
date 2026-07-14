@@ -1,3 +1,5 @@
+// server.js
+
 import 'dotenv/config';
 import express from 'express';
 import dotenv from 'dotenv';
@@ -24,9 +26,9 @@ app.use(
           "'self'",
           'http://localhost:3000',
           'http://localhost:3001',
-          'https://osm.digiindiasolutions.com', // ✅ ADD
+          'https://osm.digiindiasolutions.com',
         ],
-        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com',],
+        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com'],
         imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com'],
       },
     },
@@ -55,46 +57,56 @@ app.use(express.json({ limit: '1000mb' }));
 app.use(express.urlencoded({ limit: '1000mb', extended: true }));
 app.use(cookieParser());
 
-// ✅ UPDATED CORS CONFIGURATION
-// const allowedOrigins = [
-//   // Development
-//   'http://localhost:3000',
-//   'http://localhost:3001',
-//   'http://localhost:5173',
-//   'http://127.0.0.1:5173',
-//   'http://192.168.166.80:3001',
-//   // Production
-//   'https://osm.digiindiasolutions.com',
-// 'https://osmapi.digiindiasolutions.com',
-// ];
+// ================================================================
+// ✅ FIXED CORS CONFIGURATION
+// ================================================================
 
-// app.use(
-//   cors({
-//     origin: function (origin, callback) {
-//       // ✅ Allow requests with no origin (like mobile apps or curl requests)
-//       if (!origin) {
-//         return callback(null, true);
-//       }
-//       if (allowedOrigins.includes(origin)) {
-//         callback(null, true);
-//       } else {
-//         console.log('❌ CORS blocked for origin:', origin);
-//         callback(new Error('Not allowed by CORS'));
-//       }
-//     },
-//     credentials: true,
-//     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-//     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-//   }),
-// );
-app.use(cors());
+const allowedOrigins = [
+  // Development
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://192.168.166.80:3001',
+  // Production
+  'https://osm.digiindiasolutions.com',
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // ✅ Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) {
+        return callback(null, true);
+      }
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.log('❌ CORS blocked for origin:', origin);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true, // ✅ IMPORTANT: This allows cookies to be sent
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Cookie',
+      'X-Requested-With',
+    ],
+    exposedHeaders: ['Set-Cookie', 'Authorization'],
+  }),
+);
+
 // ✅ Static serving for uploads
-// app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
-  setHeaders: (res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-  },
-}));
+app.use(
+  '/uploads',
+  express.static(path.join(process.cwd(), 'uploads'), {
+    setHeaders: (res) => {
+      res.set('Access-Control-Allow-Origin', '*');
+    },
+  }),
+);
 app.use('/backups', express.static(path.join(process.cwd(), 'backups')));
 
 // ===== Routes =====
@@ -142,13 +154,6 @@ app.use('/api/v1/teacher', TeacherRoutes);
 // ===== Root Routes =====
 app.get('/', (req, res) => {
   res.send('Server is running');
-});
-
-// In your Express app, before routes:
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-  next();
 });
 
 app.get('/developer', (req, res) => {

@@ -6,6 +6,7 @@ import {
   uploadModelAnswer,
   uploadQuestionPaper,
   deletePDF,
+  getTotalMarks,
 } from '../mark-scheme/mark-scheme-controller.js';
 import { uploadPDF } from '../../middlewares/multer.middleware.js';
 import { multerErrorHandler } from '../../middlewares/multerErrorHadler.middleware.js';
@@ -50,5 +51,7 @@ router.post(
 
 // Delete PDF (model_answer or question_paper)
 router.delete('/exams/:examId/pdf/:type', verifyToken, deletePDF);
+// src/routes/mark-scheme.routes.js
+router.get('/:examId/total-marks', verifyToken, getTotalMarks);
 
 export default router;
