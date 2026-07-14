@@ -25,9 +25,8 @@ function Toast({ message, type, onClose }: ToastProps) {
 
   return (
     <div
-      className={`fixed bottom-6 right-6 z-[9999] px-5 py-3 rounded-xl text-sm font-medium shadow-2xl flex items-center gap-3 animate-in slide-in-from-right-5 ${
-        type === 'error' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'
-      }`}
+      className={`fixed bottom-6 right-6 z-[9999] px-5 py-3 rounded-xl text-sm font-medium shadow-2xl flex items-center gap-3 animate-in slide-in-from-right-5 ${type === 'error' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'
+        }`}
     >
       <span className="w-5 h-5 flex items-center justify-center shrink-0">
         <i
@@ -146,7 +145,7 @@ function DeleteConfirmationModal({
 
           {previewData.students.length > 10 && (
             <p className="text-xs text-gray-400 mt-2 text-center">
-              Showing first 10 of {previewData.students.length} students
+              {/* Showing first 10 of {previewData.students.length} students */}
             </p>
           )}
         </div>
@@ -281,11 +280,10 @@ function CustomSelect({
                   onChange(opt.value);
                   setOpen(false);
                 }}
-                className={`w-full text-left px-4 py-2 text-sm transition-colors whitespace-nowrap cursor-pointer ${
-                  opt.value === value
-                    ? 'bg-gray-900 text-white font-medium'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
+                className={`w-full text-left px-4 py-2 text-sm transition-colors whitespace-nowrap cursor-pointer ${opt.value === value
+                  ? 'bg-gray-900 text-white font-medium'
+                  : 'text-gray-700 hover:bg-gray-50'
+                  }`}
               >
                 {opt.label}
               </button>
@@ -303,7 +301,8 @@ function CustomSelect({
 export default function StudentDataUpload() {
   const loading = usePageLoading();
   const [isLoading, setIsLoading] = useState(false);
-
+  const [previewPage, setPreviewPage] = useState(1);
+  const PREVIEW_PAGE_SIZE = 5;
   // ─── STATE ──────────────────────────────────────────────────
 
   const [showFormatModal, setShowFormatModal] = useState(false);
@@ -522,7 +521,7 @@ export default function StudentDataUpload() {
       if (response.success) {
         showToast(
           response.message ||
-            `${selectedIds.length} students deleted successfully`,
+          `${selectedIds.length} students deleted successfully`,
           'success',
         );
         setSelectedIds([]);
@@ -572,7 +571,7 @@ export default function StudentDataUpload() {
       if (response.success) {
         showToast(
           response.message ||
-            `Student "${singleDeleteData.name}" deleted successfully`,
+          `Student "${singleDeleteData.name}" deleted successfully`,
           'success',
         );
         setShowSingleDeleteModal(false);
@@ -873,9 +872,8 @@ export default function StudentDataUpload() {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           onClick={() => document.getElementById('fileInput')?.click()}
-          className={`border-2 border-dashed rounded-2xl p-10 text-center transition-colors cursor-pointer ${
-            dragOver ? 'border-gray-900 bg-gray-50' : 'border-gray-200'
-          }`}
+          className={`border-2 border-dashed rounded-2xl p-10 text-center transition-colors cursor-pointer ${dragOver ? 'border-gray-900 bg-gray-50' : 'border-gray-200'
+            }`}
         >
           <input
             id="fileInput"
@@ -946,15 +944,7 @@ export default function StudentDataUpload() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-white border-b border-gray-100">
-                      {[
-                        'Roll No',
-                        'Student Name',
-                        'Course',
-                        'Branch',
-                        'Sem',
-                        'Subject',
-                        'Barcode',
-                      ].map((h) => (
+                      {['Roll No', 'Student Name', 'Course', 'Branch', 'Sem', 'Subject', 'Barcode'].map((h) => (
                         <th
                           key={h}
                           className={`py-2.5 px-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${h === 'Sem' ? 'text-center' : 'text-left'}`}
@@ -965,45 +955,75 @@ export default function StudentDataUpload() {
                     </tr>
                   </thead>
                   <tbody>
-                    {previewData.slice(0, 5).map((s, idx) => (
-                      <tr
-                        key={idx}
-                        className="border-b border-gray-50 bg-white"
-                      >
-                        <td className="py-2.5 px-3 text-gray-900 font-medium whitespace-nowrap">
-                          {s.roll_no}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-700 whitespace-nowrap">
-                          {s.student_name}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">
-                          {s.course}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">
-                          {s.branch}
-                        </td>
-                        <td className="py-2.5 px-3 text-center text-gray-600 whitespace-nowrap">
-                          {s.semester}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">
-                          {s.subject}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-500 font-mono text-[11px] whitespace-nowrap">
-                          {s.barcode}
-                        </td>
-                      </tr>
-                    ))}
+                    {previewData
+                      .slice((previewPage - 1) * PREVIEW_PAGE_SIZE, previewPage * PREVIEW_PAGE_SIZE)
+                      .map((s, idx) => (
+                        <tr key={idx} className="border-b border-gray-50 bg-white">
+                          <td className="py-2.5 px-3 text-gray-900 font-medium whitespace-nowrap">{s.roll_no}</td>
+                          <td className="py-2.5 px-3 text-gray-700 whitespace-nowrap">{s.student_name}</td>
+                          <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">{s.course}</td>
+                          <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">{s.branch}</td>
+                          <td className="py-2.5 px-3 text-center text-gray-600 whitespace-nowrap">{s.semester}</td>
+                          <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{s.subject}</td>
+                          <td className="py-2.5 px-3 text-gray-500 font-mono text-[11px] whitespace-nowrap">{s.barcode}</td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
-                {previewData.length > 5 && (
-                  <p className="text-xs text-gray-400 py-2 text-center">
-                    Showing first 5 of {previewData.length} records
-                  </p>
+
+                {/* ✅ Pagination bar */}
+                {previewData.length > PREVIEW_PAGE_SIZE && (
+                  <div className="flex items-center justify-between px-3 py-2.5 border-t border-gray-100 bg-white">
+                    <p className="text-[11px] text-gray-400">
+                      Showing{' '}
+                      <span className="font-medium text-gray-600">
+                        {(previewPage - 1) * PREVIEW_PAGE_SIZE + 1}–
+                        {Math.min(previewPage * PREVIEW_PAGE_SIZE, previewData.length)}
+                      </span>{' '}
+                      of{' '}
+                      <span className="font-medium text-gray-600">{previewData.length}</span> records
+                    </p>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                        disabled={previewPage === 1}
+                        className="w-7 h-7 rounded flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        <i className="ri-arrow-left-s-line text-sm"></i>
+                      </button>
+
+                      {Array.from(
+                        { length: Math.ceil(previewData.length / PREVIEW_PAGE_SIZE) },
+                        (_, i) => i + 1
+                      ).map((page) => (
+                        <button
+                          key={page}
+                          onClick={() => setPreviewPage(page)}
+                          className={`w-7 h-7 rounded text-[11px] font-medium transition-colors cursor-pointer ${page === previewPage
+                            ? 'bg-gray-900 text-white'
+                            : 'text-gray-500 hover:bg-gray-100'
+                            }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+
+                      <button
+                        onClick={() => setPreviewPage((p) => Math.min(Math.ceil(previewData.length / PREVIEW_PAGE_SIZE), p + 1))}
+                        disabled={previewPage === Math.ceil(previewData.length / PREVIEW_PAGE_SIZE)}
+                        className="w-7 h-7 rounded flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        <i className="ri-arrow-right-s-line text-sm"></i>
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
           </div>
         )}
+
       </div>
 
       {/* ─── SECTION B — Student Records ─── */}
@@ -1213,9 +1233,8 @@ export default function StudentDataUpload() {
                   ].map((label) => (
                     <th
                       key={label}
-                      className={`py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap ${
-                        label === 'Sem' ? 'text-center' : 'text-left'
-                      }`}
+                      className={`py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap ${label === 'Sem' ? 'text-center' : 'text-left'
+                        }`}
                     >
                       {label}
                     </th>
@@ -1226,9 +1245,8 @@ export default function StudentDataUpload() {
                 {students.map((s, idx) => (
                   <tr
                     key={s.id}
-                    className={`border-b border-gray-50 hover:bg-gray-50/30 transition-colors ${
-                      idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'
-                    }`}
+                    className={`border-b border-gray-50 hover:bg-gray-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'
+                      }`}
                   >
                     <td className="py-3 px-4">
                       <input
@@ -1320,9 +1338,8 @@ export default function StudentDataUpload() {
                     ].map((h) => (
                       <th
                         key={h}
-                        className={`py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${
-                          h === 'SEM' ? 'text-center' : 'text-left'
-                        }`}
+                        className={`py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${h === 'SEM' ? 'text-center' : 'text-left'
+                          }`}
                       >
                         {h}
                       </th>
