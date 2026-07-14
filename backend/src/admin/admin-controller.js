@@ -1009,3 +1009,173 @@ export const updateProfile = async (req, res) => {
     });
   }
 };
+
+
+
+// backend/src/controllers/otp.controller.js
+// Routes:
+//   POST /api/v1/auth/send-otp    → sendOtp
+//   POST /api/v1/auth/verify-otp  → verifyOtp
+
+import nodemailer from 'nodemailer';
+
+// ─── Config ──────────────────────────────────────────────────────
+const OTP_EXPIRY_MS  = 10 * 60 * 1000; // 10 minutes
+const MAX_ATTEMPTS   = 5;
+
+// ─── In-memory OTP store ─────────────────────────────────────────
+// { 'email@x.com': { otp, expiresAt, attempts } }
+// ✅ Replace with Redis in production for multi-instance deployments
+const otpStore = new Map();
+
+// ─── ✅ Nodemailer — uses your existing EMAIL_USER / EMAIL_PASS ──
+const transporter = nodemailer.createTransport({
+  service: 'gmail',               // Gmail — matches ishika325g@gmail.com
+  auth: {
+    user: process.env.EMAIL_USER, // ishika325g@gmail.com
+    pass: process.env.EMAIL_PASS, // dhssllvbwumqygga (App Password)
+  },
+});
+
+// Verify transport on startup
+transporter.verify((error) => {
+  if (error) {
+    console.error('❌ Email transport error:', error.message);
+  } else {
+    console.log('✅ Email transport ready');
+  }
+});
+
+// ─── Helper: generate 6-digit OTP ────────────────────────────────
+const generateOtp = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
+
+// ─── POST /api/v1/auth/send-otp ──────────────────────────────────
+export const sendOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid email is required',
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const otp             = generateOtp();
+    const expiresAt       = Date.now() + OTP_EXPIRY_MS;
+
+    // ✅ Store OTP (overwrites any previous OTP for same email)
+    otpStore.set(normalizedEmail, { otp, expiresAt, attempts: 0 });
+
+    // ✅ Send email
+    await transporter.sendMail({
+      from:    `"OSM System" <${process.env.EMAIL_USER}>`,
+      to:      email.trim(),
+      subject: 'Email Verification OTP — OSM',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;
+                    padding:28px;border:1px solid #e5e7eb;border-radius:12px;">
+          <h2 style="color:#111;font-size:18px;margin:0 0 6px">
+            Email Verification
+          </h2>
+          <p style="color:#6b7280;font-size:14px;margin:0 0 24px">
+            Use the OTP below to verify your email address for OSM.
+            It expires in <strong>10 minutes</strong>.
+          </p>
+          <div style="text-align:center;margin:24px 0">
+            <span style="display:inline-block;font-size:38px;font-weight:700;
+                         letter-spacing:14px;color:#111;background:#f3f4f6;
+                         padding:16px 28px;border-radius:10px;font-family:monospace">
+              ${otp}
+            </span>
+          </div>
+          <p style="color:#9ca3af;font-size:12px;text-align:center;margin:0">
+            If you did not request this, please ignore this email.
+          </p>
+        </div>
+      `,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `OTP sent to ${email.trim()}`,
+    });
+
+  } catch (error) {
+    console.error('sendOtp error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to send OTP. Please try again.',
+    });
+  }
+};
+
+// ─── POST /api/v1/auth/verify-otp ────────────────────────────────
+export const verifyOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and OTP are required',
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const record          = otpStore.get(normalizedEmail);
+
+    // OTP never sent or already used
+    if (!record) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP not found. Please request a new one.',
+      });
+    }
+
+    // Expired
+    if (Date.now() > record.expiresAt) {
+      otpStore.delete(normalizedEmail);
+      return res.status(400).json({
+        success: false,
+        message: 'OTP has expired. Please request a new one.',
+      });
+    }
+
+    // Too many wrong attempts
+    if (record.attempts >= MAX_ATTEMPTS) {
+      otpStore.delete(normalizedEmail);
+      return res.status(400).json({
+        success: false,
+        message: 'Too many failed attempts. Please request a new OTP.',
+      });
+    }
+
+    // Wrong OTP
+    if (record.otp !== otp.trim()) {
+      record.attempts += 1;
+      const remaining = MAX_ATTEMPTS - record.attempts;
+      return res.status(400).json({
+        success: false,
+        message: `Invalid OTP. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`,
+      });
+    }
+
+    // ✅ Correct — delete (one-time use)
+    otpStore.delete(normalizedEmail);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Email verified successfully',
+    });
+
+  } catch (error) {
+    console.error('verifyOtp error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to verify OTP. Please try again.',
+    });
+  }
+};
