@@ -968,7 +968,8 @@ export default function WorkQueue() {
                       This sheet only
                     </div>
                   </button>
-                  <button
+                  
+                  {/* <button
                     onClick={() => setFlagOption('entire')}
                     className={`flex-1 py-3 px-4 rounded-xl border-2 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
                       flagOption === 'entire'
@@ -982,7 +983,8 @@ export default function WorkQueue() {
                       </span>
                       Entire exam
                     </div>
-                  </button>
+                  </button> */}
+
                 </div>
                 {flagOption === 'entire' && (
                   <p className="text-xs text-amber-600 mt-2">

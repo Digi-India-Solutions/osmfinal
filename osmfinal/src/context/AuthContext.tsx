@@ -92,8 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem('osm_user');
           setCurrentUser(null);
         }
-      } catch (error) {
-        console.error('Auth check error:', error);
+      } catch (error: any) {
+        if (error.response?.status !== 401) {
+          console.error('Auth check error:', error);
+        }
         localStorage.removeItem('osm_user');
         setCurrentUser(null);
       } finally {

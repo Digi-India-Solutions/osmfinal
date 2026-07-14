@@ -2,3 +2,5 @@
 **/.env
 **/.env.local
 backend/backups/
+backend/uploads/
+osmfinal/out/
