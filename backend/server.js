@@ -15,27 +15,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ===== Security headers =====
-app.use(
-  helmet({
-    crossOriginResourcePolicy: false,
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        frameAncestors: [
-          "'self'",
-          'http://localhost:3000',
-          'http://localhost:3001',
-          'https://osm.digiindiasolutions.com',
-        ],
-        frameSrc: ["'self'", 'https://osm.digiindiasolutions.com'],
-        imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com'],
-      },
-    },
-  }),
-);
+app.use(helmet({ crossOriginResourcePolicy: false, contentSecurityPolicy: false }));
 
-// ✅ Remove X-Frame-Options and CSP headers
 app.use((req, res, next) => {
   res.removeHeader('X-Frame-Options');
   res.removeHeader('Content-Security-Policy');
@@ -57,59 +38,32 @@ app.use(express.json({ limit: '1000mb' }));
 app.use(express.urlencoded({ limit: '1000mb', extended: true }));
 app.use(cookieParser());
 
-// ================================================================
-// ✅ FIXED CORS CONFIGURATION
-// ================================================================
-
 const allowedOrigins = [
-  // Development
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://192.168.166.80:3001',
-  // Production
   'https://osm.digiindiasolutions.com',
+  'https://osmapi.digiindiasolutions.com',
 ];
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // ✅ Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) {
-        return callback(null, true);
-      }
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        console.log('❌ CORS blocked for origin:', origin);
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true, // ✅ IMPORTANT: This allows cookies to be sent
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'Cookie',
-      'X-Requested-With',
-    ],
-    exposedHeaders: ['Set-Cookie', 'Authorization'],
-  }),
-);
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin) || origin.startsWith('blob:')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+}));
 
-// ✅ Static serving for uploads
-app.use(
-  '/uploads',
-  express.static(path.join(process.cwd(), 'uploads'), {
-    setHeaders: (res) => {
-      res.set('Access-Control-Allow-Origin', '*');
-    },
-  }),
-);
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/backups', express.static(path.join(process.cwd(), 'backups')));
 
-// ===== Routes =====
 import adminRouter from './src/admin/admin-routes.js';
 import companyRouter from './src/system-settings/company/company-routes.js';
 import dashboardRouter from './src/dashboard/dashboard-routes.js';
@@ -130,7 +84,6 @@ import AdminDashboardRoutes from './src/adminDashboard/adminDashboardROute.js';
 import recheckReportRoutes from './src/reportsTab/recheck/recheckReportsROutes.js';
 import checkerPerformanceRoutes from './src/reports/checkerPerformanceController/checkerPerformanceRoutes.js';
 
-// app.use('/api/v1/reports', reportsRouter);
 app.use('/api/v1/results', reportsRouter);
 app.use('/api/v1/recheck-report', recheckReportRoutes);
 app.use('/api/v1/checker-performance', checkerPerformanceRoutes);
@@ -151,18 +104,12 @@ app.use('/api/v1/recheck-queue', recheckRoutes);
 app.use('/api/v1/checker', MarkscheckerRoutes);
 app.use('/api/v1/teacher', TeacherRoutes);
 
-// ===== Root Routes =====
-app.get('/', (req, res) => {
-  res.send('Server is running');
-});
+app.get('/', (req, res) => { res.send('Server is running'); });
 
 app.get('/developer', (req, res) => {
-  res.send(
-    `<h1>It is great to see you on the server of <a href="https://www.linkedin.com/in//">AASIB KHAN</a></h1>`,
-  );
+  res.send('<h1>Server of AASIB KHAN</h1>');
 });
 
-// ===== Start Server =====
 const port = process.env.PORT || 7000;
 app.listen(port, '127.0.0.1', () => {
   console.log({ message: `App is running on port ${port}` });

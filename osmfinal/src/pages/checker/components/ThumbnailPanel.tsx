@@ -383,11 +383,9 @@ export default function ThumbnailPanel({
             <div
               key={page}
               data-thumbnail-page={page}
-              className={`relative border-2 ${borderColor} rounded cursor-pointer transition-all ${
-                isBlank ? "opacity-40" : ""
-              } ${isCurrent ? "shadow-md shadow-sky-500/20" : ""} ${
-                isDragOver ? "border-sky-400 border-dashed bg-sky-500/10" : ""
-              }`}
+              className={`relative border-2 ${borderColor} rounded cursor-pointer transition-all ${isBlank ? "opacity-40" : ""
+                } ${isCurrent ? "shadow-md shadow-sky-500/20" : ""} ${isDragOver ? "border-sky-400 border-dashed bg-sky-500/10" : ""
+                }`}
             >
               {/* Page content */}
               <div
@@ -437,9 +435,8 @@ export default function ThumbnailPanel({
               {/* Page label + blank badge */}
               <div className="flex items-center justify-between px-1 py-0.5">
                 <span
-                  className={`text-[10px] tabular-nums ${
-                    isCurrent ? "text-sky-400 font-semibold" : "text-slate-400"
-                  }`}
+                  className={`text-[10px] tabular-nums ${isCurrent ? "text-sky-400 font-semibold" : "text-slate-400"
+                    }`}
                 >
                   Page {page}
                 </span>

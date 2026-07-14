@@ -1,1213 +1,3 @@
-// // src/pages/checker/components/SheetViewer.tsx
-
-// import {
-//   forwardRef,
-//   useImperativeHandle,
-//   useCallback,
-//   useEffect,
-//   useRef,
-//   useState,
-//   useMemo,
-// } from 'react';
-// import type { AnnotationTool, Annotation, MarksStamp } from '../MarkingView';
-
-// // ✅ PDF.js imports
-// import * as pdfjsLib from 'pdfjs-dist';
-
-// // ✅ Set worker source - FIXED for production
-// if (import.meta.env.PROD) {
-//   // Production: Use CDN or local path
-//  pdfjsLib.GlobalWorkerOptions.workerSrc =
-//    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-// } else {
-//   // Development: Use local worker
-//   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-//     'pdfjs-dist/build/pdf.worker.min.mjs',
-//     import.meta.url,
-//   ).toString();
-// }
-
-// // ... rest of the component code
-
-// interface SheetViewerProps {
-//   currentPage: number;
-//   totalPages: number;
-//   blankPages: Set<number>;
-//   onPageChange: (page: number) => void;
-//   zoom: number;
-//   activeTool: AnnotationTool;
-//   annotations: Annotation[];
-//   stamps: MarksStamp[];
-//   activeMarkId: string | null;
-//   placingMarkId: string | null;
-//   instructionBanner: string | null;
-//   stampColor?: string;
-//   pulseAnimationName?: string;
-//   onAnnotationAdd: (
-//     tool: AnnotationTool,
-//     x: number,
-//     y: number,
-//     page: number,
-//     width?: number,
-//     height?: number,
-//   ) => void;
-//   onAnnotationDelete: (id: number) => void;
-//   onEraserNoHit: () => void;
-//   onPencilStroke: () => void;
-//   onSheetClickForPlacement: (
-//     page: number,
-//     xPercent: number,
-//     yPercent: number,
-//   ) => void;
-//   onStampReposition: (
-//     markId: string,
-//     page: number,
-//     xPercent: number,
-//     yPercent: number,
-//   ) => void;
-//   onDismissBanner: () => void;
-//   pageRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
-//   scrollToPage: (page: number) => void;
-//   pdfUrl?: string | null;
-//   onPageRender?: (pageNum: number, imageData: string) => void; // ✅ ADD
-//   onPageCount?: (count: number) => void;
-// }
-
-// export interface SheetViewerHandle {
-//   undoPencil: () => void;
-//   clearPencil: () => void;
-//   hasPencilMarks: () => boolean;
-// }
-
-// const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
-//   function SheetViewer(
-//     {
-//       currentPage,
-//       totalPages,
-//       blankPages,
-//       onPageChange,
-//       zoom,
-//       activeTool,
-//       annotations,
-//       stamps,
-//       activeMarkId,
-//       placingMarkId,
-//       instructionBanner,
-//       stampColor = '#4338CA',
-//       pulseAnimationName = 'stampPulse',
-//       onAnnotationAdd,
-//       onAnnotationDelete,
-//       onEraserNoHit,
-//       onPencilStroke,
-//       onSheetClickForPlacement,
-//       onStampReposition,
-//       onDismissBanner,
-//       pageRefs,
-//       scrollToPage,
-//       pdfUrl,
-//       onPageRender, // ✅ ADD THIS
-//       onPageCount,
-//     },
-//     ref,
-//   ) {
-//     const scrollContainerRef = useRef<HTMLDivElement>(null);
-//     const canvasRef = useRef<HTMLCanvasElement>(null);
-//     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
-//     const isDrawingRef = useRef(false);
-//     const canvasHistoryRef = useRef<string[]>([]);
-
-//     const onPencilStrokeRef = useRef(onPencilStroke);
-//     useEffect(() => {
-//       onPencilStrokeRef.current = onPencilStroke;
-//     }, [onPencilStroke]);
-
-//     // ─── Highlight drag state ───
-//     const [highlightPreview, setHighlightPreview] = useState<{
-//       x: number;
-//       y: number;
-//       width: number;
-//       height: number;
-//       page: number;
-//     } | null>(null);
-//     const highlightDragRef = useRef<{
-//       startX: number;
-//       startY: number;
-//       page: number;
-//     } | null>(null);
-
-//     // ─── Stamp drag reposition state ───
-//     const [dragStamp, setDragStamp] = useState<{
-//       markId: string;
-//       page: number;
-//       x: number;
-//       y: number;
-//     } | null>(null);
-
-//     // ─── Build page-stamps lookup ───
-//     const stampsByPage = useMemo(() => {
-//       const map: Record<number, MarksStamp[]> = {};
-//       stamps.forEach((s) => {
-//         if (!map[s.page]) map[s.page] = [];
-//         map[s.page].push(s);
-//       });
-//       return map;
-//     }, [stamps]);
-
-//     // ─── PDF STATE ────────────────────────────────────────────
-
-//     const [pdfLoading, setPdfLoading] = useState(false);
-//     const [pdfError, setPdfError] = useState<string | null>(null);
-//     const [pdfDocument, setPdfDocument] = useState<any>(null);
-//     const [pdfPageCount, setPdfPageCount] = useState(0);
-//     const [pdfRenderedPages, setPdfRenderedPages] = useState<Set<number>>(
-//       new Set(),
-//     );
-//     const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
-//     const pdfCanvasContainerRef = useRef<HTMLDivElement | null>(null);
-
-//     // ─── LOAD PDF ─────────────────────────────────────────────
-
-//     useEffect(() => {
-//       if (!pdfUrl) {
-//         setPdfDocument(null);
-//         setPdfPageCount(0);
-//         setPdfRenderedPages(new Set());
-//         setPdfError(null);
-//         return;
-//       }
-
-//       const loadPdf = async () => {
-//         setPdfLoading(true);
-//         setPdfError(null);
-//         try {
-//           const loadingTask = pdfjsLib.getDocument(pdfUrl);
-//           const pdf = await loadingTask.promise;
-//           setPdfDocument(pdf);
-//           setPdfPageCount(pdf.numPages);
-//           setPdfRenderedPages(new Set());
-//         } catch (err) {
-//           console.error('PDF load error:', err);
-//           setPdfError('Failed to load PDF document');
-//         } finally {
-//           setPdfLoading(false);
-//         }
-//       };
-
-//       loadPdf();
-//     }, [pdfUrl]);
-
-//     // ─── RENDER PDF PAGE TO CANVAS ────────────────────────────
-
-//     // SheetViewer.tsx
-
-//     // ─── RENDER PDF PAGE TO CANVAS ────────────────────────────
-
-//     useEffect(() => {
-//       const renderPage = async (pageNum: number) => {
-//         if (!pdfDocument || pdfRenderedPages.has(pageNum)) return;
-
-//         const canvas = pdfCanvasRef.current;
-//         if (!canvas) return;
-
-//         try {
-//           const page = await pdfDocument.getPage(pageNum);
-//           const viewport = page.getViewport({ scale: 1.5 });
-
-//           const context = canvas.getContext('2d');
-//           if (!context) return;
-
-//           canvas.width = viewport.width;
-//           canvas.height = viewport.height;
-
-//           const renderContext = {
-//             canvasContext: context,
-//             viewport: viewport,
-//           };
-
-//           await page.render(renderContext).promise;
-
-//           // ✅ Get image data for thumbnail
-//           const imageData = canvas.toDataURL();
-
-//           // ✅ Send to parent component
-//           onPageRender?.(pageNum, imageData);
-//           onPageCount?.(pdfPageCount);
-
-//           setPdfRenderedPages((prev) => new Set([...prev, pageNum]));
-//         } catch (err) {
-//           console.error(`Error rendering page ${pageNum}:`, err);
-//         }
-//       };
-
-//       if (
-//         pdfDocument &&
-//         pdfCanvasRef.current &&
-//         !pdfRenderedPages.has(currentPage)
-//       ) {
-//         renderPage(currentPage);
-//       }
-//     }, [
-//       pdfDocument,
-//       currentPage,
-//       pdfRenderedPages,
-//       onPageRender,
-//       onPageCount,
-//       pdfPageCount,
-//     ]);
-
-//     // ─── Page overlay handlers (tick, cross, highlight, eraser) ───
-
-//     const getCanvasCoordinates = useCallback(
-//       (e: React.MouseEvent<HTMLDivElement>) => {
-//         const canvas = pdfCanvasRef.current;
-//         if (!canvas) return { x: 0, y: 0 };
-
-//         const rect = canvas.getBoundingClientRect();
-//         const scaleX = canvas.width / rect.width;
-//         const scaleY = canvas.height / rect.height;
-
-//         return {
-//           x: (e.clientX - rect.left) * scaleX,
-//           y: (e.clientY - rect.top) * scaleY,
-//         };
-//       },
-//       [],
-//     );
-
-//     const handleOverlayMouseDown = useCallback(
-//       (e: React.MouseEvent<HTMLDivElement>) => {
-//         if (placingMarkId) return;
-//         if (activeTool === 'highlight') {
-//           const { x, y } = getCanvasCoordinates(e);
-//           highlightDragRef.current = {
-//             startX: x,
-//             startY: y,
-//             page: currentPage,
-//           };
-//         }
-//       },
-//       [activeTool, placingMarkId, getCanvasCoordinates, currentPage],
-//     );
-
-//     const handleOverlayMouseMove = useCallback(
-//       (e: React.MouseEvent<HTMLDivElement>) => {
-//         if (placingMarkId) return;
-//         if (activeTool !== 'highlight' || !highlightDragRef.current) return;
-//         if (highlightDragRef.current.page !== currentPage) return;
-
-//         const { x, y } = getCanvasCoordinates(e);
-//         const startX = highlightDragRef.current.startX;
-//         const startY = highlightDragRef.current.startY;
-
-//         setHighlightPreview({
-//           x: Math.min(startX, x),
-//           y: Math.min(startY, y),
-//           width: Math.abs(x - startX),
-//           height: Math.abs(y - startY),
-//           page: currentPage,
-//         });
-//       },
-//       [activeTool, placingMarkId, getCanvasCoordinates, currentPage],
-//     );
-
-//     const handleOverlayMouseUp = useCallback(
-//       (e: React.MouseEvent<HTMLDivElement>) => {
-//         if (placingMarkId) return;
-
-//         const { x, y } = getCanvasCoordinates(e);
-
-//         if (activeTool === 'eraser') {
-//           const pageAnnotations = annotations.filter(
-//             (ann) => ann.page === currentPage,
-//           );
-
-//           for (const ann of pageAnnotations) {
-//             if (ann.tool === 'highlight' && ann.width && ann.height) {
-//               if (
-//                 x >= ann.x &&
-//                 x <= ann.x + ann.width &&
-//                 y >= ann.y &&
-//                 y <= ann.y + ann.height
-//               ) {
-//                 onAnnotationDelete(ann.id);
-//                 return;
-//               }
-//             }
-//           }
-
-//           for (const ann of pageAnnotations) {
-//             if (ann.tool === 'tick' || ann.tool === 'cross') {
-//               const dx = x - ann.x;
-//               const dy = y - ann.y;
-//               if (Math.sqrt(dx * dx + dy * dy) < 20) {
-//                 onAnnotationDelete(ann.id);
-//                 return;
-//               }
-//             }
-//           }
-
-//           onEraserNoHit();
-//           return;
-//         }
-
-//         if (activeTool === 'highlight' && highlightDragRef.current) {
-//           const startX = highlightDragRef.current.startX;
-//           const startY = highlightDragRef.current.startY;
-//           const w = Math.abs(x - startX);
-//           const h = Math.abs(y - startY);
-
-//           highlightDragRef.current = null;
-//           setHighlightPreview(null);
-
-//           if (w >= 10 && h >= 10) {
-//             onAnnotationAdd(
-//               'highlight',
-//               Math.min(startX, x),
-//               Math.min(startY, y),
-//               currentPage,
-//               w,
-//               h,
-//             );
-//           }
-//         } else if (activeTool === 'tick' || activeTool === 'cross') {
-//           onAnnotationAdd(activeTool, x, y, currentPage);
-//         }
-//       },
-//       [
-//         activeTool,
-//         placingMarkId,
-//         getCanvasCoordinates,
-//         currentPage,
-//         annotations,
-//         onAnnotationAdd,
-//         onAnnotationDelete,
-//         onEraserNoHit,
-//       ],
-//     );
-
-//     // ─── Click-to-place handler ───
-//     const handlePlaceClick = useCallback(
-//       (e: React.MouseEvent<HTMLDivElement>) => {
-//         if (!placingMarkId) return;
-//         const canvas = pdfCanvasRef.current;
-//         if (!canvas) return;
-
-//         const rect = canvas.getBoundingClientRect();
-//         const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
-//         const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
-
-//         onSheetClickForPlacement(currentPage, xPercent, yPercent);
-//       },
-//       [placingMarkId, currentPage, onSheetClickForPlacement],
-//     );
-
-//     // ─── Stamp right-click → start drag ───
-//     const handleStampRightClick = useCallback(
-//       (
-//         e: React.MouseEvent,
-//         markId: string,
-//         page: number,
-//         x: number,
-//         y: number,
-//       ) => {
-//         e.preventDefault();
-//         e.stopPropagation();
-//         setDragStamp({ markId, page, x, y });
-//       },
-//       [],
-//     );
-
-//     // ─── Stamp drag mouse move / release (document-level) ───
-//     useEffect(() => {
-//       if (!dragStamp) return;
-
-//       const handleMouseMove = (e: MouseEvent) => {
-//         const canvas = pdfCanvasRef.current;
-//         if (!canvas) return;
-
-//         const rect = canvas.getBoundingClientRect();
-//         const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
-//         const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
-
-//         setDragStamp((prev) =>
-//           prev ? { ...prev, x: xPercent, y: yPercent } : null,
-//         );
-//       };
-
-//       const handleMouseUp = () => {
-//         if (dragStamp) {
-//           onStampReposition(
-//             dragStamp.markId,
-//             dragStamp.page,
-//             dragStamp.x,
-//             dragStamp.y,
-//           );
-//         }
-//         setDragStamp(null);
-//       };
-
-//       document.addEventListener('mousemove', handleMouseMove);
-//       document.addEventListener('mouseup', handleMouseUp);
-
-//       return () => {
-//         document.removeEventListener('mousemove', handleMouseMove);
-//         document.removeEventListener('mouseup', handleMouseUp);
-//       };
-//     }, [dragStamp, onStampReposition]);
-
-//     // ─── IntersectionObserver ───
-//     useEffect(() => {
-//       const container = scrollContainerRef.current;
-//       if (!container) return;
-
-//       const observer = new IntersectionObserver(
-//         (entries) => {
-//           let bestPage = currentPage;
-//           let bestRatio = 0;
-//           entries.forEach((entry) => {
-//             if (entry.intersectionRatio > bestRatio) {
-//               bestRatio = entry.intersectionRatio;
-//               const pageNum = parseInt(
-//                 entry.target.getAttribute('data-page') || '1',
-//                 10,
-//               );
-//               bestPage = pageNum;
-//             }
-//           });
-//           if (bestRatio > 0 && bestPage !== currentPage) {
-//             onPageChange(bestPage);
-//           }
-//         },
-//         {
-//           root: container,
-//           threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
-//         },
-//       );
-
-//       for (let i = 1; i <= totalPages; i++) {
-//         const el = pageRefs.current[i];
-//         if (el) observer.observe(el);
-//       }
-
-//       return () => observer.disconnect();
-//     }, [currentPage, totalPages, onPageChange, pageRefs]);
-
-//     const isPencilActive = activeTool === 'pencil';
-//     const isPlacing = !!placingMarkId;
-
-//     // ─── Hex to rgba converter for stamp shadows ───
-//     const stampRgba = useCallback(
-//       (alpha: number) => {
-//         const r = parseInt(stampColor.slice(1, 3), 16);
-//         const g = parseInt(stampColor.slice(3, 5), 16);
-//         const b = parseInt(stampColor.slice(5, 7), 16);
-//         return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-//       },
-//       [stampColor],
-//     );
-
-//     // ─── ✅ IF PDF URL EXISTS, SHOW PDF WITH OVERLAY ──────────────────────
-
-//     if (pdfUrl) {
-//       const pageStamps = stampsByPage[currentPage] || [];
-
-//       return (
-//         <div className="flex-1 flex flex-col bg-[#0f172a] min-w-0">
-//           {/* Instruction banner */}
-//           {instructionBanner && (
-//             <div
-//               className="shrink-0 mx-3 mt-2 px-3 py-2 rounded flex items-center gap-2"
-//               style={{
-//                 backgroundColor: '#FFFBEB',
-//                 border: '1px solid #F59E0B',
-//               }}
-//             >
-//               <div className="w-4 h-4 flex items-center justify-center shrink-0">
-//                 <i
-//                   className="ri-information-line text-sm"
-//                   style={{ color: '#D97706' }}
-//                 ></i>
-//               </div>
-//               <span
-//                 className="text-[11px] font-medium flex-1"
-//                 style={{ color: '#92400E' }}
-//               >
-//                 {instructionBanner}
-//               </span>
-//               <button
-//                 onClick={onDismissBanner}
-//                 className="w-5 h-5 rounded-full flex items-center justify-center hover:bg-amber-200 cursor-pointer shrink-0 transition-colors"
-//                 style={{ color: '#92400E' }}
-//               >
-//                 <i className="ri-close-line text-xs"></i>
-//               </button>
-//             </div>
-//           )}
-
-//           {/* PDF Viewer with overlay */}
-//           <div
-//             className="flex-1 overflow-y-auto flex justify-center p-4 relative"
-//             ref={scrollContainerRef}
-//           >
-//             {pdfLoading ? (
-//               <div className="flex items-center justify-center w-full h-full">
-//                 <div className="text-center">
-//                   <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-//                   <p className="text-slate-400 mt-3 text-sm">Loading PDF...</p>
-//                 </div>
-//               </div>
-//             ) : pdfError ? (
-//               <div className="flex items-center justify-center w-full h-full">
-//                 <div className="text-center">
-//                   <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-4">
-//                     <i className="ri-error-warning-line text-red-400 text-3xl"></i>
-//                   </div>
-//                   <p className="text-red-400 text-sm">{pdfError}</p>
-//                   <button
-//                     onClick={() => window.location.reload()}
-//                     className="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-500 transition-colors"
-//                   >
-//                     Reload
-//                   </button>
-//                 </div>
-//               </div>
-//             ) : (
-//               <div
-//                 className="relative w-full max-w-4xl"
-//                 ref={pdfCanvasContainerRef}
-//               >
-//                 {/* PDF Canvas */}
-//                 <canvas
-//                   ref={pdfCanvasRef}
-//                   className="mx-auto shadow-lg rounded-lg"
-//                   style={{
-//                     width: '100%',
-//                     height: 'auto',
-//                     backgroundColor: 'white',
-//                     display: 'block',
-//                   }}
-//                 />
-
-//                 {/* ✅ Overlay for annotations and stamps */}
-//                 <div
-//                   className="absolute inset-0 z-10"
-//                   style={{ pointerEvents: 'none' }}
-//                 >
-//                   {/* Annotation overlay (tick, cross, highlight) + click-to-place */}
-//                   <div
-//                     className="absolute inset-0 z-20"
-//                     style={{
-//                       pointerEvents:
-//                         isPlacing || activeTool !== 'pencil' ? 'auto' : 'none',
-//                       cursor: isPlacing
-//                         ? 'crosshair'
-//                         : activeTool === 'eraser'
-//                           ? 'not-allowed'
-//                           : activeTool === 'highlight' ||
-//                               activeTool === 'tick' ||
-//                               activeTool === 'cross'
-//                             ? 'crosshair'
-//                             : 'default',
-//                     }}
-//                     onClick={isPlacing ? handlePlaceClick : undefined}
-//                     onMouseDown={isPlacing ? undefined : handleOverlayMouseDown}
-//                     onMouseMove={isPlacing ? undefined : handleOverlayMouseMove}
-//                     onMouseUp={isPlacing ? undefined : handleOverlayMouseUp}
-//                   />
-
-//                   {/* Highlight preview */}
-//                   {highlightPreview &&
-//                     highlightPreview.page === currentPage && (
-//                       <div
-//                         className="absolute z-15 pointer-events-none"
-//                         style={{
-//                           left: highlightPreview.x,
-//                           top: highlightPreview.y,
-//                           width: highlightPreview.width,
-//                           height: highlightPreview.height,
-//                           backgroundColor: 'rgba(255, 235, 59, 0.4)',
-//                           border: '1px dashed #D97706',
-//                         }}
-//                       />
-//                     )}
-
-//                   {/* STAMPS for this page */}
-//                   {pageStamps.map((stamp) => {
-//                     const isActive = stamp.markId === activeMarkId;
-//                     const hasValue =
-//                       stamp.value !== null && stamp.value !== undefined;
-//                     const isDragging = dragStamp?.markId === stamp.markId;
-//                     const canvas = pdfCanvasRef.current;
-//                     if (!canvas) return null;
-
-//                     const rect = canvas.getBoundingClientRect();
-//                     const canvasWidth = canvas.width;
-//                     const canvasHeight = canvas.height;
-
-//                     const xPos = (stamp.x / 100) * rect.width;
-//                     const yPos = (stamp.y / 100) * rect.height;
-//                     const size = isActive ? 38 : 34;
-//                     const fontSize = isActive ? 15 : 14;
-
-//                     return (
-//                       <div
-//                         key={stamp.markId}
-//                         className={`absolute rounded-full flex items-center justify-center font-bold select-none ${
-//                           isDragging
-//                             ? 'cursor-grabbing z-30'
-//                             : 'cursor-pointer z-5'
-//                         }`}
-//                         style={{
-//                           width: `${size}px`,
-//                           height: `${size}px`,
-//                           border: hasValue
-//                             ? `2px solid ${stampColor}`
-//                             : `2px dashed ${stampColor}`,
-//                           color: hasValue ? stampColor : '#94a3b8',
-//                           fontSize: `${fontSize}px`,
-//                           backgroundColor: 'white',
-//                           top: `${yPos - size / 2}px`,
-//                           left: `${xPos - size / 2}px`,
-//                           boxShadow: isActive
-//                             ? `0 0 0 4px ${stampRgba(0.25)}`
-//                             : undefined,
-//                           animation: isActive
-//                             ? `${pulseAnimationName} 1.5s ease-in-out infinite`
-//                             : undefined,
-//                           pointerEvents: 'auto',
-//                         }}
-//                         onContextMenu={
-//                           !isDragging
-//                             ? (e) =>
-//                                 handleStampRightClick(
-//                                   e,
-//                                   stamp.markId,
-//                                   stamp.page,
-//                                   stamp.x,
-//                                   stamp.y,
-//                                 )
-//                             : undefined
-//                         }
-//                         title={
-//                           hasValue
-//                             ? `${stamp.markId}: ${stamp.value}`
-//                             : `${stamp.markId}: not yet marked`
-//                         }
-//                       >
-//                         {hasValue ? stamp.value : '—'}
-//                       </div>
-//                     );
-//                   })}
-
-//                   {/* Rendered annotations for this page */}
-//                   {annotations
-//                     .filter((ann) => ann.page === currentPage)
-//                     .map((ann) => {
-//                       const canvas = pdfCanvasRef.current;
-//                       if (!canvas) return null;
-
-//                       const rect = canvas.getBoundingClientRect();
-//                       const scaleX = rect.width / canvas.width;
-//                       const scaleY = rect.height / canvas.height;
-
-//                       const xPos = ann.x * scaleX;
-//                       const yPos = ann.y * scaleY;
-
-//                       return (
-//                         <div
-//                           key={ann.id}
-//                           className="absolute z-10 pointer-events-none"
-//                           style={{ left: xPos, top: yPos }}
-//                         >
-//                           {ann.tool === 'tick' && (
-//                             <span
-//                               className="font-bold select-none leading-none inline-block"
-//                               style={{
-//                                 fontSize: `${24 * scaleX}px`,
-//                                 color: '#27500A',
-//                                 fontFamily: 'serif',
-//                                 transform: 'translate(-6px, -12px)',
-//                               }}
-//                             >
-//                               ✓
-//                             </span>
-//                           )}
-//                           {ann.tool === 'cross' && (
-//                             <span
-//                               className="font-bold select-none leading-none inline-block"
-//                               style={{
-//                                 fontSize: `${28 * scaleX}px`,
-//                                 color: '#E24B4A',
-//                                 fontFamily: 'serif',
-//                                 transform: 'translate(-7px, -14px)',
-//                               }}
-//                             >
-//                               ✗
-//                             </span>
-//                           )}
-//                           {ann.tool === 'highlight' && (
-//                             <div
-//                               className="rounded-sm"
-//                               style={{
-//                                 width: (ann.width ?? 80) * scaleX,
-//                                 height: (ann.height ?? 20) * scaleY,
-//                                 backgroundColor: 'rgba(250, 204, 21, 0.45)',
-//                                 transform: 'translate(-2px, -3px)',
-//                               }}
-//                             />
-//                           )}
-//                         </div>
-//                       );
-//                     })}
-//                 </div>
-//               </div>
-//             )}
-//           </div>
-
-//           {/* Bottom page navigation */}
-//           <div className="h-11 shrink-0 bg-[#1e293b] flex items-center justify-center gap-1 px-3 overflow-x-auto">
-//             {pdfPageCount > 0 && (
-//               <>
-//                 <button
-//                   onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-//                   disabled={currentPage <= 1}
-//                   className="px-3 py-1 text-xs text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-//                 >
-//                   <i className="ri-arrow-left-s-line"></i>
-//                 </button>
-//                 <span className="text-xs text-slate-400 px-2">
-//                   Page {currentPage} of {pdfPageCount}
-//                 </span>
-//                 <button
-//                   onClick={() =>
-//                     onPageChange(Math.min(pdfPageCount, currentPage + 1))
-//                   }
-//                   disabled={currentPage >= pdfPageCount}
-//                   className="px-3 py-1 text-xs text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-//                 >
-//                   <i className="ri-arrow-right-s-line"></i>
-//                 </button>
-//               </>
-//             )}
-//           </div>
-//         </div>
-//       );
-//     }
-
-//     // ─── FALLBACK: Static pages (when no PDF URL) ──────────────────────
-
-//     return (
-//       <div className="flex-1 flex flex-col bg-slate-200 min-w-0">
-//         {/* ─── INSTRUCTION BANNER ─── */}
-//         {instructionBanner && (
-//           <div
-//             className="shrink-0 mx-3 mt-2 px-3 py-2 rounded flex items-center gap-2"
-//             style={{ backgroundColor: '#FFFBEB', border: '1px solid #F59E0B' }}
-//           >
-//             <div className="w-4 h-4 flex items-center justify-center shrink-0">
-//               <i
-//                 className="ri-information-line text-sm"
-//                 style={{ color: '#D97706' }}
-//               ></i>
-//             </div>
-//             <span
-//               className="text-[11px] font-medium flex-1"
-//               style={{ color: '#92400E' }}
-//             >
-//               {instructionBanner}
-//             </span>
-//             <button
-//               onClick={onDismissBanner}
-//               className="w-5 h-5 rounded-full flex items-center justify-center hover:bg-amber-200 cursor-pointer shrink-0 transition-colors"
-//               style={{ color: '#92400E' }}
-//             >
-//               <i className="ri-close-line text-xs"></i>
-//             </button>
-//           </div>
-//         )}
-
-//         {/* ─── SCROLLABLE SHEET VIEW ─── */}
-//         <div className="flex-1 overflow-y-auto">
-//           <div
-//             ref={(el) => {
-//               scrollContainerRef.current = el;
-//             }}
-//             className="flex-1 overflow-y-auto flex justify-center"
-//           >
-//             <div
-//               className="relative py-4 flex flex-col items-center gap-2"
-//               style={{
-//                 transform: `scale(${zoom / 100})`,
-//                 transformOrigin: 'top center',
-//               }}
-//             >
-//               {/* ─── PENCIL CANVAS OVERLAY ─── */}
-//               <canvas
-//                 ref={canvasRef}
-//                 width={720}
-//                 height={8000}
-//                 className="absolute top-0 left-0 z-10"
-//                 style={{
-//                   pointerEvents: isPencilActive && !isPlacing ? 'auto' : 'none',
-//                   cursor:
-//                     isPencilActive && !isPlacing ? 'crosshair' : undefined,
-//                   width: '720px',
-//                   height: '8000px',
-//                 }}
-//                 onMouseDown={handleCanvasMouseDown}
-//                 onMouseMove={handleCanvasMouseMove}
-//                 onMouseUp={handleCanvasMouseUp}
-//                 onMouseLeave={handleCanvasMouseLeave}
-//               />
-
-//               {/* ─── HIGHLIGHT LIVE PREVIEW ─── */}
-//               {highlightPreview && (
-//                 <div
-//                   className="absolute z-15 pointer-events-none"
-//                   style={{
-//                     left: highlightPreview.x,
-//                     top: highlightPreview.y,
-//                     width: highlightPreview.width,
-//                     height: highlightPreview.height,
-//                     backgroundColor: 'rgba(255, 235, 59, 0.4)',
-//                     border: '1px dashed #D97706',
-//                   }}
-//                 />
-//               )}
-
-//               {/* ─── PAGES ─── */}
-//               {Array.from({ length: totalPages }, (_, i) => {
-//                 const page = i + 1;
-//                 const isBlank = blankPages.has(page);
-//                 const pageAnnotations = annotations.filter(
-//                   (ann) => ann.page === page,
-//                 );
-//                 const pageStamps = stampsByPage[page] || [];
-//                 const lines = getPageLines(page);
-//                 const showOverlay =
-//                   !isBlank && (activeTool !== 'pencil' || isPlacing);
-//                 const cursorClass = isPlacing
-//                   ? 'cursor-crosshair'
-//                   : activeTool === 'eraser'
-//                     ? 'cursor-not-allowed'
-//                     : activeTool === 'highlight' ||
-//                         activeTool === 'tick' ||
-//                         activeTool === 'cross'
-//                       ? 'cursor-crosshair'
-//                       : 'cursor-default';
-
-//                 return (
-//                   <div
-//                     key={page}
-//                     ref={(el) => {
-//                       pageRefs.current[page] = el;
-//                     }}
-//                     data-page={page}
-//                     className="relative bg-white shadow-sm rounded-sm shrink-0"
-//                     style={{ width: '720px' }}
-//                   >
-//                     {/* Annotation overlay */}
-//                     {showOverlay && (
-//                       <div
-//                         className={`absolute inset-0 z-20 ${cursorClass}`}
-//                         style={{ background: 'transparent' }}
-//                         onClick={
-//                           isPlacing
-//                             ? (e) => handlePlaceClick(page, e)
-//                             : undefined
-//                         }
-//                         onMouseDown={
-//                           isPlacing
-//                             ? undefined
-//                             : (e) => handleOverlayMouseDown(page, e)
-//                         }
-//                         onMouseMove={
-//                           isPlacing
-//                             ? undefined
-//                             : (e) => handleOverlayMouseMove(page, e)
-//                         }
-//                         onMouseUp={
-//                           isPlacing
-//                             ? undefined
-//                             : (e) => handleOverlayMouseUp(page, e)
-//                         }
-//                       />
-//                     )}
-
-//                     {/* STAMPS */}
-//                     {!isBlank &&
-//                       pageStamps.map((stamp) => {
-//                         const isActive = stamp.markId === activeMarkId;
-//                         const hasValue =
-//                           stamp.value !== null && stamp.value !== undefined;
-//                         const isDragging = dragStamp?.markId === stamp.markId;
-//                         const stampX = isDragging ? dragStamp.x : stamp.x;
-//                         const stampY = isDragging ? dragStamp.y : stamp.y;
-//                         const size = isActive ? 38 : 34;
-//                         const fontSize = isActive ? 15 : 14;
-
-//                         return (
-//                           <div
-//                             key={stamp.markId}
-//                             className={`absolute rounded-full flex items-center justify-center font-bold select-none ${
-//                               isDragging
-//                                 ? 'cursor-grabbing z-30'
-//                                 : 'pointer-events-auto cursor-pointer z-5'
-//                             }`}
-//                             style={{
-//                               width: `${size}px`,
-//                               height: `${size}px`,
-//                               border: hasValue
-//                                 ? `2px solid ${stampColor}`
-//                                 : `2px dashed ${stampColor}`,
-//                               color: hasValue ? stampColor : '#94a3b8',
-//                               fontSize: `${fontSize}px`,
-//                               backgroundColor: 'white',
-//                               top: `${stampY}%`,
-//                               left: `${stampX}%`,
-//                               transform: 'translate(-50%, -50%)',
-//                               boxShadow: isActive
-//                                 ? `0 0 0 4px ${stampRgba(0.25)}`
-//                                 : undefined,
-//                               animation: isActive
-//                                 ? `${pulseAnimationName} 1.5s ease-in-out infinite`
-//                                 : undefined,
-//                             }}
-//                             onContextMenu={
-//                               !isDragging
-//                                 ? (e) =>
-//                                     handleStampRightClick(
-//                                       e,
-//                                       stamp.markId,
-//                                       stamp.page,
-//                                       stamp.x,
-//                                       stamp.y,
-//                                     )
-//                                 : undefined
-//                             }
-//                             title={
-//                               hasValue
-//                                 ? `${stamp.markId}: ${stamp.value}`
-//                                 : `${stamp.markId}: not yet marked`
-//                             }
-//                           >
-//                             {hasValue ? stamp.value : '—'}
-//                           </div>
-//                         );
-//                       })}
-
-//                     {/* Rendered annotations */}
-//                     {!isBlank &&
-//                       pageAnnotations.map((ann) => (
-//                         <div
-//                           key={ann.id}
-//                           className="absolute z-10 pointer-events-none"
-//                           style={{ left: ann.x, top: ann.y }}
-//                         >
-//                           {ann.tool === 'tick' && (
-//                             <span
-//                               className="font-bold select-none leading-none inline-block"
-//                               style={{
-//                                 fontSize: '24px',
-//                                 color: '#27500A',
-//                                 fontFamily: 'serif',
-//                                 transform: 'translate(-6px, -12px)',
-//                               }}
-//                             >
-//                               ✓
-//                             </span>
-//                           )}
-//                           {ann.tool === 'cross' && (
-//                             <span
-//                               className="font-bold select-none leading-none inline-block"
-//                               style={{
-//                                 fontSize: '28px',
-//                                 color: '#E24B4A',
-//                                 fontFamily: 'serif',
-//                                 transform: 'translate(-7px, -14px)',
-//                               }}
-//                             >
-//                               ✗
-//                             </span>
-//                           )}
-//                           {ann.tool === 'highlight' && (
-//                             <div
-//                               className="rounded-sm"
-//                               style={{
-//                                 width: ann.width ?? 80,
-//                                 height: ann.height ?? 20,
-//                                 backgroundColor: 'rgba(250, 204, 21, 0.45)',
-//                                 transform: 'translate(-2px, -3px)',
-//                               }}
-//                             />
-//                           )}
-//                         </div>
-//                       ))}
-
-//                     {/* Content */}
-//                     <div className="px-6 py-4 min-h-[280px] relative">
-//                       {isBlank ? (
-//                         <div className="flex items-center justify-center min-h-[240px]">
-//                           <div className="text-center">
-//                             <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-amber-100 flex items-center justify-center">
-//                               <i className="ri-file-reduce-line text-amber-500 text-xl"></i>
-//                             </div>
-//                             <span className="inline-block text-xs font-semibold text-amber-600 bg-amber-50 px-3 py-1 rounded-full">
-//                               Blank Page
-//                             </span>
-//                             <p className="text-xs text-slate-400 mt-2">
-//                               This page has been marked as blank
-//                             </p>
-//                           </div>
-//                         </div>
-//                       ) : (
-//                         <div className="space-y-2.5">
-//                           {page > 1 && (
-//                             <div className="text-xs font-semibold text-slate-800 mb-3">
-//                               Answer Sheet — Page {page}
-//                             </div>
-//                           )}
-//                           {page === 1 && (
-//                             <div className="text-xs font-semibold text-slate-800 mb-3">
-//                               Answer Sheet — Page {page}
-//                             </div>
-//                           )}
-//                           {lines.map((line, idx) => (
-//                             <p
-//                               key={idx}
-//                               className="text-[13px] leading-relaxed text-slate-600"
-//                               style={{
-//                                 fontFamily: "'Caveat', cursive",
-//                                 fontSize: idx === 0 ? '15px' : '14px',
-//                               }}
-//                             >
-//                               {line}
-//                             </p>
-//                           ))}
-//                         </div>
-//                       )}
-//                     </div>
-
-//                     {/* Footer */}
-//                     <div className="px-6 py-2 border-t border-slate-100 flex items-center justify-between">
-//                       <span className="text-[10px] text-slate-400">
-//                         Roll No: 102
-//                       </span>
-//                       <span className="text-[10px] text-slate-400">
-//                         Page {page}
-//                       </span>
-//                     </div>
-//                   </div>
-//                 );
-//               })}
-
-//               {/* Bottom spacer */}
-//               <div className="h-6 shrink-0" />
-//             </div>
-//           </div>
-
-//           {/* Bottom page grid */}
-//           <div className="h-11 shrink-0 bg-[#1e293b] flex items-center justify-center gap-1 px-3 overflow-x-auto">
-//             {Array.from({ length: totalPages }, (_, i) => {
-//               const p = i + 1;
-//               const isBlankP = blankPages.has(p);
-//               let btnClass =
-//                 'w-7 h-7 rounded text-xs flex items-center justify-center cursor-pointer transition-colors whitespace-nowrap shrink-0 ';
-//               if (p === currentPage) {
-//                 btnClass += 'bg-sky-500 text-white font-semibold';
-//               } else if (isBlankP) {
-//                 btnClass += 'bg-amber-500/20 text-amber-400';
-//               } else {
-//                 btnClass += 'text-slate-400 hover:text-white hover:bg-white/10';
-//               }
-//               return (
-//                 <button
-//                   key={p}
-//                   onClick={() => scrollToPage(p)}
-//                   className={btnClass}
-//                 >
-//                   {p}
-//                 </button>
-//               );
-//             })}
-//           </div>
-//         </div>
-//       </div>
-//     );
-//   },
-// );
-
-// // ─── Helper function for static pages ───
-// function getPageLines(page: number): string[] {
-//   const answerLines: Record<number, string[]> = {
-//     1: [
-//       'Explain the working principle of a single-phase transformer with a neat diagram.',
-//       'A single-phase transformer operates on the principle of mutual induction between two coils wound on a common magnetic core.',
-//       'When an alternating voltage V₁ is applied to the primary winding, it produces an alternating flux Φ in the core.',
-//       "This flux links with the secondary winding and induces an EMF E₂ according to Faraday's law of electromagnetic induction.",
-//       'The magnitude of the induced EMF depends on the turns ratio N₂/N₁.',
-//       'For a step-down transformer, N₂ &lt; N₁, and for a step-up transformer, N₂ &gt; N₁.',
-//       'The core is made of laminated silicon steel to minimize eddy current losses.',
-//       'Hysteresis loss is minimized by using high-grade CRGO (Cold Rolled Grain Oriented) steel.',
-//       'The efficiency of a well-designed transformer typically ranges from 95% to 99%.',
-//       'Applications include power distribution, impedance matching, and electrical isolation.',
-//     ],
-//     2: [
-//       'The EMF equation of a transformer is given by:',
-//       'E = 4.44 × f × N × Φₘ × 10⁻⁸ volts',
-//       'Where: f = supply frequency in Hz',
-//       'N = number of turns in the winding',
-//       'Φₘ = maximum flux in the core in Maxwells',
-//       'This equation is fundamental to transformer design and analysis.',
-//       'For a given core cross-section A and flux density Bₘ:',
-//       'Φₘ = Bₘ × A',
-//       'Substituting: E = 4.44 × f × N × Bₘ × A × 10⁻⁸',
-//       'This shows that the induced EMF is directly proportional to frequency, turns, flux density, and core area.',
-//     ],
-//     3: [
-//       'Explain the concept of voltage regulation in transformers.',
-//       'Voltage regulation is defined as the change in secondary terminal voltage from no-load to full-load.',
-//       'It is expressed as a percentage of the full-load voltage.',
-//       'Regulation (%) = (V₂₍ₙₗ₎ - V₂₍ꜰₗ₎) / V₂₍ꜰₗ₎ × 100',
-//       'Good transformers have regulation less than 5%.',
-//       'The regulation depends on the load power factor and the equivalent impedance of the transformer.',
-//       'For leading power factor loads, the regulation can be negative (voltage rise).',
-//       'For lagging power factor loads, the regulation is always positive (voltage drop).',
-//       'The phasor diagram helps visualize the voltage drops due to resistance and leakage reactance.',
-//       'Proper design of winding geometry minimizes leakage reactance and improves regulation.',
-//     ],
-//     4: [
-//       'Discuss the various losses in a transformer and methods to minimize them.',
-//       'Transformer losses are broadly classified into two categories:',
-//       '1. Core Losses (Iron Losses): These include hysteresis loss and eddy current loss.',
-//       'Hysteresis loss: Pₕ = Kₕ × f × Bₘ¹·⁶ — minimized by using silicon steel with narrow hysteresis loop.',
-//       'Eddy current loss: Pₑ = Kₑ × f² × Bₘ² × t² — minimized by laminating the core.',
-//       '2. Copper Losses (I²R Losses): Due to resistance of windings.',
-//       'Copper loss varies with the square of the load current.',
-//       'These can be minimized by using conductors with larger cross-sectional area.',
-//       'Stray losses occur due to leakage flux linking with structural parts.',
-//       'Dielectric losses occur in insulating materials, especially at high voltages.',
-//       'Overall, transformer efficiency = Output / (Output + Total Losses) × 100%.',
-//     ],
-//   };
-
-//   const defaultLines = [
-//     "The analysis of this circuit requires applying Kirchhoff's voltage law to each loop.",
-//     'Consider the mesh currents I₁, I₂, and I₃ flowing in the clockwise direction.',
-//     'For mesh 1: 10I₁ - 4I₂ - 2I₃ = 12 volts',
-//     'For mesh 2: -4I₁ + 8I₂ - 3I₃ = 0',
-//     'For mesh 3: -2I₁ - 3I₂ + 6I₃ = -6',
-//     "Solving these simultaneous equations using Cramer's rule yields the mesh currents.",
-//     'The determinant of the coefficient matrix Δ = 10(48-9) - (-4)(-24+6) + (-2)(12-16) = 312.',
-//     'I₁ = Δ₁/Δ = 1.5 A, I₂ = 0.8 A, I₃ = 0.3 A',
-//     "The voltage across each component can now be calculated using Ohm's law.",
-//     'Power dissipated in each resistor: P = I²R watts.',
-//   ];
-
-//   return answerLines[page] || defaultLines;
-// }
-
-// export default SheetViewer;
 
 // src/pages/checker/components/SheetViewer.tsx
 import {
@@ -1222,15 +12,6 @@ import {
 import type { AnnotationTool, Annotation, MarksStamp } from "../MarkingView";
 import * as pdfjsLib from "pdfjs-dist";
 
-// if (import.meta.env.PROD) {
-//   pdfjsLib.GlobalWorkerOptions.workerSrc =
-//     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.269/pdf.worker.min.js";
-// } else {
-//   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-//     "pdfjs-dist/build/pdf.worker.min.mjs",
-//     import.meta.url,
-//   ).toString();
-// }
 
 // REPLACE with this single line:
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -1320,6 +101,7 @@ interface SheetViewerProps {
   onPageRender?: (pageNum: number, imageData: string) => void;
   pageRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   scrollToPage: (page: number) => void;
+  eraserSize?: number;
 }
 
 export interface SheetViewerHandle {
@@ -1381,6 +163,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       onPageRender,
       pageRefs,
       scrollToPage,
+      eraserSize = 20,
     },
     ref,
   ) {
@@ -1444,6 +227,9 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
     const isDrawingRef = useRef(false);
     const canvasHistoryRef = useRef<string[]>([]);
+    // Per-page pencil stroke storage (PDF mode: page N → dataURL)
+    const pageCanvasDataRef = useRef<Record<number, string>>({});
+    const prevPageRef = useRef<number>(-1);
 
     const isDraggingRef = useRef(false);
     const dragOffsetRef = useRef({ x: 0, y: 0 });
@@ -1479,15 +265,19 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
     const [pdfError, setPdfError] = useState<string | null>(null);
     const [pdfDocument, setPdfDocument] = useState<any>(null);
     const [pdfPageCount, setPdfPageCount] = useState(0);
-    const [pdfRenderedPages, setPdfRenderedPages] = useState<Set<number>>(new Set());
     const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    // Tracks which page is currently drawn on the visible canvas (viewer)
+    const canvasCurrentPageRef = useRef<number>(-1);
+    // Tracks which pages have already been captured for thumbnails
+    const thumbnailRenderedRef = useRef<Set<number>>(new Set());
 
     useEffect(() => {
       if (!pdfUrl) {
         setPdfDocument(null);
         setPdfPageCount(0);
-        setPdfRenderedPages(new Set());
         setPdfError(null);
+        canvasCurrentPageRef.current = -1;
+        thumbnailRenderedRef.current = new Set();
         return;
       }
       let cancelled = false;
@@ -1495,19 +285,18 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
         setPdfLoading(true);
         setPdfError(null);
         try {
-          // const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
           const pdf = await pdfjsLib.getDocument({
             url: pdfUrl,
             withCredentials: false,
             cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist/cmaps/',
             cMapPacked: true,
           }).promise;
-          console.log("pdfUrl===>", pdf)
           if (cancelled) return;
           setPdfDocument(pdf);
           setPdfPageCount(pdf.numPages);
           onPageCountRef.current?.(pdf.numPages);
-          setPdfRenderedPages(new Set());
+          canvasCurrentPageRef.current = -1;
+          thumbnailRenderedRef.current = new Set();
         } catch (err) {
           console.error("PDF load error:", err);
           if (!cancelled) setPdfError("Failed to load PDF. Please try reloading.");
@@ -1519,9 +308,11 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       return () => { cancelled = true; };
     }, [pdfUrl]);
 
+    // ─── Render current page into the visible canvas (viewer) ────────────────
     useEffect(() => {
       if (!pdfDocument || !pdfCanvasRef.current) return;
-      if (pdfRenderedPages.has(currentPage)) return;
+      // Skip if the canvas is already showing this exact page
+      if (canvasCurrentPageRef.current === currentPage) return;
       let cancelled = false;
       const renderPage = async () => {
         try {
@@ -1534,16 +325,51 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
           canvas.height = viewport.height;
           await page.render({ canvasContext: ctx, viewport }).promise;
           if (cancelled) return;
-          const imageData = canvas.toDataURL("image/jpeg", 0.6);
-          onPageRenderRef.current?.(currentPage, imageData);
-          setPdfRenderedPages((prev) => new Set([...prev, currentPage]));
+          canvasCurrentPageRef.current = currentPage;
+          // Also capture as thumbnail if not already done
+          if (!thumbnailRenderedRef.current.has(currentPage)) {
+            const imageData = canvas.toDataURL("image/jpeg", 0.6);
+            onPageRenderRef.current?.(currentPage, imageData);
+            thumbnailRenderedRef.current.add(currentPage);
+          }
         } catch (err) {
           console.error(`Error rendering PDF page ${currentPage}:`, err);
         }
       };
       renderPage();
       return () => { cancelled = true; };
-    }, [pdfDocument, currentPage, pdfRenderedPages]);
+    }, [pdfDocument, currentPage]);
+
+    // ─── Background-render ALL pages for thumbnails ───────────────────────────
+    useEffect(() => {
+      if (!pdfDocument || pdfPageCount === 0) return;
+      let cancelled = false;
+      const offscreenCanvas = document.createElement("canvas");
+      const renderAllPages = async () => {
+        for (let pageNum = 1; pageNum <= pdfPageCount; pageNum++) {
+          if (cancelled) return;
+          if (thumbnailRenderedRef.current.has(pageNum)) continue;
+          try {
+            const page = await pdfDocument.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 0.5 });
+            const ctx = offscreenCanvas.getContext("2d");
+            if (!ctx || cancelled) return;
+            offscreenCanvas.width = viewport.width;
+            offscreenCanvas.height = viewport.height;
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            if (cancelled) return;
+            const imageData = offscreenCanvas.toDataURL("image/jpeg", 0.5);
+            onPageRenderRef.current?.(pageNum, imageData);
+            thumbnailRenderedRef.current.add(pageNum);
+          } catch (err) {
+            console.error(`Error background-rendering PDF page ${pageNum}:`, err);
+          }
+        }
+      };
+      renderAllPages();
+      return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pdfDocument, pdfPageCount]);
 
     // ─── Highlight drag preview ──────────────────────────────────────────────
     const [highlightPreview, setHighlightPreview] = useState<{
@@ -1592,7 +418,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       },
     }), []);
 
-    useEffect(() => {
+    const setupPencilCanvas = useCallback(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
@@ -1607,6 +433,52 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       }
     }, []);
 
+    // Initialize pencil canvas for non-PDF (static) mode — canvas is in DOM at mount
+    useEffect(() => {
+      if (!pdfUrl) setupPencilCanvas();
+    }, [pdfUrl, setupPencilCanvas]);
+
+    // In PDF mode, the pencil canvas mounts after the PDF loads.
+    // After each page renders into pdfCanvasRef, resize the pencil canvas
+    // to match and (re)initialize the 2D context.
+    // We save/restore per-page stroke data so navigation doesn't lose pencil marks.
+    useEffect(() => {
+      if (!pdfDocument) return;
+      const timer = setTimeout(() => {
+        const pdfCanvas = pdfCanvasRef.current;
+        const pencilCanvas = canvasRef.current;
+        if (!pdfCanvas || !pencilCanvas) return;
+
+        // 1. Save current page's pencil content before we resize (which clears it)
+        const prev = prevPageRef.current;
+        if (prev !== -1 && prev !== currentPage) {
+          pageCanvasDataRef.current[prev] = pencilCanvas.toDataURL();
+        }
+
+        // 2. Resize pencil canvas to match the newly rendered PDF page (clears the canvas)
+        pencilCanvas.width = pdfCanvas.width;
+        pencilCanvas.height = pdfCanvas.height;
+
+        // 3. Re-initialize the 2D context (resize resets it)
+        setupPencilCanvas();
+
+        // 4. Restore this page's previously drawn strokes (if any)
+        const saved = pageCanvasDataRef.current[currentPage];
+        if (saved && ctxRef.current) {
+          const img = new Image();
+          img.onload = () => {
+            if (ctxRef.current && pencilCanvas) {
+              ctxRef.current.drawImage(img, 0, 0, pencilCanvas.width, pencilCanvas.height);
+            }
+          };
+          img.src = saved;
+        }
+
+        prevPageRef.current = currentPage;
+      }, 150); // slightly more than PDF render time
+      return () => clearTimeout(timer);
+    }, [pdfDocument, currentPage, setupPencilCanvas]);
+
     const getCanvasCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0 };
@@ -1617,20 +489,58 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       };
     }, []);
 
+    // Eraser cursor position (CSS pixels relative to canvas element)
+    const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
+
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (activeTool !== "pencil" || placingMarkId) return;
       const ctx = ctxRef.current;
       if (!ctx) return;
+
+      if (activeTool === "eraser" && !placingMarkId) {
+        const { x, y } = getCanvasCoords(e);
+        isDrawingRef.current = true;
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = eraserSize * 2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        return;
+      }
+
+      if (activeTool !== "pencil" || placingMarkId) return;
       const { x, y } = getCanvasCoords(e);
       isDrawingRef.current = true;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(x, y);
-    }, [activeTool, placingMarkId, getCanvasCoords]);
+    }, [activeTool, placingMarkId, getCanvasCoords, eraserSize]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (activeTool !== "pencil" || !isDrawingRef.current || placingMarkId) return;
+      const canvas = canvasRef.current;
       const ctx = ctxRef.current;
-      if (!ctx) return;
+
+      // Update visual eraser cursor position
+      if (activeTool === "eraser") {
+        const rect = canvas?.getBoundingClientRect();
+        if (rect) setEraserCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      } else {
+        setEraserCursor(null);
+      }
+
+      if (!isDrawingRef.current || !ctx) return;
+
+      if (activeTool === "eraser" && !placingMarkId) {
+        const { x, y } = getCanvasCoords(e);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        return;
+      }
+
+      if (activeTool !== "pencil" || placingMarkId) return;
       const { x, y } = getCanvasCoords(e);
       ctx.lineTo(x, y);
       ctx.stroke();
@@ -1642,16 +552,26 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       const history = canvasHistoryRef.current;
       if (history.length >= 20) history.shift();
       history.push(canvas.toDataURL());
-      onPencilStrokeRef.current();
+      // Only fire pencil stroke event for pencil (not eraser)
+      if (ctxRef.current?.globalCompositeOperation === "source-over") {
+        onPencilStrokeRef.current();
+      }
+      // Reset composite operation back to normal drawing
+      if (ctxRef.current) {
+        ctxRef.current.globalCompositeOperation = "source-over";
+        ctxRef.current.lineWidth = 2;
+      }
     }, []);
 
     const handleCanvasMouseUp = useCallback(() => {
-      if (activeTool !== "pencil" || !isDrawingRef.current) return;
+      if (!isDrawingRef.current) return;
+      if (activeTool !== "pencil" && activeTool !== "eraser") return;
       isDrawingRef.current = false;
       saveCanvasSnapshot();
     }, [activeTool, saveCanvasSnapshot]);
 
     const handleCanvasMouseLeave = useCallback(() => {
+      setEraserCursor(null);
       if (!isDrawingRef.current) return;
       isDrawingRef.current = false;
       saveCanvasSnapshot();
@@ -1663,7 +583,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
         if (isDraggingRef.current) {
           const activeStampId = dragStampId || stampDragIdRef.current;
           if (activeStampId) {
-            const pageEl = document.getElementById(`page-${dragPageRef.current}`);
+            const pageEl = document.getElementById(`page-${dragPageRef.current}`) || pdfCanvasRef.current?.parentElement || null;
             if (!pageEl) return;
             const rect = pageEl.getBoundingClientRect();
             let newX = ((e.clientX - rect.left - dragOffsetRef.current.x) / rect.width) * 100;
@@ -1676,7 +596,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
 
         const annotId = annotDragIdRef.current;
         if (isAnnotDraggingRef.current && annotId !== null) {
-          const pageEl = document.getElementById(`page-${annotDragPageRef.current}`);
+          const pageEl = document.getElementById(`page-${annotDragPageRef.current}`) || pdfCanvasRef.current?.parentElement || null;
           if (!pageEl) return;
           const rect = pageEl.getBoundingClientRect();
           const ann = annotationsRef.current.find((a) => a.id === annotId);
@@ -1766,6 +686,12 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
 
     // ─── Stamp interaction ───────────────────────────────────────────────────
     const handleStampMouseDown = useCallback((e: React.MouseEvent, stamp: MarksStamp) => {
+      const getPageRect = (page: number): DOMRect | null => {
+        const byId = document.getElementById(`page-${page}`);
+        if (byId) return byId.getBoundingClientRect();
+        // PDF mode: single canvas container
+        return pdfCanvasRef.current?.parentElement?.getBoundingClientRect() ?? null;
+      };
       if (activeTool === "handSelect") {
         e.preventDefault();
         e.stopPropagation();
@@ -1773,9 +699,8 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
         stampDragIdRef.current = stamp.markId;
         isDraggingRef.current = true;
         dragPageRef.current = stamp.page;
-        const pageEl = document.getElementById(`page-${stamp.page}`);
-        if (!pageEl) return;
-        const rect = pageEl.getBoundingClientRect();
+        const rect = getPageRect(stamp.page);
+        if (!rect) return;
         dragOffsetRef.current = {
           x: e.clientX - rect.left - (stamp.x / 100) * rect.width,
           y: e.clientY - rect.top - (stamp.y / 100) * rect.height,
@@ -1789,9 +714,8 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       stampDragIdRef.current = stamp.markId;
       isDraggingRef.current = true;
       dragPageRef.current = stamp.page;
-      const pageEl = document.getElementById(`page-${stamp.page}`);
-      if (!pageEl) return;
-      const rect = pageEl.getBoundingClientRect();
+      const rect = getPageRect(stamp.page);
+      if (!rect) return;
       dragOffsetRef.current = {
         x: e.clientX - rect.left - (stamp.x / 100) * rect.width,
         y: e.clientY - rect.top - (stamp.y / 100) * rect.height,
@@ -1833,7 +757,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       isAnnotDraggingRef.current = true;
       annotDragIdRef.current = ann.id;
       annotDragPageRef.current = ann.page;
-      const pageEl = document.getElementById(`page-${ann.page}`);
+      const pageEl = document.getElementById(`page-${ann.page}`) || pdfCanvasRef.current?.parentElement || null;
       if (!pageEl) return;
       const rect = pageEl.getBoundingClientRect();
       if (ann.tool === "tick" || ann.tool === "cross") {
@@ -1898,26 +822,8 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       const y = (e.clientY - rect.top) / scale;
 
       if (activeTool === "eraser") {
-        const pageAnnotations = annotations.filter((ann) => ann.page === page);
-        for (const ann of pageAnnotations) {
-          if (ann.tool === "highlight" && ann.width && ann.height) {
-            if (x >= ann.x && x <= ann.x + ann.width && y >= ann.y && y <= ann.y + ann.height) {
-              onAnnotationDelete(ann.id);
-              return;
-            }
-          }
-        }
-        for (const ann of pageAnnotations) {
-          if (ann.tool === "tick" || ann.tool === "cross") {
-            const ax = (ann.x / 100) * rect.width;
-            const ay = (ann.y / 100) * rect.height;
-            if (Math.hypot(x - ax, y - ay) < 20) {
-              onAnnotationDelete(ann.id);
-              return;
-            }
-          }
-        }
-        onEraserNoHit();
+        // Eraser now works only on the pencil canvas via canvas events.
+        // No annotation deletion on overlay click.
         return;
       }
 
@@ -2069,139 +975,188 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                 </div>
               </div>
             ) : (
-              <div className="relative w-full max-w-4xl">
-                <canvas
-                  ref={pdfCanvasRef}
-                  className="mx-auto shadow-lg rounded-lg"
-                  style={{ width: "100%", height: "auto", backgroundColor: "white", display: "block" }}
-                />
-                <div className="absolute inset-0 z-10" style={{ pointerEvents: "none" }}>
-                  <div
-                    className="absolute inset-0 z-20"
-                    style={{
-                      pointerEvents: isPlacing || activeTool !== "pencil" ? "auto" : "none",
-                      cursor: isPlacing ? "crosshair" : activeTool === "eraser" ? "not-allowed" : "crosshair",
-                    }}
-                    onClick={isPlacing ? (e) => handlePlaceClick(currentPage, e) : undefined}
-                    onMouseDown={!isPlacing ? (e) => handleOverlayMouseDown(currentPage, e) : undefined}
-                    onMouseMove={!isPlacing ? (e) => handleOverlayMouseMove(currentPage, e) : undefined}
-                    onMouseUp={!isPlacing ? (e) => handleOverlayMouseUp(currentPage, e) : undefined}
+              <div
+                style={{
+                  width: `${zoom}%`,
+                  maxWidth: `${zoom * 9}px`,
+                  margin: "0 auto",
+                  transform: `scale(${zoom / 100})`,
+                  transformOrigin: "top center",
+                  transition: "transform 0.15s ease",
+                }}
+              >
+                <div className="relative w-full" id={`page-${currentPage}`}>
+                  <canvas
+                    ref={pdfCanvasRef}
+                    className="mx-auto shadow-lg rounded-lg"
+                    style={{ width: "100%", height: "auto", backgroundColor: "white", display: "block" }}
                   />
-
-                  {highlightPreview?.page === currentPage && (
+                  {/* Pencil / eraser canvas — sits directly over the PDF canvas */}
+                  <canvas
+                    ref={canvasRef}
+                    className="absolute inset-0 w-full h-full z-10"
+                    style={{
+                      pointerEvents: (isPencilActive || activeTool === "eraser") && !isPlacing ? "auto" : "none",
+                      cursor: activeTool === "eraser" ? "none" : isPencilActive && !isPlacing ? "crosshair" : undefined,
+                    }}
+                    onMouseDown={handleCanvasMouseDown}
+                    onMouseMove={handleCanvasMouseMove}
+                    onMouseUp={handleCanvasMouseUp}
+                    onMouseLeave={handleCanvasMouseLeave}
+                  />
+                  {/* Eraser visual cursor */}
+                  {activeTool === "eraser" && eraserCursor && (
                     <div
-                      className="absolute pointer-events-none"
+                      className="absolute pointer-events-none z-30"
                       style={{
-                        left: highlightPreview.x,
-                        top: highlightPreview.y,
-                        width: highlightPreview.width,
-                        height: highlightPreview.height,
-                        backgroundColor: "rgba(255,235,59,0.4)",
-                        border: "1px dashed #D97706",
+                        left: eraserCursor.x,
+                        top: eraserCursor.y,
+                        width: eraserSize * 2,
+                        height: eraserSize * 2,
+                        borderRadius: "50%",
+                        border: "2px solid #000",
+                        backgroundColor: "rgba(255,255,255,0.15)",
+                        transform: "translate(-50%, -50%)",
+                        pointerEvents: "none",
                       }}
                     />
                   )}
+                  <div className="absolute inset-0 z-20" style={{ pointerEvents: "none" }}>
+                    <div
+                      className="absolute inset-0 z-30"
+                      style={{
+                        pointerEvents: isPlacing || (!isPencilActive && activeTool !== "eraser" && activeTool !== "handSelect") ? "auto" : "none",
+                        cursor: isPlacing ? "crosshair" : activeTool === "handSelect" ? "default" : "crosshair",
+                      }}
+                      onClick={isPlacing ? (e) => handlePlaceClick(currentPage, e) : undefined}
+                      onMouseDown={!isPlacing ? (e) => handleOverlayMouseDown(currentPage, e) : undefined}
+                      onMouseMove={!isPlacing ? (e) => handleOverlayMouseMove(currentPage, e) : undefined}
+                      onMouseUp={!isPlacing ? (e) => handleOverlayMouseUp(currentPage, e) : undefined}
+                    />
 
-                  {pageStamps.map((stamp) => {
-                    const isSelected = stamp.markId === selectedStampId;
-                    const isDragging = stamp.markId === dragStampId;
-                    const hasValue = stamp.value !== null && stamp.value !== undefined;
-                    const canvas = pdfCanvasRef.current;
-                    if (!canvas) return null;
-                    const rect = canvas.getBoundingClientRect();
-                    const xPos = (stamp.x / 100) * rect.width;
-                    const yPos = (stamp.y / 100) * rect.height;
-                    const size = isSelected ? 38 : 34;
+                    {highlightPreview?.page === currentPage && (
+                      <div
+                        className="absolute pointer-events-none"
+                        style={{
+                          left: highlightPreview.x,
+                          top: highlightPreview.y,
+                          width: highlightPreview.width,
+                          height: highlightPreview.height,
+                          backgroundColor: "rgba(255,235,59,0.4)",
+                          border: "1px dashed #D97706",
+                        }}
+                      />
+                    )}
 
-                    return (
-                      <div key={stamp.markId}>
-                        {isSelected && !isDragging && (
+                    {pageStamps.map((stamp) => {
+                      const isSelected = stamp.markId === selectedStampId;
+                      const isDragging = stamp.markId === dragStampId;
+                      const hasValue = stamp.value !== null && stamp.value !== undefined;
+                      const canvas = pdfCanvasRef.current;
+                      if (!canvas) return null;
+                      const rect = canvas.getBoundingClientRect();
+                      const xPos = (stamp.x / 100) * rect.width;
+                      const yPos = (stamp.y / 100) * rect.height;
+                      const size = isSelected ? 38 : 34;
+
+                      return (
+                        <div key={stamp.markId}>
+                          {isSelected && !isDragging && (
+                            <div
+                              className="absolute z-30 flex gap-1 p-1 rounded-lg"
+                              style={{
+                                left: xPos, top: yPos,
+                                transform: "translate(-50%, calc(-100% - 44px))",
+                                backgroundColor: "white",
+                                boxShadow: "0 2px 12px rgba(0,0,0,0.18)",
+                                pointerEvents: "auto",
+                              }}
+                            >
+                              <button
+                                className="w-7 h-7 rounded flex items-center justify-center text-xs"
+                                style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}
+                                onClick={(e) => { e.stopPropagation(); onStampRemove?.(stamp.markId); }}
+                                title="Remove stamp (Delete)"
+                              >✕</button>
+                              <button
+                                className="w-7 h-7 rounded flex items-center justify-center text-xs"
+                                style={{ backgroundColor: "#DBEAFE", color: "#1D4ED8" }}
+                                onClick={(e) => { e.stopPropagation(); onStampDoubleClick?.(stamp.markId); }}
+                                title="Reposition"
+                              >⤢</button>
+                            </div>
+                          )}
                           <div
-                            className="absolute z-30 flex gap-1 p-1 rounded-lg"
+                            className="absolute rounded-full flex items-center justify-center font-bold select-none cursor-pointer z-25"
                             style={{
-                              left: xPos, top: yPos,
-                              transform: "translate(-50%, calc(-100% - 44px))",
+                              width: size, height: size,
+                              border: hasValue ? `2px solid ${stampColor}` : `2px dashed ${stampColor}`,
+                              color: hasValue ? stampColor : "#94a3b8",
+                              fontSize: isSelected ? 15 : 14,
                               backgroundColor: "white",
-                              boxShadow: "0 2px 12px rgba(0,0,0,0.18)",
+                              top: yPos - size / 2,
+                              left: xPos - size / 2,
+                              opacity: isDragging ? 0.6 : 1,
+                              boxShadow: isSelected ? `0 0 0 4px ${stampRgba(0.3)}` : undefined,
+                              animation: isSelected ? `${pulseAnimationName} 1.5s ease-in-out infinite` : undefined,
                               pointerEvents: "auto",
                             }}
+                            onClick={(e) => handleStampClick(e, stamp)}
+                            onDoubleClick={(e) => handleStampDoubleClick(e, stamp)}
+                            onMouseDown={(e) => handleStampMouseDown(e, stamp)}
+                            onContextMenu={(e) => handleStampRightClick(e, stamp)}
+                            title={hasValue ? `${stamp.markId}: ${stamp.value}` : `${stamp.markId}: not marked`}
                           >
-                            <button
-                              className="w-7 h-7 rounded flex items-center justify-center text-xs"
-                              style={{ backgroundColor: "#FEE2E2", color: "#991B1B" }}
-                              onClick={(e) => { e.stopPropagation(); onStampRemove?.(stamp.markId); }}
-                              title="Remove stamp (Delete)"
-                            >✕</button>
-                            <button
-                              className="w-7 h-7 rounded flex items-center justify-center text-xs"
-                              style={{ backgroundColor: "#DBEAFE", color: "#1D4ED8" }}
-                              onClick={(e) => { e.stopPropagation(); onStampDoubleClick?.(stamp.markId); }}
-                              title="Reposition"
-                            >⤢</button>
+                            {hasValue ? stamp.value : "—"}
                           </div>
-                        )}
-                        <div
-                          className="absolute rounded-full flex items-center justify-center font-bold select-none cursor-pointer z-25"
-                          style={{
-                            width: size, height: size,
-                            border: hasValue ? `2px solid ${stampColor}` : `2px dashed ${stampColor}`,
-                            color: hasValue ? stampColor : "#94a3b8",
-                            fontSize: isSelected ? 15 : 14,
-                            backgroundColor: "white",
-                            top: yPos - size / 2,
-                            left: xPos - size / 2,
-                            opacity: isDragging ? 0.6 : 1,
-                            boxShadow: isSelected ? `0 0 0 4px ${stampRgba(0.3)}` : undefined,
-                            animation: isSelected ? `${pulseAnimationName} 1.5s ease-in-out infinite` : undefined,
-                            pointerEvents: "auto",
-                          }}
-                          onClick={(e) => handleStampClick(e, stamp)}
-                          onDoubleClick={(e) => handleStampDoubleClick(e, stamp)}
-                          onMouseDown={(e) => handleStampMouseDown(e, stamp)}
-                          onContextMenu={(e) => handleStampRightClick(e, stamp)}
-                          title={hasValue ? `${stamp.markId}: ${stamp.value}` : `${stamp.markId}: not marked`}
-                        >
-                          {hasValue ? stamp.value : "—"}
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
 
-                  {annotations.filter((ann) => ann.page === currentPage).map((ann) => {
-                    const canvas = pdfCanvasRef.current;
-                    if (!canvas) return null;
-                    const rect = canvas.getBoundingClientRect();
-                    const scaleX = rect.width / canvas.width;
-                    const scaleY = rect.height / canvas.height;
-                    const isTickCross = ann.tool === "tick" || ann.tool === "cross";
+                    {annotations.filter((ann) => ann.page === currentPage).map((ann) => {
+                      const canvas = pdfCanvasRef.current;
+                      if (!canvas) return null;
+                      const rect = canvas.getBoundingClientRect();
+                      const scaleX = rect.width / canvas.width;
+                      const scaleY = rect.height / canvas.height;
+                      const isTickCross = ann.tool === "tick" || ann.tool === "cross";
+                      const isAnnotSelected = ann.id === selectedAnnotationId;
 
-                    return (
-                      <div
-                        key={ann.id}
-                        className="absolute z-10 pointer-events-none"
-                        style={isTickCross
-                          ? { top: `${ann.y}%`, left: `${ann.x}%`, transform: "translate(-50%,-50%)" }
-                          : { left: ann.x * scaleX, top: ann.y * scaleY }}
-                      >
-                        {ann.tool === "tick" && (
-                          <span style={{ fontSize: `${28 * scaleX}px`, color: "#166534", fontFamily: "serif", lineHeight: 1 }}>✓</span>
-                        )}
-                        {ann.tool === "cross" && (
-                          <span style={{ fontSize: `${28 * scaleX}px`, color: "#DC2626", fontFamily: "serif", lineHeight: 1 }}>✗</span>
-                        )}
-                        {ann.tool === "highlight" && (
-                          <div
-                            className="rounded-sm"
-                            style={{
-                              width: (ann.width ?? 80) * scaleX,
-                              height: (ann.height ?? 20) * scaleY,
-                              backgroundColor: "rgba(250,204,21,0.45)",
-                            }}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
+                      return (
+                        <div
+                          key={ann.id}
+                          className={`absolute z-10 ${activeTool === "handSelect" ? "cursor-pointer z-25" : "pointer-events-none"}`}
+                          onMouseDown={(e) => handleAnnotationMouseDown(e, ann)}
+                          onClick={(e) => handleAnnotationClick(e, ann)}
+                          onContextMenu={(e) => handleAnnotationRightClick(e, ann)}
+                          style={isTickCross
+                            ? { top: `${ann.y}%`, left: `${ann.x}%`, transform: "translate(-50%,-50%)", userSelect: "none", pointerEvents: activeTool === "handSelect" ? "auto" : "none" }
+                            : { left: ann.x * scaleX, top: ann.y * scaleY, pointerEvents: activeTool === "handSelect" ? "auto" : "none" }}
+                        >
+                          {ann.tool === "tick" && (
+                            <div className="relative" style={{ borderRadius: "4px", boxShadow: isAnnotSelected ? "0 0 0 3px #93C5FD" : undefined }}>
+                              <span style={{ fontSize: `${28 * scaleX}px`, color: "#166534", fontFamily: "serif", lineHeight: 1, display: "inline-block" }}>✓</span>
+                            </div>
+                          )}
+                          {ann.tool === "cross" && (
+                            <div className="relative" style={{ borderRadius: "4px", boxShadow: isAnnotSelected ? "0 0 0 3px #93C5FD" : undefined }}>
+                              <span style={{ fontSize: `${28 * scaleX}px`, color: "#DC2626", fontFamily: "serif", lineHeight: 1, display: "inline-block" }}>✗</span>
+                            </div>
+                          )}
+                          {ann.tool === "highlight" && (
+                            <div
+                              className="rounded-sm"
+                              style={{
+                                width: (ann.width ?? 80) * scaleX,
+                                height: (ann.height ?? 20) * scaleY,
+                                backgroundColor: "rgba(250,204,21,0.45)",
+                              }}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             )}
@@ -2306,6 +1261,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                     {showOverlay && (
                       <div
                         className={`absolute inset-0 z-20 ${cursorClass}`}
+                        style={{ pointerEvents: isPlacing || (!isPencilActive && activeTool !== "handSelect") ? "auto" : "none" }}
                         onClick={isPlacing ? (e) => handlePlaceClick(page, e) : undefined}
                         onMouseDown={!isPlacing ? (e) => handleOverlayMouseDown(page, e) : undefined}
                         onMouseMove={!isPlacing ? (e) => handleOverlayMouseMove(page, e) : undefined}
