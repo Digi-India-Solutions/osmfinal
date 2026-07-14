@@ -3,6 +3,7 @@ import axiosInstance from './axios';
 
 export interface CreateUserData {
   name: string;
+  otp:number;
   email: string;
   password: string;
   role: 'admin' | 'teacher' | 'checker' | 'teacher_checker' | 'rechecking';
@@ -57,6 +58,16 @@ export const userApi = {
   // Delete/Deactivate user - matches route: DELETE /api/v1/auth/users/:id
   deleteUser: async (id: string) => {
     const response = await axiosInstance.delete(`/api/v1/auth/users/${id}`);
+    return response.data;
+  },
+  // api/users.ts mein add karo
+  sendOtp: async (email: string) => {
+    const response = await axiosInstance.post('/api/v1/auth/send-otp', { email });
+    return response.data;
+  },
+
+  verifyOtp: async (email: string, otp: string) => {
+    const response = await axiosInstance.post('/api/v1/auth/verify-otp', { email, otp });
     return response.data;
   },
 };
