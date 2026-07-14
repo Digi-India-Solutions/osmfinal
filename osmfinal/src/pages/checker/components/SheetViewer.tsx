@@ -948,7 +948,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       const pageStamps = stampsByPage[currentPage] || [];
 
       return (
-        <div className="flex-1 flex flex-col bg-[#0f172a] min-w-0">
+        <div className="flex-1 flex flex-col bg-[#0f172a] min-w-0 min-h-0">
           <InstructionBanner />
 
           <div className="flex-1 overflow-y-auto flex justify-center p-4" ref={scrollContainerRef}>
@@ -979,19 +979,23 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                 style={{
                   width: `${zoom}%`,
                   maxWidth: `${zoom * 9}px`,
-                  margin: "0 auto",
+                  margin: blankPages.has(currentPage) ? "auto" : "0 auto",
                   transform: `scale(${zoom / 100})`,
                   transformOrigin: "top center",
-                  transition: "transform 0.15s ease",
+                  transition: "transform 0.15s ease, margin 0.3s ease",
                 }}
               >
-                <div className="relative w-full" id={`page-${currentPage}`}>
+                <div
+                  className={`relative w-full transition-all duration-300 ${
+                    blankPages.has(currentPage) ? 'aspect-[1.414/1] overflow-hidden' : ''
+                  }`}
+                  id={`page-${currentPage}`}
+                >
                   <canvas
                     ref={pdfCanvasRef}
                     className="mx-auto shadow-lg rounded-lg"
                     style={{ width: "100%", height: "auto", backgroundColor: "white", display: "block" }}
                   />
-                  {/* Pencil / eraser canvas — sits directly over the PDF canvas */}
                   <canvas
                     ref={canvasRef}
                     className="absolute inset-0 w-full h-full z-10"
@@ -1004,6 +1008,20 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                     onMouseUp={handleCanvasMouseUp}
                     onMouseLeave={handleCanvasMouseLeave}
                   />
+
+                  {blankPages.has(currentPage) && (
+                    <div className="absolute inset-0 z-50 bg-white flex items-center justify-center rounded-lg shadow-sm">
+                      <div className="text-center">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-50 flex items-center justify-center">
+                          <i className="ri-file-reduce-line text-amber-400 text-3xl" />
+                        </div>
+                        <span className="text-sm font-semibold text-amber-600 bg-amber-50/50 border border-amber-200/50 px-4 py-1.5 rounded-full">
+                          Blank Page
+                        </span>
+                        <p className="text-sm text-slate-400 mt-4">This page has been marked as blank</p>
+                      </div>
+                    </div>
+                  )}
                   {/* Eraser visual cursor */}
                   {activeTool === "eraser" && eraserCursor && (
                     <div
@@ -1161,37 +1179,13 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
               </div>
             )}
           </div>
-
-          <div className="h-11 shrink-0 bg-[#1e293b] flex items-center justify-center gap-3 px-3">
-            {pdfPageCount > 0 && (
-              <>
-                <button
-                  onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-                  disabled={currentPage <= 1}
-                  className="px-3 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  <i className="ri-arrow-left-s-line mr-1" />Prev
-                </button>
-                <span className="text-xs text-slate-400 tabular-nums">
-                  Page <span className="text-white font-medium">{currentPage}</span> of {pdfPageCount}
-                </span>
-                <button
-                  onClick={() => onPageChange(Math.min(pdfPageCount, currentPage + 1))}
-                  disabled={currentPage >= pdfPageCount}
-                  className="px-3 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  Next<i className="ri-arrow-right-s-line ml-1" />
-                </button>
-              </>
-            )}
-          </div>
         </div>
       );
     }
 
     // ─── STATIC PAGES MODE (no PDF) ─────────────────────────────────────────
     return (
-      <div className="flex-1 flex flex-col bg-slate-200 min-w-0">
+      <div className="flex-1 flex flex-col bg-slate-200 min-w-0 min-h-0">
         <InstructionBanner />
 
         <div className="flex-1 overflow-y-auto">
@@ -1255,7 +1249,9 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                     id={`page-${page}`}
                     ref={(el) => { pageRefs.current[page] = el; }}
                     data-page={page}
-                    className="relative bg-white shadow-sm rounded-sm shrink-0"
+                    className={`relative bg-white shadow-sm rounded-sm shrink-0 transition-all duration-300 ${
+                      isBlank ? 'aspect-[1.414/1] overflow-hidden' : ''
+                    }`}
                     style={{ width: "720px" }}
                   >
                     {showOverlay && (
@@ -1441,27 +1437,6 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
 
               <div className="h-6 shrink-0" />
             </div>
-          </div>
-
-          <div className="h-11 shrink-0 bg-[#1e293b] flex items-center justify-center gap-1 px-3 overflow-x-auto">
-            {Array.from({ length: totalPages }, (_, i) => {
-              const p = i + 1;
-              const isBlankP = blankPages.has(p);
-              return (
-                <button
-                  key={p}
-                  onClick={() => scrollToPage(p)}
-                  className={`w-7 h-7 rounded text-xs flex items-center justify-center cursor-pointer transition-colors whitespace-nowrap shrink-0 ${p === currentPage
-                    ? "bg-sky-500 text-white font-semibold"
-                    : isBlankP
-                      ? "bg-amber-500/20 text-amber-400"
-                      : "text-slate-400 hover:text-white hover:bg-white/10"
-                    }`}
-                >
-                  {p}
-                </button>
-              );
-            })}
           </div>
         </div>
       </div>

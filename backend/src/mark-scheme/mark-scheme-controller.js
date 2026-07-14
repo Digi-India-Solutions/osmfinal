@@ -81,6 +81,17 @@ export const saveMarkScheme = async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    // Fetch existing PDFs to retain if new ones are not provided
+    const { rows: existingRows } = await client.query(
+      'SELECT model_answer_pdf, question_paper_pdf FROM mark_schemes WHERE "examId" = $1 LIMIT 1',
+      [examId]
+    );
+    const existingModelAnswer = existingRows.length > 0 ? existingRows[0].model_answer_pdf : null;
+    const existingQuestionPaper = existingRows.length > 0 ? existingRows[0].question_paper_pdf : null;
+
+    modelAnswerPdf = modelAnswerPdf || existingModelAnswer;
+    questionPaperPdf = questionPaperPdf || existingQuestionPaper;
+
     // Delete existing mark schemes
     await client.query('DELETE FROM mark_schemes WHERE "examId" = $1', [
       examId,
