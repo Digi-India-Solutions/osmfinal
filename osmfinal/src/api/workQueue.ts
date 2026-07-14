@@ -1,5 +1,3 @@
-// src/api/workQueue.ts
-
 import api from './axios';
 
 export interface Sheet {
@@ -20,8 +18,10 @@ export interface Sheet {
     | 'checked'
     | 'recheck'
     | 'rechecked'
-    | 'escalated';
+    | 'escalated'
+    | 'linked';
   marks: string;
+  total_marks?: number; // ✅ Added: Total marks from exam
   uploaded_by: string;
   created_at: string;
   updated_at: string;
@@ -30,7 +30,8 @@ export interface Sheet {
   uploaded_by_name: string;
   pending_recheck_count: string;
   assigned_to_name?: string;
-  // ✅ Escalation fields
+  assigned_to?: string;
+  // Escalation fields
   escalate_reason?: string;
   escalate_type?: string;
   escalate_remarks?: string;
@@ -44,6 +45,8 @@ export interface RecheckUser {
   name: string;
   email: string;
   subject: string | null;
+  role?: string;
+  pending_count?: number;
 }
 
 export interface RecheckRequest {
@@ -74,7 +77,7 @@ export interface SheetStats {
   checking: number;
   rechecking: number;
   completed: number;
-  escalated: number; // ✅ Added
+  escalated: number;
 }
 
 export interface SheetsResponse {
@@ -120,7 +123,7 @@ class WorkQueueService {
             checking: 0,
             rechecking: 0,
             completed: 0,
-            escalated: 0, // ✅ Added
+            escalated: 0,
           },
         },
       };
@@ -244,6 +247,72 @@ class WorkQueueService {
         success: false,
         message:
           error.response?.data?.message || 'Failed to update recheck request',
+      };
+    }
+  }
+
+  // Reassign single sheet
+  async reassignRecheck(
+    sheetId: number,
+    data: { assignTo: string },
+  ): Promise<any> {
+    try {
+      const response = await api.post(
+        `/api/v1/work-queue/recheck/${sheetId}/reassign`,
+        data,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Reassign recheck error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to reassign',
+      };
+    }
+  }
+
+  // Reassign multiple sheets (bulk)
+  async reassignBulkRecheck(data: {
+    assignTo: string;
+    sheetIds: number[];
+  }): Promise<any> {
+    try {
+      const response = await api.post(
+        '/api/v1/work-queue/recheck/bulk/reassign',
+        {
+          assignTo: data.assignTo,
+          sheetIds: data.sheetIds,
+        },
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Bulk reassign error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to reassign',
+      };
+    }
+  }
+
+  // Get available recheckers using query parameter
+  async getAvailableRecheckers(excludeId?: string): Promise<{
+    success: boolean;
+    data: RecheckUser[];
+    message: string;
+  }> {
+    try {
+      const url = excludeId
+        ? `/api/v1/work-queue/recheckers/available?excludeId=${excludeId}`
+        : '/api/v1/work-queue/recheckers/available';
+      const response = await api.get(url);
+      return response.data;
+    } catch (error: any) {
+      console.error('Get available recheckers error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get available recheckers',
+        data: [],
       };
     }
   }

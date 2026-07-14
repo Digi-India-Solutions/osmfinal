@@ -27,7 +27,6 @@ export const getSheets = async (req, res) => {
       paramCount++;
     }
 
-    // ✅ IMPORTANT: Only add status condition if status is provided AND not empty
     if (status && status.trim() !== '') {
       const statuses = status.split(',');
       const placeholders = statuses
@@ -37,8 +36,7 @@ export const getSheets = async (req, res) => {
       params.push(...statuses);
       paramCount += statuses.length;
     } else {
-      // ✅ If no status filter, exclude 'uploaded', 'assigned', 'unlinked'
-      conditions.push(`s.status NOT IN ('uploaded', 'assigned', 'unlinked')`);
+      conditions.push(`s.status NOT IN ('unlinked')`);
     }
 
     if (search) {
@@ -83,6 +81,7 @@ export const getSheets = async (req, res) => {
         ) AS time_spent,
         e.name AS exam_name,
         e.subject AS exam_subject,
+        e."maxMarks" AS total_marks,  -- ✅ YAHI SE AAYEGA TOTAL MARKS
         u.name AS uploaded_by_name,
         assigned_user.name AS assigned_to_name,
         (
@@ -116,7 +115,7 @@ export const getSheets = async (req, res) => {
     let statsQuery = `
       SELECT 
         COUNT(*) AS all_count,
-        COUNT(*) FILTER (WHERE s.status IN ('linked')) AS pending_count,
+        COUNT(*) FILTER (WHERE s.status IN ('linked', 'uploaded', 'assigned')) AS pending_count,
         COUNT(*) FILTER (WHERE s.status = 'checking') AS checking_count,
         COUNT(*) FILTER (WHERE s.status = 'recheck') AS rechecking_count,
         COUNT(*) FILTER (WHERE s.status IN ('checked', 'rechecked')) AS completed_count,
@@ -154,6 +153,186 @@ export const getSheets = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get sheets',
+      error: error.message,
+    });
+  }
+};
+
+// ─── REASSIGN RECHECK REQUESTS ──────────────────────────────────
+
+// Add these at the end of your workController.js file
+
+// ─── REASSIGN RECHECK REQUESTS ──────────────────────────────────
+
+export const reassignRecheckRequests = async (req, res) => {
+  try {
+    const { sheetId } = req.params;
+    const { assignTo, sheetIds } = req.body;
+    const userId = req.user.id;
+
+    // Validation
+    if (!assignTo) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please select an evaluator to reassign',
+      });
+    }
+
+    // Check if rechecker exists and is active
+    const recheckerResult = await pool.query(
+      `SELECT id, name, email, role FROM users 
+       WHERE id = $1 AND role = 'rechecking' AND is_active = true`,
+      [assignTo],
+    );
+
+    if (recheckerResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid recheck evaluator selected. User must have "rechecking" role.',
+      });
+    }
+
+    const rechecker = recheckerResult.rows[0];
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      let processedSheetIds = [];
+
+      // Handle single or bulk reassign
+      if (sheetId === 'bulk' && sheetIds && Array.isArray(sheetIds)) {
+        processedSheetIds = sheetIds;
+      } else if (sheetId !== 'bulk') {
+        processedSheetIds = [parseInt(sheetId)];
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid request: sheetIds required for bulk reassign',
+        });
+      }
+
+      let reassignedCount = 0;
+      const errors = [];
+
+      for (const id of processedSheetIds) {
+        try {
+          // Check if sheet exists and has pending recheck
+          const sheetCheck = await client.query(
+            `SELECT s.id, s.status, rr.id as recheck_id, rr.status as recheck_status, rr.assign_to as current_rechecker
+             FROM sheets s
+             INNER JOIN recheck_requests rr ON s.id = rr.sheet_id
+             WHERE s.id = $1 
+               AND rr.status = 'pending'
+               AND s.status = 'recheck'`,
+            [id],
+          );
+
+          if (sheetCheck.rows.length === 0) {
+            errors.push({
+              sheetId: id,
+              error: 'Sheet not found or no pending recheck request',
+            });
+            continue;
+          }
+
+          const sheet = sheetCheck.rows[0];
+
+          // Update recheck request to reassign
+          await client.query(
+            `UPDATE recheck_requests 
+             SET assign_to = $1, 
+                 reassigned_by = $2,
+                 reassigned_at = NOW(),
+                 updated_at = NOW()
+             WHERE id = $3 AND status = 'pending'`,
+            [assignTo, userId, sheet.recheck_id],
+          );
+
+          // Update sheet's assigned_to to new rechecker
+          await client.query(
+            `UPDATE sheets 
+             SET assigned_to = $1, updated_at = NOW()
+             WHERE id = $2`,
+            [assignTo, id],
+          );
+
+          reassignedCount++;
+        } catch (err) {
+          console.error(`Error reassigning sheet ${id}:`, err);
+          errors.push({ sheetId: id, error: err.message });
+        }
+      }
+
+      await client.query('COMMIT');
+
+      return res.status(200).json({
+        success: true,
+        message: `${reassignedCount} sheet(s) reassigned successfully to ${rechecker.name}`,
+        data: {
+          reassigned: reassignedCount,
+          errors: errors,
+          assignTo: {
+            id: rechecker.id,
+            name: rechecker.name,
+            role: rechecker.role,
+          },
+          processedSheetIds: processedSheetIds,
+        },
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('reassignRecheckRequests error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to reassign recheck requests',
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET AVAILABLE RECHECKERS (excluding current) ──────────────
+
+// ─── GET AVAILABLE RECHECKERS (excluding current) ──────────────
+
+export const getAvailableRecheckers = async (req, res) => {
+  try {
+    // Handle both routes: with or without excludeId
+    const excludeId = req.params.excludeId || req.query.excludeId || null;
+
+    let query = `
+      SELECT u.id, u.name, u.email, u.subject, u.role,
+        COUNT(DISTINCT rr.id) as pending_count
+      FROM users u
+      LEFT JOIN recheck_requests rr ON u.id = rr.assign_to AND rr.status = 'pending'
+      WHERE u.role = 'rechecking' AND u.is_active = true
+    `;
+    
+    const params = [];
+    if (excludeId) {
+      query += ` AND u.id != $1`;
+      params.push(excludeId);
+    }
+    
+    query += ` GROUP BY u.id ORDER BY pending_count ASC, u.name ASC`;
+
+    const { rows } = await pool.query(query, params);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Available recheckers retrieved successfully',
+      data: rows,
+    });
+  } catch (error) {
+    console.error('getAvailableRecheckers error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get available recheckers',
       error: error.message,
     });
   }

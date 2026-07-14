@@ -1,5 +1,3 @@
-// src/pages/admin/WorkQueue.tsx
-
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import Breadcrumb from '@/components/ui/Breadcrumb';
 import StatusBadge from '@/components/ui/StatusBadge';
@@ -26,7 +24,7 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: 'escalated', label: 'Escalated' },
 ];
 
-// ✅ Format time spent in seconds to MM:SS or HH:MM:SS
+// Format time spent in seconds to MM:SS or HH:MM:SS
 function formatTimeSpent(seconds: number | null | undefined): string {
   if (!seconds || seconds === 0) return '—';
 
@@ -85,6 +83,26 @@ export default function WorkQueue() {
     type: 'success' | 'error';
   } | null>(null);
 
+  // States for reassign
+  const [reassignModal, setReassignModal] = useState<{
+    open: boolean;
+    sheetId: number | null;
+    currentRecheckerId: string | null;
+    sheetIds?: number[];
+  }>({
+    open: false,
+    sheetId: null,
+    currentRecheckerId: null,
+  });
+  const [selectedReassigner, setSelectedReassigner] = useState<string>('');
+  const [availableRecheckers, setAvailableRecheckers] = useState<RecheckUser[]>(
+    [],
+  );
+  const [reassignLoading, setReassignLoading] = useState(false);
+  const [reassignError, setReassignError] = useState('');
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedSheetIds, setSelectedSheetIds] = useState<number[]>([]);
+
   const showToast = (
     message: string,
     type: 'success' | 'error' = 'success',
@@ -118,8 +136,6 @@ export default function WorkQueue() {
 
   // ─── FETCH SHEETS ────────────────────────────────────────────
 
-  // src/pages/admin/WorkQueue.tsx - fetchSheets
-
   const fetchSheets = useCallback(async () => {
     setSheetsLoading(true);
     try {
@@ -128,10 +144,9 @@ export default function WorkQueue() {
       if (filterExam) params.examId = filterExam;
       if (searchName) params.search = searchName;
 
-      // ✅ Always send status filter (never empty)
       if (activeTab !== 'all') {
         const statusMap: Record<Exclude<TabKey, 'all'>, string> = {
-          pending: 'linked',
+          pending: 'linked,uploaded,assigned',
           checking: 'checking',
           rechecking: 'recheck',
           completed: 'checked,rechecked',
@@ -139,8 +154,8 @@ export default function WorkQueue() {
         };
         params.status = statusMap[activeTab as Exclude<TabKey, 'all'>];
       } else {
-        // ✅ For 'all' tab, send statuses we want (exclude uploaded/assigned/unlinked)
-        params.status = 'checking,recheck,escalated,linked,checked,rechecked';
+        params.status =
+          'checking,recheck,escalated,linked,uploaded,assigned,checked,rechecked';
       }
 
       const response = await workQueueService.getSheets(params);
@@ -148,12 +163,8 @@ export default function WorkQueue() {
       if (response.success) {
         let filteredSheets = response.data.items || [];
 
-        // ✅ Double filter: Remove 'assigned', 'uploaded', and 'unlinked'
         filteredSheets = filteredSheets.filter(
-          (sheet: Sheet) =>
-            sheet.status !== 'assigned' &&
-            sheet.status !== 'uploaded' &&
-            sheet.status !== 'unlinked',
+          (sheet: Sheet) => sheet.status !== 'unlinked',
         );
 
         setSheets(filteredSheets);
@@ -172,7 +183,7 @@ export default function WorkQueue() {
         showToast(response.message || 'Failed to load sheets', 'error');
       }
     } catch (error) {
-      console.error('❌ Fetch sheets error:', error);
+      console.error('Fetch sheets error:', error);
       showToast('Failed to load sheets', 'error');
     } finally {
       setSheetsLoading(false);
@@ -198,6 +209,21 @@ export default function WorkQueue() {
       setRecheckersLoading(false);
     }
   }, []);
+
+  // ─── FETCH AVAILABLE RECHECKERS ─────────────────────────────
+
+  const fetchAvailableRecheckers = async (excludeId: string | null) => {
+    try {
+      const response = await workQueueService.getAvailableRecheckers(
+        excludeId || undefined,
+      );
+      if (response.success) {
+        setAvailableRecheckers(response.data || []);
+      }
+    } catch (error) {
+      console.error('Fetch available recheckers error:', error);
+    }
+  };
 
   // ─── OPEN FLAG MODAL ────────────────────────────────────────
 
@@ -245,6 +271,7 @@ export default function WorkQueue() {
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 3000);
         setFlagModal({ open: false, sheetId: null });
+        setSelectedSheetIds([]);
         await fetchSheets();
       } else {
         showToast(response.message || 'Failed to flag for recheck', 'error');
@@ -254,6 +281,104 @@ export default function WorkQueue() {
       showToast(error.message || 'Failed to flag for recheck', 'error');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // ─── OPEN REASSIGN MODAL ─────────────────────────────────────
+
+  const openReassignModal = (
+    sheetId: number,
+    currentRecheckerId: string | null,
+  ) => {
+    setReassignModal({
+      open: true,
+      sheetId,
+      currentRecheckerId,
+    });
+    setIsBulkMode(false);
+    setSelectedReassigner('');
+    setReassignError('');
+    fetchAvailableRecheckers(currentRecheckerId);
+  };
+
+  // ─── OPEN BULK REASSIGN MODAL ──────────────────────────────
+
+  const openBulkReassignModal = (
+    sheetIds: number[],
+    currentRecheckerId: string | null,
+  ) => {
+    if (sheetIds.length === 0) {
+      showToast('Please select at least one sheet', 'error');
+      return;
+    }
+    setReassignModal({
+      open: true,
+      sheetId: null,
+      currentRecheckerId,
+      sheetIds,
+    });
+    setIsBulkMode(true);
+    setSelectedReassigner('');
+    setReassignError('');
+    fetchAvailableRecheckers(currentRecheckerId);
+  };
+
+  // ─── HANDLE REASSIGN SUBMIT ─────────────────────────────────
+
+  const handleReassignSubmit = async () => {
+    setReassignError('');
+
+    if (!selectedReassigner) {
+      setReassignError('Please select a rechecker');
+      return;
+    }
+
+    if (!reassignModal.sheetId && !isBulkMode) {
+      setReassignError('Invalid request');
+      return;
+    }
+
+    setReassignLoading(true);
+    try {
+      let response;
+      if (
+        isBulkMode &&
+        reassignModal.sheetIds &&
+        reassignModal.sheetIds.length > 0
+      ) {
+        response = await workQueueService.reassignBulkRecheck({
+          assignTo: selectedReassigner,
+          sheetIds: reassignModal.sheetIds,
+        });
+      } else if (reassignModal.sheetId) {
+        response = await workQueueService.reassignRecheck(
+          reassignModal.sheetId,
+          {
+            assignTo: selectedReassigner,
+          },
+        );
+      }
+
+      if (response?.success) {
+        setSuccessMessage(response.message || 'Reassigned successfully');
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
+        setReassignModal({
+          open: false,
+          sheetId: null,
+          currentRecheckerId: null,
+        });
+        setIsBulkMode(false);
+        setSelectedSheetIds([]);
+        await fetchSheets();
+      } else {
+        showToast(response?.message || 'Failed to reassign', 'error');
+      }
+    } catch (error: any) {
+      console.error('Reassign error:', error);
+      showToast(error.message || 'Failed to reassign', 'error');
+    } finally {
+      setReassignLoading(false);
     }
   };
 
@@ -281,6 +406,28 @@ export default function WorkQueue() {
     if (sheet.escalate_type === 'double_answer') return 'Double answer';
     if (sheet.escalate_type === 'other') return 'Other';
     return sheet.escalate_reason || 'Escalated';
+  };
+
+  // ─── HANDLE SELECT ALL ──────────────────────────────────────
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedSheetIds(sheets.map((s) => s.id));
+    } else {
+      setSelectedSheetIds([]);
+    }
+  };
+
+  // ─── CALCULATE PERCENTAGE ───────────────────────────────────
+
+  const calculatePercentage = (
+    marks: string,
+    totalMarks: number,
+  ): number | null => {
+    if (!marks || !totalMarks) return null;
+    const obtained = parseFloat(marks);
+    if (isNaN(obtained) || obtained === 0) return null;
+    return (obtained / totalMarks) * 100;
   };
 
   // ─── LOADING ──────────────────────────────────────────────────
@@ -334,7 +481,10 @@ export default function WorkQueue() {
             {tabs.map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => {
+                  setActiveTab(tab.key);
+                  setSelectedSheetIds([]);
+                }}
                 className={`relative px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   activeTab === tab.key
                     ? 'bg-white text-gray-900 shadow-sm'
@@ -380,6 +530,48 @@ export default function WorkQueue() {
       </div>
 
       <div className="bg-white rounded-2xl overflow-hidden">
+        {/* Bulk Actions Bar - ONLY in pending tab */}
+        {activeTab === 'pending' && selectedSheetIds.length > 0 && (
+          <div className="flex items-center justify-between p-4 bg-amber-50 border-b border-amber-200">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-amber-700">
+                <i className="ri-checkbox-multiple-line mr-1"></i>
+                {selectedSheetIds.length} sheet(s) selected
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const firstSheet = sheets.find(
+                    (s) => s.id === selectedSheetIds[0],
+                  );
+                  if (firstSheet && firstSheet.assigned_to) {
+                    openBulkReassignModal(
+                      selectedSheetIds,
+                      firstSheet.assigned_to || null,
+                    );
+                  } else {
+                    showToast(
+                      'Selected sheets must be assigned first',
+                      'error',
+                    );
+                  }
+                }}
+                className="text-sm font-medium px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors cursor-pointer flex items-center gap-1"
+              >
+                <i className="ri-exchange-line"></i>
+                Reassign Selected
+              </button>
+              <button
+                onClick={() => setSelectedSheetIds([])}
+                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           {sheetsLoading ? (
             <div className="py-12 text-center">
@@ -396,6 +588,21 @@ export default function WorkQueue() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50">
+                  {/* Checkbox column - ONLY in pending tab */}
+                  {activeTab === 'pending' && (
+                    <th className="text-left py-3 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={
+                          sheets.length > 0 &&
+                          selectedSheetIds.length === sheets.length
+                        }
+                        onChange={(e) => handleSelectAll(e.target.checked)}
+                        className="rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
+                        title="Select all sheets"
+                      />
+                    </th>
+                  )}
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Sheet ID
                   </th>
@@ -419,6 +626,12 @@ export default function WorkQueue() {
                       Escalation Reason
                     </th>
                   )}
+                  {/* Marks column - ONLY show in completed tab */}
+                  {activeTab === 'completed' && (
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                      Marks
+                    </th>
+                  )}
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Time Spent
                   </th>
@@ -428,7 +641,7 @@ export default function WorkQueue() {
                 </tr>
               </thead>
               <tbody>
-                {sheets.map((sheet) => {
+                {sheets.map((sheet, index) => {
                   const hasPendingRecheck = sheet.pending_recheck_count > 0;
                   const isRecheckDisabled =
                     sheet.status === 'recheck' || sheet.status === 'rechecked';
@@ -439,11 +652,43 @@ export default function WorkQueue() {
                     (sheet as any).checking_time_spent ||
                     0;
 
+                  const percentage = calculatePercentage(
+                    sheet.marks,
+                    sheet.total_marks || 0,
+                  );
+
+                  // ✅ Use index as fallback for unique key
+                  const uniqueKey = `${sheet.id}-${index}`;
+
                   return (
                     <tr
-                      key={sheet.id}
+                      key={uniqueKey}
                       className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
                     >
+                      {/* Checkbox cell - ONLY in pending tab */}
+                      {activeTab === 'pending' && (
+                        <td className="py-3 px-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedSheetIds.includes(sheet.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedSheetIds([
+                                  ...selectedSheetIds,
+                                  sheet.id,
+                                ]);
+                              } else {
+                                setSelectedSheetIds(
+                                  selectedSheetIds.filter(
+                                    (id) => id !== sheet.id,
+                                  ),
+                                );
+                              }
+                            }}
+                            className="rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
+                          />
+                        </td>
+                      )}
                       <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
                         #{sheet.id}
                       </td>
@@ -482,6 +727,44 @@ export default function WorkQueue() {
                           )}
                         </td>
                       )}
+                      {/* Marks cell with fraction format - ONLY show in completed tab */}
+                      {activeTab === 'completed' && (
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          {sheet.marks ? (
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center gap-1 text-sm font-semibold">
+                                <span className="text-green-600">
+                                  {parseFloat(sheet.marks).toFixed(1)}
+                                </span>
+                                {sheet.total_marks ? (
+                                  <span className="text-xs text-gray-400 font-normal">
+                                    / {sheet.total_marks}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-gray-400 font-normal">
+                                    / 0
+                                  </span>
+                                )}
+                              </span>
+                              {sheet.total_marks && percentage !== null && (
+                                <span
+                                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                                    percentage >= 60
+                                      ? 'text-green-600 bg-green-50'
+                                      : percentage >= 40
+                                        ? 'text-amber-600 bg-amber-50'
+                                        : 'text-red-600 bg-red-50'
+                                  }`}
+                                >
+                                  {percentage.toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
+                      )}
                       <td className="py-3 px-4 whitespace-nowrap">
                         {timeSpent > 0 ? (
                           <span className="inline-flex items-center gap-1 text-[11px] text-blue-400 font-medium">
@@ -493,28 +776,52 @@ export default function WorkQueue() {
                         )}
                       </td>
                       <td className="py-3 px-4 text-right">
-                        {isEscalated ? (
-                          <span className="text-xs text-gray-400 italic">
-                            Escalated
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => openFlagModal(sheet.id)}
-                            disabled={isRecheckDisabled}
-                            className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                              isRecheckDisabled
-                                ? 'text-gray-300 bg-gray-100 cursor-not-allowed'
-                                : 'text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100'
-                            }`}
-                            title={
-                              isRecheckDisabled
-                                ? 'Already in recheck'
-                                : 'Flag for recheck'
-                            }
-                          >
-                            Flag for Recheck
-                          </button>
-                        )}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isEscalated ? (
+                            <span className="text-xs text-gray-400 italic">
+                              Escalated
+                            </span>
+                          ) : (
+                            <>
+                              {/* Flag for Recheck Button - Show in all tabs except rechecking */}
+                              {activeTab !== 'rechecking' && (
+                                <button
+                                  onClick={() => openFlagModal(sheet.id)}
+                                  disabled={isRecheckDisabled}
+                                  className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                                    isRecheckDisabled
+                                      ? 'text-gray-300 bg-gray-100 cursor-not-allowed'
+                                      : 'text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100'
+                                  }`}
+                                  title={
+                                    isRecheckDisabled
+                                      ? 'Already in recheck'
+                                      : 'Flag for recheck'
+                                  }
+                                >
+                                  Flag
+                                </button>
+                              )}
+
+                              {/* Reassign Button - ONLY in pending tab AND only if sheet is assigned */}
+                              {activeTab === 'pending' && sheet.assigned_to && (
+                                <button
+                                  onClick={() =>
+                                    openReassignModal(
+                                      sheet.id,
+                                      sheet.assigned_to || null,
+                                    )
+                                  }
+                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100"
+                                  title="Reassign to another rechecker"
+                                >
+                                  <i className="ri-exchange-line mr-0.5"></i>
+                                  Reassign
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -620,6 +927,7 @@ export default function WorkQueue() {
                     {recheckers.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.name} {r.subject ? `(${r.subject})` : ''}
+                        {r.role && ` - ${r.role}`}
                       </option>
                     ))}
                   </select>
@@ -673,6 +981,154 @@ export default function WorkQueue() {
                   </>
                 ) : (
                   'Confirm Flag'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── REASSIGN MODAL ────────────────────────────────────── */}
+
+      {reassignModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
+              <h4 className="text-base font-semibold text-gray-900">
+                Reassign Recheck
+                <span className="text-sm font-normal text-gray-400 ml-2">
+                  {isBulkMode
+                    ? `${reassignModal.sheetIds?.length || 0} sheets`
+                    : `Sheet #${reassignModal.sheetId}`}
+                </span>
+              </h4>
+              <button
+                onClick={() => {
+                  setReassignModal({
+                    open: false,
+                    sheetId: null,
+                    currentRecheckerId: null,
+                  });
+                  setIsBulkMode(false);
+                }}
+                className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                <i className="ri-close-line text-lg"></i>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Select New Rechecker
+                </label>
+                {availableRecheckers.length === 0 ? (
+                  <div className="text-sm text-amber-600 bg-amber-50 px-4 py-3 rounded-lg">
+                    <i className="ri-information-line mr-1"></i>
+                    No other recheckers available.
+                    {reassignModal.currentRecheckerId && (
+                      <span className="block mt-1 text-xs">
+                        Current rechecker has the only active rechecker role.
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={selectedReassigner}
+                      onChange={(e) => {
+                        setSelectedReassigner(e.target.value);
+                        if (reassignError) setReassignError('');
+                      }}
+                      className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer"
+                    >
+                      <option value="">Select rechecker...</option>
+                      {availableRecheckers.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                          {r.subject ? ` (${r.subject})` : ''}
+                          {r.role && ` - ${r.role}`}
+                          {r.pending_count !== undefined &&
+                            r.pending_count > 0 &&
+                            ` - ${r.pending_count} pending`}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1.5">
+                      <i className="ri-information-line mr-0.5"></i>
+                      Showing recheckers with active status (excluding current)
+                    </p>
+                  </>
+                )}
+                {reassignError && (
+                  <p className="text-xs text-rose-500 mt-1">{reassignError}</p>
+                )}
+              </div>
+
+              {isBulkMode && reassignModal.sheetIds && (
+                <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                  <p className="text-xs text-amber-700">
+                    <i className="ri-information-line mr-1"></i>
+                    Reassigning <strong>
+                      {reassignModal.sheetIds.length}
+                    </strong>{' '}
+                    sheets to the selected rechecker
+                  </p>
+                  <p className="text-[10px] text-amber-600 mt-1">
+                    Sheet IDs: {reassignModal.sheetIds.join(', ')}
+                  </p>
+                </div>
+              )}
+
+              {reassignModal.currentRecheckerId && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-600">
+                    <i className="ri-user-line mr-1"></i>
+                    Current rechecker:{' '}
+                    <span className="font-medium">
+                      {sheets.find(
+                        (s) =>
+                          s.assigned_to === reassignModal.currentRecheckerId,
+                      )?.assigned_to_name || 'Unknown'}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 mt-6 pt-5 border-t border-gray-100">
+              <button
+                onClick={() => {
+                  setReassignModal({
+                    open: false,
+                    sheetId: null,
+                    currentRecheckerId: null,
+                  });
+                  setIsBulkMode(false);
+                }}
+                className="flex-1 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReassignSubmit}
+                disabled={
+                  !selectedReassigner ||
+                  reassignLoading ||
+                  availableRecheckers.length === 0
+                }
+                className="flex-1 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap flex items-center justify-center gap-2"
+              >
+                {reassignLoading ? (
+                  <>
+                    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    Reassigning...
+                  </>
+                ) : (
+                  <>
+                    <i className="ri-exchange-line"></i>
+                    Confirm Reassign
+                  </>
                 )}
               </button>
             </div>
