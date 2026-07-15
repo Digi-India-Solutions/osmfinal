@@ -15,6 +15,8 @@ import {
   changePassword,
   updateProfile,
   registerSuperAdmin,
+  sendOtp,
+  verifyOtp,
 } from './admin-controller.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
@@ -43,5 +45,7 @@ router.post('/users', verifyToken, createUserByAdmin);
 router.get('/users', verifyToken, getAllUsers);
 router.patch('/users/:id', verifyToken, updateUserByAdmin);
 router.delete('/users/:id', verifyToken, deleteUserByAdmin);
+router.post('/send-otp', sendOtp);
+router.post('/verify-otp', verifyOtp);
 
 export default router;

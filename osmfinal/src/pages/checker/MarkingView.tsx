@@ -1677,9 +1677,10 @@ export default function MarkingView() {
             if (!path) return null;
             if (path.startsWith('https://') || path.startsWith('http://'))
               return path;
-            return `${API_URL}${path}`;
+            const prefix = path.startsWith('/') ? '' : '/';
+            return `${API_URL}${prefix}${path}`;
           };
-console.log('DDDDDDDDDDD===>',{
+          console.log('DDDDDDDDDDD===>', {
             ...data.sheet,
             file_url: toFullUrl(data.sheet?.file_url),
             is_submitted: data.sheet?.is_submitted || false,
@@ -1709,7 +1710,7 @@ console.log('DDDDDDDDDDD===>',{
 
     fetchData();
   }, [sheetIdNum]);
-console.log('SheetData===>',sheetData)
+  console.log('SheetData===>', sheetData)
   // ─── PAGE / TOOL / THUMBNAIL STATE ───────────────────────────
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTool, setActiveTool] = useState<AnnotationTool>('tick');
@@ -2590,13 +2591,13 @@ console.log('SheetData===>',sheetData)
         prev.map((s) =>
           s.markId === placingMarkId
             ? {
-                ...s,
-                placed: true,
-                x: xPercent,
-                y: yPercent,
-                page,
-                value: null,
-              }
+              ...s,
+              placed: true,
+              x: xPercent,
+              y: yPercent,
+              page,
+              value: null,
+            }
             : s,
         ),
       );
@@ -2815,6 +2816,16 @@ console.log('SheetData===>',sheetData)
     );
   }
 
+  // ─── PAGE ANNOTATION STATUS ───────────────────────────────────
+  const isPageAnnotated = (page: number) => {
+    if (blankPages.has(page)) return true;
+    if (annotations.some((ann) => ann.page === page)) return true;
+    if (stamps.some((stamp) => stamp.page === page && stamp.placed)) return true;
+    return false;
+  };
+
+  const annotatedPagesCount = Array.from({ length: totalPages }, (_, i) => i + 1).filter(isPageAnnotated).length;
+
   const examName = examData
     ? `${examData.name} — ${examData.subject}`
     : 'Loading...';
@@ -2831,11 +2842,10 @@ console.log('SheetData===>',sheetData)
           </span>
           {minTimeRequired > 0 && (
             <span
-              className={`text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
-                isTimeRequirementMet
+              className={`text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5 ${isTimeRequirementMet
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-              }`}
+                }`}
             >
               <i
                 className={`${isTimeRequirementMet ? 'ri-check-line' : 'ri-timer-line'} text-xs`}
@@ -2868,11 +2878,10 @@ console.log('SheetData===>',sheetData)
         <aside className="w-9 shrink-0 bg-[#1e293b] flex flex-col items-center py-2 gap-1 border-r border-slate-700">
           <button
             onClick={() => setThumbnailOpen(!thumbnailOpen)}
-            className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
-              thumbnailOpen
+            className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${thumbnailOpen
                 ? 'bg-amber-500/25 text-amber-400'
                 : 'text-slate-400 hover:text-white hover:bg-white/10'
-            }`}
+              }`}
             title="Toggle thumbnails"
           >
             <i className="ri-layout-grid-line text-sm"></i>
@@ -2914,20 +2923,19 @@ console.log('SheetData===>',sheetData)
                 const isSelectedAnnotTool = activeTool === "handSelect" && selectedAnnotationId && annotations.find(a => a.id === selectedAnnotationId)?.tool === tool;
                 const isActive = activeTool === tool || isSelectedAnnotTool;
                 return (
-                <button
-                  key={tool}
-                  onClick={() => handleToolSelect(tool)}
-                  className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
-                    isActive
-                      ? tool === 'eraser'
-                        ? 'bg-rose-500/25 text-rose-400'
-                        : 'bg-sky-500/25 text-sky-400'
-                      : 'text-slate-400 hover:text-white hover:bg-white/10'
-                  }`}
-                  title={label}
-                >
-                  <i className={`${icon} text-sm`}></i>
-                </button>
+                  <button
+                    key={tool}
+                    onClick={() => handleToolSelect(tool)}
+                    className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${isActive
+                        ? tool === 'eraser'
+                          ? 'bg-rose-500/25 text-rose-400'
+                          : 'bg-sky-500/25 text-sky-400'
+                        : 'text-slate-400 hover:text-white hover:bg-white/10'
+                      }`}
+                    title={label}
+                  >
+                    <i className={`${icon} text-sm`}></i>
+                  </button>
                 );
               })}
 
@@ -3017,7 +3025,8 @@ console.log('SheetData===>',sheetData)
         )}
 
         {/* ─── SHEET VIEWER ─── */}
-        <SheetViewer
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+          <SheetViewer
           ref={sheetViewerRef}
           currentPage={currentPage}
           totalPages={totalPages}
@@ -3070,7 +3079,60 @@ console.log('SheetData===>',sheetData)
           eraserSize={eraserSize}
         />
 
-        {/* ─── RIGHT SIDE: Resume banner + Mark Panel ─── */}
+        {/* ─── BOTTOM PAGINATION BAR ─── */}
+        <div className="h-[60px] shrink-0 bg-[#1e293b] flex flex-col border-t border-slate-700 select-none z-[40]">
+          <div className="flex-1 flex items-center overflow-x-auto overflow-y-hidden w-full custom-scrollbar">
+            <div className="flex items-center gap-1.5 min-w-max px-3 mx-auto md:justify-center">
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage <= 1}
+                className="flex items-center justify-center flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer mr-1"
+                title="Previous Page"
+              >
+                <i className="ri-arrow-left-s-line text-lg" />
+              </button>
+
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                const annotated = isPageAnnotated(page);
+                const isActive = page === currentPage;
+                return (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`relative flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-xs sm:text-[13px] font-medium transition-colors cursor-pointer ${
+                      isActive
+                        ? 'bg-sky-500 text-white shadow-sm'
+                        : 'bg-[#334155] text-slate-300 hover:bg-slate-600'
+                    }`}
+                  >
+                    {page}
+                    <span
+                      className={`absolute bottom-1 right-1 w-1.5 h-1.5 sm:w-[5px] sm:h-[5px] rounded-full shadow-sm ${
+                        annotated ? 'bg-emerald-400' : 'bg-amber-500'
+                      }`}
+                    />
+                  </button>
+                );
+              })}
+
+              <button
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage >= totalPages}
+                className="flex items-center justify-center flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer ml-1"
+                title="Next Page"
+              >
+                <i className="ri-arrow-right-s-line text-lg" />
+              </button>
+            </div>
+          </div>
+          <div className="h-6 shrink-0 flex items-center justify-center text-[10px] sm:text-[11px] font-medium text-amber-500/90 bg-[#151c28] border-t border-slate-700/50">
+            <i className="ri-error-warning-fill mr-1.5 text-xs"></i>
+            Pages annotated: {annotatedPagesCount} / {totalPages}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── RIGHT SIDE: Resume banner + Mark Panel ─── */}
         <div className="w-[255px] shrink-0 flex flex-col">
           {resumeBanner && (
             <div className="shrink-0 bg-amber-500/15 border-b border-amber-500/30 px-3 py-2.5">
