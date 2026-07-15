@@ -81,7 +81,7 @@ export const getSheets = async (req, res) => {
         ) AS time_spent,
         e.name AS exam_name,
         e.subject AS exam_subject,
-        e."maxMarks" AS total_marks,  -- ✅ YAHI SE AAYEGA TOTAL MARKS
+        e."maxMarks" AS total_marks,  -- ✅ YEH LINE ADD KARO
         u.name AS uploaded_by_name,
         assigned_user.name AS assigned_to_name,
         (
@@ -160,7 +160,6 @@ export const getSheets = async (req, res) => {
 
 // ─── REASSIGN RECHECK REQUESTS ──────────────────────────────────
 
-// Add these at the end of your workController.js file
 
 // ─── REASSIGN RECHECK REQUESTS ──────────────────────────────────
 

@@ -135,6 +135,8 @@ export default function WorkQueue() {
 
   // ─── FETCH SHEETS ────────────────────────────────────────────
 
+  // ─── FETCH SHEETS ────────────────────────────────────────────
+
   const fetchSheets = useCallback(async () => {
     setSheetsLoading(true);
     try {
@@ -157,10 +159,15 @@ export default function WorkQueue() {
           'checking,recheck,escalated,linked,uploaded,assigned,checked,rechecked';
       }
 
+      console.log('📤 Fetching sheets with params:', params); // ✅ Debug log
+
       const response = await workQueueService.getSheets(params);
+
+      console.log('📥 Sheets response:', response); // ✅ Debug log
 
       if (response.success) {
         let filteredSheets = response.data.items || [];
+        console.log('📋 Filtered sheets:', filteredSheets); // ✅ Debug log
 
         filteredSheets = filteredSheets.filter(
           (sheet: Sheet) => sheet.status !== 'unlinked',
@@ -179,10 +186,11 @@ export default function WorkQueue() {
           escalated: parseInt(statsData.escalated || 0),
         });
       } else {
+        console.error('❌ API returned error:', response.message); // ✅ Debug log
         showToast(response.message || 'Failed to load sheets', 'error');
       }
     } catch (error) {
-      console.error('Fetch sheets error:', error);
+      console.error('❌ Fetch sheets error:', error); // ✅ Debug log
       showToast('Failed to load sheets', 'error');
     } finally {
       setSheetsLoading(false);
@@ -326,8 +334,6 @@ export default function WorkQueue() {
 
   // ─── OPEN BULK REASSIGN MODAL ──────────────────────────────
 
-  // ─── OPEN BULK REASSIGN MODAL ──────────────────────────────
-
   const openBulkReassignModal = (
     sheetIds: number[],
     currentCheckerId: string | null,
@@ -372,8 +378,6 @@ export default function WorkQueue() {
 
   // ─── HANDLE REASSIGN SUBMIT ─────────────────────────────────
 
-  // ─── HANDLE REASSIGN SUBMIT ─────────────────────────────────
-
   const handleReassignSubmit = async () => {
     setReassignError('');
 
@@ -397,12 +401,10 @@ export default function WorkQueue() {
         reassignModal.sheetIds &&
         reassignModal.sheetIds.length > 0
       ) {
-        // ✅ Bulk mode - get all sheets and verify they have same exam_id
         const selectedSheets = sheets.filter((s) =>
           reassignModal.sheetIds?.includes(s.id),
         );
 
-        // ✅ Check if all sheets have same exam_id
         const examIds = selectedSheets.map((s) => s.exam_id).filter(Boolean);
         const uniqueExamIds = [...new Set(examIds)];
 
@@ -418,7 +420,6 @@ export default function WorkQueue() {
         examId = uniqueExamIds[0] || null;
         sheetIds = reassignModal.sheetIds;
       } else if (reassignModal.sheetId) {
-        // ✅ Single mode
         const sheet = sheets.find((s) => s.id === reassignModal.sheetId);
         if (!sheet) {
           showToast('Sheet not found', 'error');
@@ -886,8 +887,8 @@ export default function WorkQueue() {
                             </span>
                           ) : (
                             <>
-                              {/* ✅ Flag button - Show for 'checked' or 'rechecked' status */}
-                              {isChecked && (
+                              {/* Flag button - Show for 'checked' or 'rechecked' status in pending tab */}
+                              {activeTab === 'pending' && isChecked && (
                                 <button
                                   onClick={() => openFlagModal(sheet.id)}
                                   className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100"
@@ -897,7 +898,7 @@ export default function WorkQueue() {
                                 </button>
                               )}
 
-                              {/* ✅ Reassign Button - ONLY for assigned sheets in pending tab */}
+                              {/* Reassign Button - ONLY for 'assigned' sheets in pending tab */}
                               {activeTab === 'pending' && isAssigned && (
                                 <button
                                   onClick={() =>
@@ -914,6 +915,36 @@ export default function WorkQueue() {
                                   Reassign
                                 </button>
                               )}
+
+                              {/* Show status label for other statuses in pending tab */}
+                              {activeTab === 'pending' &&
+                                !isChecked &&
+                                !isAssigned && (
+                                  <span className="text-xs text-gray-400 italic capitalize">
+                                    {sheet.status}
+                                  </span>
+                                )}
+
+                              {/* For other tabs (checking, rechecking, etc.) show Flag button if not recheck disabled */}
+                              {activeTab !== 'pending' &&
+                                activeTab !== 'rechecking' && (
+                                  <button
+                                    onClick={() => openFlagModal(sheet.id)}
+                                    disabled={isRecheckDisabled}
+                                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                                      isRecheckDisabled
+                                        ? 'text-gray-300 bg-gray-100 cursor-not-allowed'
+                                        : 'text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100'
+                                    }`}
+                                    title={
+                                      isRecheckDisabled
+                                        ? 'Already in recheck'
+                                        : 'Flag for recheck'
+                                    }
+                                  >
+                                    Flag
+                                  </button>
+                                )}
                             </>
                           )}
                         </div>
@@ -968,30 +999,7 @@ export default function WorkQueue() {
                       This sheet only
                     </div>
                   </button>
-                  
-                  {/* <button
-                    onClick={() => setFlagOption('entire')}
-                    className={`flex-1 py-3 px-4 rounded-xl border-2 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                      flagOption === 'entire'
-                        ? 'border-gray-900 bg-gray-50 text-gray-900'
-                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 justify-center">
-                      <span className="w-4 h-4 flex items-center justify-center">
-                        <i className="ri-stack-line"></i>
-                      </span>
-                      Entire exam
-                    </div>
-                  </button> */}
-
                 </div>
-                {flagOption === 'entire' && (
-                  <p className="text-xs text-amber-600 mt-2">
-                    <i className="ri-information-line mr-1"></i>
-                    All sheets for this exam will be flagged for recheck
-                  </p>
-                )}
               </div>
 
               <div>
