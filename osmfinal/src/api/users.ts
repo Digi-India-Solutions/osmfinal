@@ -3,7 +3,6 @@ import axiosInstance from './axios';
 
 export interface CreateUserData {
   name: string;
-  otp:number;
   email: string;
   password: string;
   role: 'admin' | 'teacher' | 'checker' | 'teacher_checker' | 'rechecking';
