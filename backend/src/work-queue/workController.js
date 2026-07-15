@@ -112,16 +112,18 @@ export const getSheets = async (req, res) => {
     const countResult = await pool.query(countQuery, params);
     const total = countResult.rows[0]?.total || 0;
 
+    // src/work-queue/workController.js - getSheets function
+
     let statsQuery = `
-      SELECT 
-        COUNT(*) AS all_count,
-        COUNT(*) FILTER (WHERE s.status IN ('linked', 'uploaded', 'assigned')) AS pending_count,
-        COUNT(*) FILTER (WHERE s.status = 'checking') AS checking_count,
-        COUNT(*) FILTER (WHERE s.status = 'recheck') AS rechecking_count,
-        COUNT(*) FILTER (WHERE s.status IN ('checked', 'rechecked')) AS completed_count,
-        COUNT(*) FILTER (WHERE s.status = 'escalated') AS escalated_count
-      FROM sheets s
-    `;
+  SELECT 
+    COUNT(*) AS all_count,
+    COUNT(*) FILTER (WHERE s.status IN ('linked', 'uploaded', 'assigned', 'recheck')) AS pending_count, -- ✅ Added 'recheck'
+    COUNT(*) FILTER (WHERE s.status = 'checking') AS checking_count,
+    COUNT(*) FILTER (WHERE s.status = 'recheck') AS rechecking_count,
+    COUNT(*) FILTER (WHERE s.status IN ('checked', 'rechecked')) AS completed_count,
+    COUNT(*) FILTER (WHERE s.status = 'escalated') AS escalated_count
+  FROM sheets s
+`;
     if (whereClause) {
       statsQuery += ` ${whereClause}`;
     }

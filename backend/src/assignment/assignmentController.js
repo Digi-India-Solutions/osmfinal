@@ -532,7 +532,12 @@ export const getMyAssignedSheets = async (req, res) => {
     const userId = req.user.id;
     const { status } = req.query;
 
-    let conditions = ["a.checker_id = $1 AND a.status = 'assigned'"];
+    // ✅ IMPORTANT: do NOT restrict the join to a.status = 'assigned' only.
+    // When a checker submits marks (submitMarks in checkerMarkingCont.js),
+    // the assignment row's status is updated to 'completed'. If this join
+    // only allowed 'assigned', every checked sheet would silently vanish
+    // from this checker's queue and from the stats counts below.
+    let conditions = ['a.checker_id = $1'];
     const params = [userId];
     let paramCount = 2;
 
@@ -544,8 +549,11 @@ export const getMyAssignedSheets = async (req, res) => {
 
     const whereClause = conditions.join(' AND ');
 
+    // ✅ DISTINCT ON (s.id) so a sheet with more than one assignment row
+    // for this checker (e.g. it went 'assigned' -> 'completed', or was
+    // reassigned) only appears once, using the most recently updated row.
     const { rows } = await pool.query(
-      `SELECT 
+      `SELECT DISTINCT ON (s.id)
         s.id,
         s.exam_id,
         s.student_id,
@@ -568,11 +576,13 @@ export const getMyAssignedSheets = async (req, res) => {
           WHERE rr.sheet_id = s.id AND rr.status IN ('pending', 'assigned')
         ) AS pending_recheck_count
       FROM sheets s
-      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
+      INNER JOIN assignments a ON s.id = a.sheet_id 
+        AND a.checker_id = $1 
+        AND a.status IN ('assigned', 'completed')
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN users u ON a.checker_id = u.id
       WHERE ${whereClause}
-      ORDER BY s.created_at DESC
+      ORDER BY s.id, a.updated_at DESC
       `,
       params,
     );
@@ -583,9 +593,14 @@ export const getMyAssignedSheets = async (req, res) => {
         COUNT(*) FILTER (WHERE s.status = 'checking') AS checking_count,
         COUNT(*) FILTER (WHERE s.status = 'checked') AS completed_count,
         COUNT(*) FILTER (WHERE s.status = 'recheck') AS recheck_count
-      FROM sheets s
-      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
-      WHERE a.checker_id = $1`,
+      FROM (
+        SELECT DISTINCT ON (s.id) s.id, s.status
+        FROM sheets s
+        INNER JOIN assignments a ON s.id = a.sheet_id 
+          AND a.checker_id = $1 
+          AND a.status IN ('assigned', 'completed')
+        ORDER BY s.id, a.updated_at DESC
+      ) s`,
       [userId],
     );
 

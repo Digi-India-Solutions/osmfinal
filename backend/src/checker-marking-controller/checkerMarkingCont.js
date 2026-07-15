@@ -1,6 +1,61 @@
 // src/checker/checkerMarkingCont.js
 
 import pool from '../pool.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ─── HELPER: Normalize a stored file_url into a real relative path ──
+// Handles: windows backslashes, full URLs, leading slashes, and a
+// leading "uploads/" segment (since uploadsDir already points at .../uploads)
+const normalizeStoredPath = (storedPath) => {
+  if (!storedPath) return null;
+  let p = storedPath.replace(/\\/g, '/'); // windows backslash -> forward slash
+  p = p.replace(/^https?:\/\/[^/]+/, ''); // strip domain if a full URL was stored
+  p = p.replace(/^\/+/, ''); // strip leading slashes
+  if (p.startsWith('uploads/')) {
+    p = p.slice('uploads/'.length); // avoid uploads/uploads/... double join
+  }
+  return p;
+};
+
+// ─── HELPER: Make a safe folder/file-name segment ──────────────
+const sanitizeForFolderName = (value) => {
+  if (!value) return null;
+  return String(value)
+    .trim()
+    .replace(/[^a-zA-Z0-9-_]/g, '_'); // strip anything unsafe for a path segment
+};
+
+// ─── HELPER: Move file to checked folder ──────────────────────
+
+const moveFileToCheckedFolder = (oldPath, newPath) => {
+  try {
+    // Create directory if not exists
+    const dir = path.dirname(newPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log(`📁 Created directory: ${dir}`);
+    }
+
+    // Check if source file exists
+    if (!fs.existsSync(oldPath)) {
+      console.warn(`⚠️ Source file not found: ${oldPath}`);
+      return false;
+    }
+
+    // Move file
+    fs.renameSync(oldPath, newPath);
+    console.log(`✅ File moved to: ${newPath}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Error moving file: ${error.message}`);
+    return false;
+  }
+};
 
 // ─── SAVE DRAFT MARKS ──────────────────────────────────────────
 
@@ -142,7 +197,7 @@ export const submitMarks = async (req, res) => {
 
     // Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
-      `SELECT a.sheet_id, s.exam_id 
+      `SELECT a.sheet_id, s.exam_id, s.file_url, s.file_name, s.student_name, s.roll_no, s.barcode
        FROM assignments a
        JOIN sheets s ON a.sheet_id = s.id
        WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
@@ -157,6 +212,7 @@ export const submitMarks = async (req, res) => {
     }
 
     const examId = assignmentCheck.rows[0].exam_id;
+    const sheetData = assignmentCheck.rows[0];
 
     // Check if marking record exists
     const existing = await pool.query(
@@ -167,7 +223,6 @@ export const submitMarks = async (req, res) => {
 
     let result;
 
-    // ✅ Calculate final time spent (if provided)
     const finalTimeSpent = timeSpent || 0;
 
     if (existing.rows.length > 0) {
@@ -221,15 +276,80 @@ export const submitMarks = async (req, res) => {
       );
     }
 
-    // ✅ Update sheet marks, status AND time spent
+    // ✅ Create checked folder path — use barcode (matches file_name pattern
+    // like "BAR025.pdf") instead of the raw sheetId, falling back to sheetId
+    // if barcode is missing for some reason
+    const folderKey = sanitizeForFolderName(sheetData.barcode) || sheetId;
+    const checkedFolder = `checked-sheets/${examId}/${folderKey}`;
+
+    // ✅ Get current file path from sheet
+    const currentFilePath = sheetData.file_url;
+    let newFilePath = null;
+    let fileMoved = false;
+
+    if (currentFilePath) {
+      // ✅ Generate new file path in checked folder
+      const fileName = sheetData.file_name || `sheet-${sheetId}.pdf`;
+      newFilePath = `/${checkedFolder}/${fileName}`;
+
+      // ✅ Get full paths for file moving
+      const uploadsDir = path.join(__dirname, '..', 'uploads');
+
+      // ✅ Normalize the DB-stored path before joining, so we never end up
+      // with a double "uploads/uploads/..." path (main cause of silent
+      // "Source file not found" failures)
+      const relativeOldPath = normalizeStoredPath(currentFilePath);
+      const oldFullPath = path.join(uploadsDir, relativeOldPath);
+      const newFullPath = path.join(uploadsDir, checkedFolder, fileName);
+
+      console.log(
+        `📁 Moving sheet ${sheetId} to checked folder: ${checkedFolder}`,
+      );
+      console.log(`📄 Raw file_url from DB: ${currentFilePath}`);
+      console.log(`📄 Normalized relative path: ${relativeOldPath}`);
+      console.log(`📄 Old full path: ${oldFullPath}`);
+      console.log(`📄 New full path: ${newFullPath}`);
+
+      // ✅ Move the file physically
+      fileMoved = moveFileToCheckedFolder(oldFullPath, newFullPath);
+
+      if (fileMoved) {
+        console.log(`✅ File moved successfully for sheet ${sheetId}`);
+      } else {
+        console.warn(
+          `⚠️ File not moved for sheet ${sheetId}, keeping original path`,
+        );
+      }
+    }
+
+    // ✅ Update sheet marks, status AND time spent + checked folder info
     await pool.query(
       `UPDATE sheets 
        SET marks = $1, 
            status = 'checked', 
            checking_time_spent = $2,
+           is_checked = true,
+           checked_at = CURRENT_TIMESTAMP,
+           archived_folder = $3,
+           file_url = $4,
            updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $3`,
-      [totalMarks || 0, finalTimeSpent, sheetId],
+       WHERE id = $5`,
+      [
+        totalMarks || 0,
+        finalTimeSpent,
+        checkedFolder,
+        fileMoved ? newFilePath : currentFilePath,
+        sheetId,
+      ],
+    );
+
+    // ✅ Update assignment status to completed
+    await pool.query(
+      `UPDATE assignments 
+       SET status = 'completed',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE sheet_id = $1 AND checker_id = $2`,
+      [sheetId, userId],
     );
 
     return res.status(200).json({
@@ -238,6 +358,9 @@ export const submitMarks = async (req, res) => {
       data: {
         ...result.rows[0],
         time_spent: finalTimeSpent,
+        archived_folder: checkedFolder,
+        new_file_path: fileMoved ? newFilePath : null,
+        file_moved: fileMoved,
       },
     });
   } catch (error) {
@@ -296,7 +419,7 @@ export const getDraft = async (req, res) => {
         stamps_data: row.stamps_data || [],
         total_marks: row.total_marks,
         remarks: row.remarks,
-        time_spent: row.time_spent || 0, // ✅ Return time spent
+        time_spent: row.time_spent || 0,
         is_draft: row.is_draft,
         is_submitted: row.is_submitted,
         submitted_at: row.submitted_at,
@@ -334,6 +457,8 @@ export const getSubmittedMarks = async (req, res) => {
         s.student_name,
         s.roll_no,
         s.checking_time_spent,
+        s.archived_folder,
+        s.is_checked,
         e.name AS exam_name,
         e.subject AS exam_subject,
         u.name AS checker_name
@@ -520,6 +645,120 @@ export const getEscalatedSheets = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get escalated sheets',
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET CHECKED SHEETS ────────────────────────────────────────
+
+export const getCheckedSheets = async (req, res) => {
+  try {
+    const { examId } = req.params;
+
+    // ✅ DISTINCT ON (s.id) avoids duplicate rows when a sheet has more
+    // than one assignment row (e.g. it was reassigned before being checked)
+    let query = `
+      SELECT DISTINCT ON (s.id)
+        s.id,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.marks,
+        s.checking_time_spent,
+        s.archived_folder,
+        s.file_url,
+        s.checked_at,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        u.name AS checker_name
+      FROM sheets s
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'completed'
+      LEFT JOIN users u ON a.checker_id = u.id
+      WHERE s.is_checked = true AND s.status = 'checked'
+    `;
+
+    const params = [];
+
+    if (examId) {
+      query += ` AND s.exam_id = $1`;
+      params.push(examId);
+    }
+
+    // DISTINCT ON requires the ORDER BY to start with the same expression
+    query += ` ORDER BY s.id, s.checked_at DESC`;
+
+    const result = await pool.query(query, params);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Checked sheets retrieved successfully',
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error('getCheckedSheets error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get checked sheets',
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET CHECKED SHEET BY ID ──────────────────────────────────
+
+export const getCheckedSheetById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT 
+        s.id,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.marks,
+        s.checking_time_spent,
+        s.archived_folder,
+        s.file_url,
+        s.checked_at,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        e."maxMarks" AS total_marks,
+        u.name AS checker_name,
+        cm.marks_data,
+        cm.annotations_data,
+        cm.remarks,
+        cm.submitted_at
+      FROM sheets s
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'completed'
+      LEFT JOIN users u ON a.checker_id = u.id
+      LEFT JOIN checker_markings cm ON s.id = cm.sheet_id AND cm.is_submitted = true
+      WHERE s.id = $1 AND s.is_checked = true
+      ORDER BY a.updated_at DESC
+      LIMIT 1`,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Checked sheet not found',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Checked sheet retrieved successfully',
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error('getCheckedSheetById error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get checked sheet',
       error: error.message,
     });
   }
