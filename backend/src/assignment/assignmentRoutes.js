@@ -1,5 +1,3 @@
-// src/routes/assignment.routes.js
-
 import { Router } from 'express';
 import {
   getUnassignedSheets,
@@ -40,7 +38,7 @@ router.get(
 );
 router.delete('/assignments/:assignmentId', verifyToken, unassignSheet);
 
-// ─── ✅ CHECKER WORK QUEUE ROUTES ─────────────────────────────
+// ─── CHECKER WORK QUEUE ROUTES ─────────────────────────────
 
 router.get('/my-sheets', verifyToken, getMyAssignedSheets);
 router.get('/sheet/:id', verifyToken, getSheetForMarking);

@@ -1,5 +1,3 @@
-// src/assignments/assignment-controller.js
-
 import pool from '../pool.js';
 
 // ─── HELPER: Case-insensitive subject compare ──────────────────
@@ -74,7 +72,6 @@ export const getAvailableCheckers = async (req, res) => {
       let hasConflict = false;
       let conflictReason = null;
 
-      // ✅ FIX: Case-insensitive comparison
       if (checker.role === 'teacher_checker' && checker.subject) {
         if (!isSubjectMatch(checker.subject, examSubject)) {
           hasConflict = true;
@@ -105,15 +102,15 @@ export const getAvailableCheckers = async (req, res) => {
   }
 };
 
-// ─── ASSIGN SHEETS TO CHECKER ──────────────────────────────────
-
-// src/assignments/assignment-controller.js
+// ─── ASSIGN SHEETS TO CHECKER (UPDATED - SUPPORTS REASSIGN) ───
 
 export const assignSheets = async (req, res) => {
   try {
     const { examId } = req.params;
     const { checkerId, sheetIds } = req.body;
     const userId = req.user.id;
+
+    console.log('📋 Assign sheets request:', { examId, checkerId, sheetIds });
 
     if (
       !checkerId ||
@@ -127,6 +124,7 @@ export const assignSheets = async (req, res) => {
       });
     }
 
+    // ✅ Check if checker exists and is eligible
     const checkerResult = await pool.query(
       `SELECT id, name, role, subject FROM users 
        WHERE id = $1 AND is_active = true 
@@ -143,13 +141,22 @@ export const assignSheets = async (req, res) => {
 
     const checker = checkerResult.rows[0];
 
+    // ✅ Get exam subject for conflict check
     const examResult = await pool.query(
       `SELECT subject FROM exams WHERE id = $1`,
       [examId],
     );
 
+    if (examResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found',
+      });
+    }
+
     const examSubject = examResult.rows[0]?.subject || null;
 
+    // ✅ Check subject conflict
     if (checker.role === 'teacher_checker' && checker.subject && examSubject) {
       if (!isSubjectMatch(checker.subject, examSubject)) {
         return res.status(400).json({
@@ -168,33 +175,58 @@ export const assignSheets = async (req, res) => {
 
       for (const sheetId of sheetIds) {
         try {
+          console.log(`🔍 Processing sheet ${sheetId} for exam ${examId}`);
+
+          // ✅ Check if sheet exists and belongs to the exam
           const sheetCheck = await client.query(
-            `SELECT s.id, s.status 
+            `SELECT s.id, s.status, s.assigned_to as current_assigned_to
              FROM sheets s
-             LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
              WHERE s.id = $1 AND s.exam_id = $2 
-             AND (a.id IS NULL OR a.status != 'assigned')
-             AND s.status IN ('uploaded', 'linked')`,
+             AND s.status IN ('uploaded', 'linked', 'assigned')`,
             [sheetId, examId],
           );
 
           if (sheetCheck.rows.length === 0) {
+            console.log(`❌ Sheet ${sheetId} not found or not assignable`);
             errors.push({
               sheetId,
-              error: 'Sheet not found or already assigned',
+              error: 'Sheet not found or not in assignable status',
             });
             continue;
           }
 
-          // ✅ Insert into assignments table
-          await client.query(
-            `INSERT INTO assignments (
-              exam_id, sheet_id, checker_id, assigned_by, status
-            ) VALUES ($1, $2, $3, $4, 'assigned')`,
-            [examId, sheetId, checkerId, userId],
+          const sheet = sheetCheck.rows[0];
+
+          // ✅ Check if assignment already exists
+          const existingAssignment = await client.query(
+            `SELECT id FROM assignments 
+             WHERE sheet_id = $1 AND status = 'assigned'`,
+            [sheetId],
           );
 
-          // ✅ CRITICAL: Update sheets table with assigned_to
+          if (existingAssignment.rows.length > 0) {
+            // ✅ Update existing assignment
+            console.log(`📝 Updating assignment for sheet ${sheetId}`);
+            await client.query(
+              `UPDATE assignments 
+               SET checker_id = $1, 
+                   assigned_by = $2,
+                   updated_at = NOW()
+               WHERE sheet_id = $3 AND status = 'assigned'`,
+              [checkerId, userId, sheetId],
+            );
+          } else {
+            // ✅ Insert new assignment
+            console.log(`📝 Creating new assignment for sheet ${sheetId}`);
+            await client.query(
+              `INSERT INTO assignments (
+                exam_id, sheet_id, checker_id, assigned_by, status
+              ) VALUES ($1, $2, $3, $4, 'assigned')`,
+              [examId, sheetId, checkerId, userId],
+            );
+          }
+
+          // ✅ Update sheets table with assigned_to
           await client.query(
             `UPDATE sheets 
              SET status = 'assigned', 
@@ -205,12 +237,18 @@ export const assignSheets = async (req, res) => {
           );
 
           assignedCount++;
+          console.log(`✅ Sheet ${sheetId} assigned successfully`);
         } catch (err) {
+          console.error(`❌ Error processing sheet ${sheetId}:`, err);
           errors.push({ sheetId, error: err.message });
         }
       }
 
       await client.query('COMMIT');
+
+      console.log(
+        `✅ Assignment complete: ${assignedCount} assigned, ${errors.length} errors`,
+      );
 
       return res.status(200).json({
         success: true,
@@ -240,8 +278,6 @@ export const assignSheets = async (req, res) => {
     });
   }
 };
-
-// ─── RANDOM ASSIGNMENT ──────────────────────────────────────────
 
 // ─── RANDOM ASSIGNMENT ──────────────────────────────────────────
 
@@ -334,7 +370,6 @@ export const randomAssignment = async (req, res) => {
             [examId, sheetId, checker.id, userId],
           );
 
-          // ✅ CRITICAL: Update sheets table with assigned_to
           await client.query(
             `UPDATE sheets 
              SET status = 'assigned', 
@@ -492,14 +527,17 @@ export const unassignSheet = async (req, res) => {
 
 // ─── GET MY ASSIGNED SHEETS (CHECKER WORK QUEUE) ──────────────
 
-// ─── GET MY ASSIGNED SHEETS (CHECKER WORK QUEUE) ──────────────
-
 export const getMyAssignedSheets = async (req, res) => {
   try {
     const userId = req.user.id;
     const { status } = req.query;
 
-    let conditions = ["a.checker_id = $1 AND a.status = 'assigned'"];
+    // ✅ IMPORTANT: do NOT restrict the join to a.status = 'assigned' only.
+    // When a checker submits marks (submitMarks in checkerMarkingCont.js),
+    // the assignment row's status is updated to 'completed'. If this join
+    // only allowed 'assigned', every checked sheet would silently vanish
+    // from this checker's queue and from the stats counts below.
+    let conditions = ['a.checker_id = $1'];
     const params = [userId];
     let paramCount = 2;
 
@@ -511,8 +549,11 @@ export const getMyAssignedSheets = async (req, res) => {
 
     const whereClause = conditions.join(' AND ');
 
+    // ✅ DISTINCT ON (s.id) so a sheet with more than one assignment row
+    // for this checker (e.g. it went 'assigned' -> 'completed', or was
+    // reassigned) only appears once, using the most recently updated row.
     const { rows } = await pool.query(
-      `SELECT 
+      `SELECT DISTINCT ON (s.id)
         s.id,
         s.exam_id,
         s.student_id,
@@ -527,7 +568,7 @@ export const getMyAssignedSheets = async (req, res) => {
         s.updated_at,
         e.name AS exam_name,
         e.subject AS exam_subject,
-        e."spentTime" AS exam_spent_time,  -- ✅ ADD THIS
+        e."spentTime" AS exam_spent_time,
         u.name AS checker_name,
         (
           SELECT COUNT(*) 
@@ -535,11 +576,13 @@ export const getMyAssignedSheets = async (req, res) => {
           WHERE rr.sheet_id = s.id AND rr.status IN ('pending', 'assigned')
         ) AS pending_recheck_count
       FROM sheets s
-      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
+      INNER JOIN assignments a ON s.id = a.sheet_id 
+        AND a.checker_id = $1 
+        AND a.status IN ('assigned', 'completed')
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN users u ON a.checker_id = u.id
       WHERE ${whereClause}
-      ORDER BY s.created_at DESC
+      ORDER BY s.id, a.updated_at DESC
       `,
       params,
     );
@@ -550,9 +593,14 @@ export const getMyAssignedSheets = async (req, res) => {
         COUNT(*) FILTER (WHERE s.status = 'checking') AS checking_count,
         COUNT(*) FILTER (WHERE s.status = 'checked') AS completed_count,
         COUNT(*) FILTER (WHERE s.status = 'recheck') AS recheck_count
-      FROM sheets s
-      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
-      WHERE a.checker_id = $1`,
+      FROM (
+        SELECT DISTINCT ON (s.id) s.id, s.status
+        FROM sheets s
+        INNER JOIN assignments a ON s.id = a.sheet_id 
+          AND a.checker_id = $1 
+          AND a.status IN ('assigned', 'completed')
+        ORDER BY s.id, a.updated_at DESC
+      ) s`,
       [userId],
     );
 
@@ -590,6 +638,7 @@ export const getSheetForMarking = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
+    // ✅ FIX: Include both 'assigned' AND 'completed' assignments
     const { rows } = await pool.query(
       `SELECT 
         s.id,
@@ -604,21 +653,26 @@ export const getSheetForMarking = async (req, res) => {
         s.marks,
         s.created_at,
         s.updated_at,
+        s.archived_folder,
+        s.is_checked,
+        s.checked_at,
         e.name AS exam_name,
         e.subject AS exam_subject,
         e."totalQuestions",
         e."maxMarks",
-        e."spentTime" AS exam_spent_time,  -- ✅ ADD THIS
+        e."spentTime" AS exam_spent_time,
         ms."questionName",
         ms."maxMarks" AS questionMaxMarks,
         ms.guidelines,
         ms.model_answer_pdf,
         ms.question_paper_pdf
       FROM sheets s
-      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
+      INNER JOIN assignments a ON s.id = a.sheet_id 
+        AND a.checker_id = $2 
+        AND a.status IN ('assigned', 'completed')
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN mark_schemes ms ON ms."examId" = e.id
-      WHERE s.id = $1 AND a.checker_id = $2`,
+      WHERE s.id = $1`,
       [id, userId],
     );
 
@@ -629,7 +683,6 @@ export const getSheetForMarking = async (req, res) => {
       });
     }
 
-    // Group mark scheme by question
     const markScheme = {};
     rows.forEach((row) => {
       if (row.questionName) {
@@ -657,6 +710,9 @@ export const getSheetForMarking = async (req, res) => {
           file_url: sheet.file_url,
           status: sheet.status,
           marks: sheet.marks,
+          archived_folder: sheet.archived_folder,
+          is_checked: sheet.is_checked,
+          checked_at: sheet.checked_at,
         },
         exam: {
           id: sheet.exam_id,
@@ -664,7 +720,7 @@ export const getSheetForMarking = async (req, res) => {
           subject: sheet.exam_subject,
           totalQuestions: sheet.totalQuestions || 0,
           maxMarks: sheet.maxMarks || 0,
-          spentTime: sheet.exam_spent_time || 0,  // ✅ ADD THIS
+          spentTime: sheet.exam_spent_time || 0,
         },
         markScheme: markScheme,
         pdfs: {
@@ -699,7 +755,6 @@ export const updateCheckerSheetStatus = async (req, res) => {
       });
     }
 
-    // Check via assignments table
     const checkResult = await pool.query(
       `SELECT a.sheet_id 
        FROM assignments a
@@ -765,16 +820,20 @@ export const updateCheckerSheetStatus = async (req, res) => {
 
 // ─── SAVE DRAFT MARKS ──────────────────────────────────────────
 
+// ─── SAVE DRAFT MARKS ──────────────────────────────────────────
+
 export const saveDraftMarks = async (req, res) => {
   try {
     const { id } = req.params;
     const { marks } = req.body;
     const userId = req.user.id;
 
+    // ✅ FIX: Include both 'assigned' AND 'completed' assignments
     const checkResult = await pool.query(
       `SELECT a.sheet_id 
        FROM assignments a
-       WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
+       WHERE a.sheet_id = $1 AND a.checker_id = $2 
+       AND a.status IN ('assigned', 'completed')`,
       [id, userId],
     );
 

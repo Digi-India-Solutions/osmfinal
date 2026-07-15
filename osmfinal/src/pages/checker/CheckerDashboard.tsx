@@ -54,21 +54,26 @@ export default function CheckerDashboard() {
     setSheetsLoading(true);
     try {
       const response = await assignmentService.getMyAssignedSheets();
+      console.log('📥 API Response:', response); // ✅ Debug log
+
       if (response.success) {
-        setSheets(response.data.items || []);
-        setStats(
-          response.data.stats || {
-            pending: 0,
-            checking: 0,
-            completed: 0,
-            recheck: 0,
-          },
-        );
+        const items = response.data.items || [];
+        const statsData = response.data.stats || {
+          pending: 0,
+          checking: 0,
+          completed: 0,
+          recheck: 0,
+        };
+
+        console.log('📊 Stats from API:', statsData); // ✅ Debug log
+
+        setSheets(items);
+        setStats(statsData);
       } else {
         showToast(response.message || 'Failed to load sheets', 'error');
       }
     } catch (error) {
-      console.error('Fetch sheets error:', error);
+      console.error('❌ Fetch sheets error:', error);
       showToast('Failed to load sheets', 'error');
     } finally {
       setSheetsLoading(false);
@@ -79,20 +84,22 @@ export default function CheckerDashboard() {
     fetchSheets();
   }, [fetchSheets]);
 
-  // ─── CALCULATE STATS ─────────────────────────────────────────
+  // ─── CALCULATE STATS DYNAMICALLY FROM API ──────────────────
 
+  // ✅ Use API stats directly instead of calculating from sheets
+  // This ensures consistency with backend
   const totalAssigned = sheets.length;
-  const completedSheets = sheets.filter(
-    (s) => s.status === 'checked' || s.status === 'rechecked',
-  ).length;
-  const checkingSheets = sheets.filter((s) => s.status === 'checking').length;
-  const pendingSheets = sheets.filter(
-    (s) => s.status === 'assigned' || s.status === 'uploaded',
-  ).length;
-  const recheckSheets = sheets.filter((s) => s.status === 'recheck').length;
+
+  // ✅ Use stats from API response
+  const pendingSheets = stats.pending || 0;
+  const checkingSheets = stats.checking || 0;
+  const completedSheets = stats.completed || 0;
+  const recheckSheets = stats.recheck || 0;
+
+  // ✅ Calculate escalated sheets from sheets data
   const escalatedSheets = sheets.filter((s) => s.status === 'escalated').length;
 
-  // Calculate average marks for completed sheets
+  // ✅ Calculate average marks for completed sheets from API data
   const averageMarks =
     completedSheets > 0
       ? (
@@ -145,7 +152,7 @@ export default function CheckerDashboard() {
       )}
 
       {/* ─── WELCOME CARD ──────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl p-6">
+      <div className="bg-white rounded-2xl p-6 border border-gray-100">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-violet-600 flex items-center justify-center shrink-0">
             <span className="text-white text-lg font-semibold">
@@ -306,7 +313,7 @@ export default function CheckerDashboard() {
                     Status
                   </th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Min Time
+                    Time
                   </th>
                   <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-400 uppercase tracking-wider">
                     Action

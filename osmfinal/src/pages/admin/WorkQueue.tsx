@@ -6,6 +6,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { usePageLoading } from '@/hooks/usePageLoading';
 import workQueueService, { Sheet, RecheckUser } from '@/api/workQueue';
 import { examApi, ExamResponse } from '@/api/exam';
+import api from '@/api/axios';
 
 type TabKey =
   | 'all'
@@ -87,14 +88,17 @@ export default function WorkQueue() {
   const [reassignModal, setReassignModal] = useState<{
     open: boolean;
     sheetId: number | null;
-    currentRecheckerId: string | null;
+    currentAssigneeId: string | null;
     sheetIds?: number[];
+    reassignType: 'checker' | 'rechecker' | null;
   }>({
     open: false,
     sheetId: null,
-    currentRecheckerId: null,
+    currentAssigneeId: null,
+    reassignType: null,
   });
   const [selectedReassigner, setSelectedReassigner] = useState<string>('');
+  const [availableCheckers, setAvailableCheckers] = useState<any[]>([]);
   const [availableRecheckers, setAvailableRecheckers] = useState<RecheckUser[]>(
     [],
   );
@@ -146,7 +150,7 @@ export default function WorkQueue() {
 
       if (activeTab !== 'all') {
         const statusMap: Record<Exclude<TabKey, 'all'>, string> = {
-          pending: 'linked,uploaded,assigned',
+          pending: 'linked,uploaded,assigned,recheck',
           checking: 'checking',
           rechecking: 'recheck',
           completed: 'checked,rechecked',
@@ -158,10 +162,15 @@ export default function WorkQueue() {
           'checking,recheck,escalated,linked,uploaded,assigned,checked,rechecked';
       }
 
+      console.log('📤 Fetching sheets with params:', params);
+
       const response = await workQueueService.getSheets(params);
+
+      console.log('📥 Sheets response:', response);
 
       if (response.success) {
         let filteredSheets = response.data.items || [];
+        console.log('📋 Filtered sheets:', filteredSheets);
 
         filteredSheets = filteredSheets.filter(
           (sheet: Sheet) => sheet.status !== 'unlinked',
@@ -180,10 +189,11 @@ export default function WorkQueue() {
           escalated: parseInt(statsData.escalated || 0),
         });
       } else {
+        console.error('❌ API returned error:', response.message);
         showToast(response.message || 'Failed to load sheets', 'error');
       }
     } catch (error) {
-      console.error('Fetch sheets error:', error);
+      console.error('❌ Fetch sheets error:', error);
       showToast('Failed to load sheets', 'error');
     } finally {
       setSheetsLoading(false);
@@ -210,7 +220,39 @@ export default function WorkQueue() {
     }
   }, []);
 
-  // ─── FETCH AVAILABLE RECHECKERS ─────────────────────────────
+  // ─── FETCH AVAILABLE CHECKERS ─────────────────────────────
+
+  const fetchAvailableCheckers = async (examId: string | null) => {
+    try {
+      if (!examId) {
+        console.log('⚠️ No examId provided, setting empty checkers');
+        setAvailableCheckers([]);
+        return;
+      }
+
+      console.log('🔍 Fetching checkers for exam:', examId);
+      const response = await api.get(
+        `/api/v1/assignments/exams/${examId}/checkers/available`,
+      );
+      console.log('✅ Checkers response:', response.data);
+
+      if (response.data.success) {
+        setAvailableCheckers(response.data.data || []);
+      } else {
+        setAvailableCheckers([]);
+        showToast(response.data.message || 'Failed to fetch checkers', 'error');
+      }
+    } catch (error: any) {
+      console.error('❌ Fetch available checkers error:', error);
+      setAvailableCheckers([]);
+      showToast(
+        error.response?.data?.message || 'Failed to fetch checkers',
+        'error',
+      );
+    }
+  };
+
+  // ─── FETCH AVAILABLE RECHECKERS ────────────────────────────
 
   const fetchAvailableRecheckers = async (excludeId: string | null) => {
     try {
@@ -222,6 +264,7 @@ export default function WorkQueue() {
       }
     } catch (error) {
       console.error('Fetch available recheckers error:', error);
+      setAvailableRecheckers([]);
     }
   };
 
@@ -288,39 +331,85 @@ export default function WorkQueue() {
 
   const openReassignModal = (
     sheetId: number,
-    currentRecheckerId: string | null,
+    currentAssigneeId: string | null,
+    examId: string | null,
+    reassignType: 'checker' | 'rechecker',
   ) => {
+    console.log(
+      '📋 Opening reassign modal for sheet:',
+      sheetId,
+      'examId:',
+      examId,
+      'type:',
+      reassignType,
+    );
     setReassignModal({
       open: true,
       sheetId,
-      currentRecheckerId,
+      currentAssigneeId,
+      reassignType,
     });
     setIsBulkMode(false);
     setSelectedReassigner('');
     setReassignError('');
-    fetchAvailableRecheckers(currentRecheckerId);
+
+    if (reassignType === 'checker') {
+      fetchAvailableCheckers(examId);
+    } else {
+      fetchAvailableRecheckers(currentAssigneeId);
+    }
   };
 
   // ─── OPEN BULK REASSIGN MODAL ──────────────────────────────
 
   const openBulkReassignModal = (
     sheetIds: number[],
-    currentRecheckerId: string | null,
+    currentAssigneeId: string | null,
+    examId: string | null,
+    reassignType: 'checker' | 'rechecker',
   ) => {
     if (sheetIds.length === 0) {
       showToast('Please select at least one sheet', 'error');
       return;
     }
+
+    const selectedSheets = sheets.filter((s) => sheetIds.includes(s.id));
+    const examIds = selectedSheets.map((s) => s.exam_id).filter(Boolean);
+    const uniqueExamIds = [...new Set(examIds)];
+
+    if (uniqueExamIds.length > 1) {
+      showToast('All selected sheets must belong to the same exam', 'error');
+      setSelectedSheetIds([]);
+      return;
+    }
+
+    const examIdToUse = uniqueExamIds[0] || examId;
+
+    console.log(
+      '📋 Opening bulk reassign modal for sheets:',
+      sheetIds,
+      'examId:',
+      examIdToUse,
+      'type:',
+      reassignType,
+    );
+
     setReassignModal({
       open: true,
       sheetId: null,
-      currentRecheckerId,
+      currentAssigneeId,
       sheetIds,
+      reassignType,
     });
     setIsBulkMode(true);
     setSelectedReassigner('');
     setReassignError('');
-    fetchAvailableRecheckers(currentRecheckerId);
+
+    if (reassignType === 'checker') {
+      fetchAvailableCheckers(examIdToUse);
+    } else {
+      fetchAvailableRecheckers(currentAssigneeId);
+    }
   };
 
   // ─── HANDLE REASSIGN SUBMIT ─────────────────────────────────
@@ -329,7 +418,7 @@ export default function WorkQueue() {
     setReassignError('');
 
     if (!selectedReassigner) {
-      setReassignError('Please select a rechecker');
+      setReassignError('Please select a reassignee');
       return;
     }
 
@@ -340,43 +429,120 @@ export default function WorkQueue() {
 
     setReassignLoading(true);
     try {
-      let response;
+      let sheetIds: number[] = [];
+      let examId: string | null = null;
+
       if (
         isBulkMode &&
         reassignModal.sheetIds &&
         reassignModal.sheetIds.length > 0
       ) {
-        response = await workQueueService.reassignBulkRecheck({
-          assignTo: selectedReassigner,
-          sheetIds: reassignModal.sheetIds,
-        });
-      } else if (reassignModal.sheetId) {
-        response = await workQueueService.reassignRecheck(
-          reassignModal.sheetId,
-          {
-            assignTo: selectedReassigner,
-          },
+        const selectedSheets = sheets.filter((s) =>
+          reassignModal.sheetIds?.includes(s.id),
         );
+
+        const examIds = selectedSheets.map((s) => s.exam_id).filter(Boolean);
+        const uniqueExamIds = [...new Set(examIds)];
+
+        if (uniqueExamIds.length > 1) {
+          showToast(
+            'All selected sheets must belong to the same exam',
+            'error',
+          );
+          setReassignLoading(false);
+          return;
+        }
+
+        examId = uniqueExamIds[0] || null;
+        sheetIds = reassignModal.sheetIds;
+      } else if (reassignModal.sheetId) {
+        const sheet = sheets.find((s) => s.id === reassignModal.sheetId);
+        if (!sheet) {
+          showToast('Sheet not found', 'error');
+          setReassignLoading(false);
+          return;
+        }
+        examId = sheet.exam_id;
+        sheetIds = [reassignModal.sheetId];
       }
 
-      if (response?.success) {
-        setSuccessMessage(response.message || 'Reassigned successfully');
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 3000);
-        setReassignModal({
-          open: false,
-          sheetId: null,
-          currentRecheckerId: null,
-        });
-        setIsBulkMode(false);
-        setSelectedSheetIds([]);
-        await fetchSheets();
-      } else {
-        showToast(response?.message || 'Failed to reassign', 'error');
+      if (!examId) {
+        showToast('Exam ID not found', 'error');
+        setReassignLoading(false);
+        return;
       }
+
+      if (reassignModal.reassignType === 'checker') {
+        console.log(
+          '📤 Reassigning sheets to checker:',
+          sheetIds,
+          'checker:',
+          selectedReassigner,
+          'examId:',
+          examId,
+        );
+
+        const response = await api.post(
+          `/api/v1/assignments/exams/${examId}/assign`,
+          {
+            checkerId: selectedReassigner,
+            sheetIds: sheetIds,
+          },
+        );
+
+        console.log('✅ Reassign response:', response.data);
+
+        if (response.data.success) {
+          setSuccessMessage(
+            response.data.message || 'Reassigned to checker successfully',
+          );
+          setShowSuccess(true);
+          setTimeout(() => setShowSuccess(false), 3000);
+        } else {
+          showToast(response.data.message || 'Failed to reassign', 'error');
+          setReassignLoading(false);
+          return;
+        }
+      } else {
+        console.log(
+          '📤 Reassigning sheets to rechecker:',
+          sheetIds,
+          'rechecker:',
+          selectedReassigner,
+        );
+
+        const response = await workQueueService.reassignBulkRecheck({
+          assignTo: selectedReassigner,
+          sheetIds: sheetIds,
+        });
+
+        console.log('✅ Reassign recheck response:', response);
+
+        if (response.success) {
+          setSuccessMessage(
+            response.message || 'Reassigned to rechecker successfully',
+          );
+          setShowSuccess(true);
+          setTimeout(() => setShowSuccess(false), 3000);
+        } else {
+          showToast(response.message || 'Failed to reassign', 'error');
+          setReassignLoading(false);
+          return;
+        }
+      }
+
+      setReassignModal({
+        open: false,
+        sheetId: null,
+        currentAssigneeId: null,
+        reassignType: null,
+      });
+      setIsBulkMode(false);
+      setSelectedSheetIds([]);
+      await fetchSheets();
     } catch (error: any) {
-      console.error('Reassign error:', error);
-      showToast(error.message || 'Failed to reassign', 'error');
+      console.error('❌ Reassign error:', error);
+      showToast(error.response?.data?.message || 'Failed to reassign', 'error');
     } finally {
       setReassignLoading(false);
     }
@@ -408,14 +574,156 @@ export default function WorkQueue() {
     return sheet.escalate_reason || 'Escalated';
   };
 
+  // ─── SHOULD SHOW FLAG BUTTON ────────────────────────────────
+
+  const shouldShowFlagButton = (sheet: Sheet): boolean => {
+    // ✅ All tab mein assigned status par Flag button mat dikhao
+    if (activeTab === 'all' && sheet.status === 'assigned') {
+      return false;
+    }
+
+    // ✅ Pending tab mein assigned status par Flag button mat dikhao
+    if (activeTab === 'pending' && sheet.status === 'assigned') {
+      return false;
+    }
+
+    // ✅ Pending tab mein sirf 'checked' aur 'rechecked' status par Flag dikhe
+    if (activeTab === 'pending') {
+      return sheet.status === 'checked' || sheet.status === 'rechecked';
+    }
+
+    // ✅ Checking tab mein Flag button nahi dikhega (sirf Reassign)
+    if (activeTab === 'checking') {
+      return false;
+    }
+
+    // ✅ Rechecking tab mein Flag button nahi dikhega (sirf Reassign)
+    if (activeTab === 'rechecking') {
+      return false;
+    }
+
+    // ✅ Completed tab mein sabhi sheets par Flag dikhe (except recheck/rechecked)
+    if (activeTab === 'completed') {
+      return sheet.status !== 'recheck' && sheet.status !== 'rechecked';
+    }
+
+    // ✅ Escalated tab mein Flag button nahi dikhega
+    if (activeTab === 'escalated') {
+      return false;
+    }
+
+    // ✅ All tab mein sabhi sheets par Flag dikhe (except assigned, recheck, rechecked)
+    if (activeTab === 'all') {
+      return (
+        sheet.status !== 'assigned' &&
+        sheet.status !== 'recheck' &&
+        sheet.status !== 'rechecked'
+      );
+    }
+
+    // Default: Flag button nahi dikhega
+    return false;
+  };
+
   // ─── HANDLE SELECT ALL ──────────────────────────────────────
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedSheetIds(sheets.map((s) => s.id));
+      if (activeTab === 'pending') {
+        // ✅ pending tab: assigned sheets select hongi
+        const selectableSheets = sheets.filter((s) => s.status === 'assigned');
+        setSelectedSheetIds(selectableSheets.map((s) => s.id));
+      } else if (activeTab === 'checking') {
+        // ✅ checking tab: assigned + checking
+        const selectableSheets = sheets.filter(
+          (s) => s.status === 'assigned' || s.status === 'checking',
+        );
+        setSelectedSheetIds(selectableSheets.map((s) => s.id));
+      } else if (activeTab === 'rechecking') {
+        const recheckSheets = sheets.filter((s) => s.status === 'recheck');
+        setSelectedSheetIds(recheckSheets.map((s) => s.id));
+      }
     } else {
       setSelectedSheetIds([]);
     }
+  };
+
+  // ─── CHECK IF SHEET IS SELECTABLE ─────────────────────────
+
+  const isSheetSelectable = (sheet: Sheet): boolean => {
+    if (activeTab === 'pending') {
+      // ✅ pending tab: assigned sheets selectable hongi
+      return sheet.status === 'assigned';
+    }
+    if (activeTab === 'checking') {
+      // ✅ checking tab: assigned + checking
+      return sheet.status === 'assigned' || sheet.status === 'checking';
+    }
+    if (activeTab === 'rechecking') {
+      return sheet.status === 'recheck';
+    }
+    return false;
+  };
+
+  // ─── CHECK IF REASSIGN ACTION SHOULD BE SHOWN ─────────────
+
+  const shouldShowReassignAction = (sheet: Sheet): boolean => {
+    if (activeTab === 'pending') {
+      // ✅ pending tab: assigned sheets par reassign dikhega
+      return sheet.status === 'assigned';
+    }
+    if (activeTab === 'checking') {
+      // ✅ checking tab: assigned + checking
+      return sheet.status === 'assigned' || sheet.status === 'checking';
+    }
+    if (activeTab === 'rechecking') {
+      return sheet.status === 'recheck';
+    }
+    return false;
+  };
+
+  // ─── GET REASSIGN TYPE FOR SELECTED SHEETS ─────────────────
+
+  const getReassignTypeForSelected = ():
+    | 'checker'
+    | 'rechecker'
+    | 'mixed'
+    | null => {
+    if (selectedSheetIds.length === 0) return null;
+
+    const selectedSheets = sheets.filter((s) =>
+      selectedSheetIds.includes(s.id),
+    );
+
+    // ✅ Check if all selected are 'assigned' (go to checker)
+    const allAreAssigned = selectedSheets.every((s) => s.status === 'assigned');
+
+    // ✅ Check if all selected are 'checking' or 'assigned' (both go to checker)
+    const allAreCheckerAssignable = selectedSheets.every(
+      (s) => s.status === 'assigned' || s.status === 'checking',
+    );
+
+    const allAreRecheck = selectedSheets.every((s) => s.status === 'recheck');
+
+    // ✅ Pending tab: only assigned sheets
+    if (activeTab === 'pending' && allAreAssigned) {
+      return 'checker';
+    }
+
+    if (activeTab === 'checking' && allAreCheckerAssignable && !allAreRecheck) {
+      return 'checker';
+    }
+
+    if (
+      activeTab === 'rechecking' &&
+      allAreRecheck &&
+      !allAreCheckerAssignable
+    ) {
+      return 'rechecker';
+    }
+
+    // Mixed statuses
+    return 'mixed';
   };
 
   // ─── CALCULATE PERCENTAGE ───────────────────────────────────
@@ -530,47 +838,107 @@ export default function WorkQueue() {
       </div>
 
       <div className="bg-white rounded-2xl overflow-hidden">
-        {/* Bulk Actions Bar - ONLY in pending tab */}
-        {activeTab === 'pending' && selectedSheetIds.length > 0 && (
-          <div className="flex items-center justify-between p-4 bg-amber-50 border-b border-amber-200">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-amber-700">
-                <i className="ri-checkbox-multiple-line mr-1"></i>
-                {selectedSheetIds.length} sheet(s) selected
-              </span>
+        {/* Bulk Actions Bar - in pending, checking or rechecking tab */}
+        {(activeTab === 'pending' ||
+          activeTab === 'checking' ||
+          activeTab === 'rechecking') &&
+          selectedSheetIds.length > 0 && (
+            <div
+              className={`flex items-center justify-between p-4 border-b ${
+                getReassignTypeForSelected() === 'mixed'
+                  ? 'bg-red-50 border-red-200'
+                  : getReassignTypeForSelected() === 'checker'
+                    ? 'bg-blue-50 border-blue-200'
+                    : 'bg-amber-50 border-amber-200'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span
+                  className={`text-sm font-medium ${
+                    getReassignTypeForSelected() === 'mixed'
+                      ? 'text-red-700'
+                      : getReassignTypeForSelected() === 'checker'
+                        ? 'text-blue-700'
+                        : 'text-amber-700'
+                  }`}
+                >
+                  <i className="ri-checkbox-multiple-line mr-1"></i>
+                  {selectedSheetIds.length} sheet(s) selected
+                </span>
+                {getReassignTypeForSelected() === 'mixed' && (
+                  <span className="text-xs text-red-600">
+                    ⚠️ You have selected mixed status sheets. Please select only
+                    {activeTab === 'pending'
+                      ? ' assigned'
+                      : activeTab === 'checking'
+                        ? ' assigned/checking'
+                        : ' recheck'}{' '}
+                    sheets.
+                  </span>
+                )}
+                {getReassignTypeForSelected() === 'checker' && (
+                  <span className="text-xs text-blue-600">
+                    (
+                    {activeTab === 'pending' ? 'Assigned' : 'Assigned/Checking'}{' '}
+                    sheets - will reassign to another checker)
+                  </span>
+                )}
+                {getReassignTypeForSelected() === 'rechecker' && (
+                  <span className="text-xs text-amber-600">
+                    (Recheck sheets - will reassign to another rechecker)
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {getReassignTypeForSelected() !== 'mixed' && (
+                  <button
+                    onClick={() => {
+                      const firstSheet = sheets.find(
+                        (s) => s.id === selectedSheetIds[0],
+                      );
+                      if (firstSheet) {
+                        const reassignType = getReassignTypeForSelected();
+                        if (reassignType === 'checker') {
+                          openBulkReassignModal(
+                            selectedSheetIds,
+                            firstSheet.assigned_to || null,
+                            firstSheet.exam_id,
+                            'checker',
+                          );
+                        } else if (reassignType === 'rechecker') {
+                          openBulkReassignModal(
+                            selectedSheetIds,
+                            firstSheet.assigned_to || null,
+                            firstSheet.exam_id,
+                            'rechecker',
+                          );
+                        }
+                      }
+                    }}
+                    disabled={getReassignTypeForSelected() === 'mixed'}
+                    className={`text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                      getReassignTypeForSelected() === 'mixed'
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : getReassignTypeForSelected() === 'checker'
+                          ? 'bg-blue-600 text-white hover:bg-blue-700'
+                          : 'bg-amber-600 text-white hover:bg-amber-700'
+                    }`}
+                  >
+                    <i className="ri-exchange-line"></i>
+                    {getReassignTypeForSelected() === 'checker'
+                      ? 'Reassign to Another Checker'
+                      : 'Reassign to Another Rechecker'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setSelectedSheetIds([])}
+                  className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  const firstSheet = sheets.find(
-                    (s) => s.id === selectedSheetIds[0],
-                  );
-                  if (firstSheet && firstSheet.assigned_to) {
-                    openBulkReassignModal(
-                      selectedSheetIds,
-                      firstSheet.assigned_to || null,
-                    );
-                  } else {
-                    showToast(
-                      'Selected sheets must be assigned first',
-                      'error',
-                    );
-                  }
-                }}
-                className="text-sm font-medium px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <i className="ri-exchange-line"></i>
-                Reassign Selected
-              </button>
-              <button
-                onClick={() => setSelectedSheetIds([])}
-                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        )}
+          )}
 
         <div className="overflow-x-auto">
           {sheetsLoading ? (
@@ -588,18 +956,22 @@ export default function WorkQueue() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50">
-                  {/* Checkbox column - ONLY in pending tab */}
-                  {activeTab === 'pending' && (
+                  {/* ✅ Checkbox column - in pending, checking or rechecking tab */}
+                  {(activeTab === 'pending' ||
+                    activeTab === 'checking' ||
+                    activeTab === 'rechecking') && (
                     <th className="text-left py-3 px-2 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                       <input
                         type="checkbox"
                         checked={
-                          sheets.length > 0 &&
-                          selectedSheetIds.length === sheets.length
+                          sheets.filter((s) => isSheetSelectable(s)).length >
+                            0 &&
+                          selectedSheetIds.length ===
+                            sheets.filter((s) => isSheetSelectable(s)).length
                         }
                         onChange={(e) => handleSelectAll(e.target.checked)}
                         className="rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
-                        title="Select all sheets"
+                        title="Select all selectable sheets"
                       />
                     </th>
                   )}
@@ -646,6 +1018,11 @@ export default function WorkQueue() {
                   const isRecheckDisabled =
                     sheet.status === 'recheck' || sheet.status === 'rechecked';
                   const isEscalated = sheet.status === 'escalated';
+                  const isAssigned = sheet.status === 'assigned';
+                  const isChecking = sheet.status === 'checking';
+                  const isRecheck = sheet.status === 'recheck';
+                  const isChecked =
+                    sheet.status === 'checked' || sheet.status === 'rechecked';
 
                   const timeSpent =
                     (sheet as any).time_spent ||
@@ -657,36 +1034,40 @@ export default function WorkQueue() {
                     sheet.total_marks || 0,
                   );
 
-                  // ✅ Use index as fallback for unique key
                   const uniqueKey = `${sheet.id}-${index}`;
+                  const selectable = isSheetSelectable(sheet);
 
                   return (
                     <tr
                       key={uniqueKey}
                       className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
                     >
-                      {/* Checkbox cell - ONLY in pending tab */}
-                      {activeTab === 'pending' && (
+                      {/* ✅ Checkbox cell - pending, checking or rechecking tab */}
+                      {(activeTab === 'pending' ||
+                        activeTab === 'checking' ||
+                        activeTab === 'rechecking') && (
                         <td className="py-3 px-2">
-                          <input
-                            type="checkbox"
-                            checked={selectedSheetIds.includes(sheet.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedSheetIds([
-                                  ...selectedSheetIds,
-                                  sheet.id,
-                                ]);
-                              } else {
-                                setSelectedSheetIds(
-                                  selectedSheetIds.filter(
-                                    (id) => id !== sheet.id,
-                                  ),
-                                );
-                              }
-                            }}
-                            className="rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
-                          />
+                          {selectable && (
+                            <input
+                              type="checkbox"
+                              checked={selectedSheetIds.includes(sheet.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedSheetIds([
+                                    ...selectedSheetIds,
+                                    sheet.id,
+                                  ]);
+                                } else {
+                                  setSelectedSheetIds(
+                                    selectedSheetIds.filter(
+                                      (id) => id !== sheet.id,
+                                    ),
+                                  );
+                                }
+                              }}
+                              className="rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
+                            />
+                          )}
                         </td>
                       )}
                       <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
@@ -783,8 +1164,8 @@ export default function WorkQueue() {
                             </span>
                           ) : (
                             <>
-                              {/* Flag for Recheck Button - Show in all tabs except rechecking */}
-                              {activeTab !== 'rechecking' && (
+                              {/* ✅ Flag button - using shouldShowFlagButton function */}
+                              {shouldShowFlagButton(sheet) && (
                                 <button
                                   onClick={() => openFlagModal(sheet.id)}
                                   disabled={isRecheckDisabled}
@@ -803,13 +1184,54 @@ export default function WorkQueue() {
                                 </button>
                               )}
 
-                              {/* Reassign Button - ONLY in pending tab AND only if sheet is assigned */}
-                              {activeTab === 'pending' && sheet.assigned_to && (
+                              {/* ✅ Reassign Button - for pending tab assigned sheets */}
+                              {activeTab === 'pending' && isAssigned && (
                                 <button
                                   onClick={() =>
                                     openReassignModal(
                                       sheet.id,
                                       sheet.assigned_to || null,
+                                      sheet.exam_id,
+                                      'checker',
+                                    )
+                                  }
+                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100"
+                                  title="Reassign to another checker"
+                                >
+                                  <i className="ri-exchange-line mr-0.5"></i>
+                                  Reassign
+                                </button>
+                              )}
+
+                              {/* ✅ Reassign Button - for checking tab assigned or checking sheets */}
+                              {activeTab === 'checking' &&
+                                (isAssigned || isChecking) && (
+                                  <button
+                                    onClick={() =>
+                                      openReassignModal(
+                                        sheet.id,
+                                        sheet.assigned_to || null,
+                                        sheet.exam_id,
+                                        'checker',
+                                      )
+                                    }
+                                    className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100"
+                                    title="Reassign to another checker"
+                                  >
+                                    <i className="ri-exchange-line mr-0.5"></i>
+                                    Reassign
+                                  </button>
+                                )}
+
+                              {/* Reassign Button - for rechecking tab recheck sheets */}
+                              {activeTab === 'rechecking' && isRecheck && (
+                                <button
+                                  onClick={() =>
+                                    openReassignModal(
+                                      sheet.id,
+                                      sheet.assigned_to || null,
+                                      sheet.exam_id,
+                                      'rechecker',
                                     )
                                   }
                                   className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100"
@@ -818,6 +1240,29 @@ export default function WorkQueue() {
                                   <i className="ri-exchange-line mr-0.5"></i>
                                   Reassign
                                 </button>
+                              )}
+
+                              {/* Show status label for other statuses */}
+                              {activeTab === 'pending' &&
+                                !isChecked &&
+                                !isAssigned && (
+                                  <span className="text-xs text-gray-400 italic capitalize">
+                                    {sheet.status}
+                                  </span>
+                                )}
+
+                              {activeTab === 'checking' &&
+                                !isAssigned &&
+                                !isChecking && (
+                                  <span className="text-xs text-gray-400 italic capitalize">
+                                    {sheet.status}
+                                  </span>
+                                )}
+
+                              {activeTab === 'rechecking' && !isRecheck && (
+                                <span className="text-xs text-gray-400 italic capitalize">
+                                  {sheet.status}
+                                </span>
                               )}
                             </>
                           )}
@@ -873,30 +1318,7 @@ export default function WorkQueue() {
                       This sheet only
                     </div>
                   </button>
-                  
-                  {/* <button
-                    onClick={() => setFlagOption('entire')}
-                    className={`flex-1 py-3 px-4 rounded-xl border-2 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                      flagOption === 'entire'
-                        ? 'border-gray-900 bg-gray-50 text-gray-900'
-                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 justify-center">
-                      <span className="w-4 h-4 flex items-center justify-center">
-                        <i className="ri-stack-line"></i>
-                      </span>
-                      Entire exam
-                    </div>
-                  </button> */}
-
                 </div>
-                {flagOption === 'entire' && (
-                  <p className="text-xs text-amber-600 mt-2">
-                    <i className="ri-information-line mr-1"></i>
-                    All sheets for this exam will be flagged for recheck
-                  </p>
-                )}
               </div>
 
               <div>
@@ -990,12 +1412,18 @@ export default function WorkQueue() {
 
       {/* ─── REASSIGN MODAL ────────────────────────────────────── */}
 
+      {/* ─── REASSIGN MODAL ────────────────────────────────────── */}
+
+      {/* ─── REASSIGN MODAL ────────────────────────────────────── */}
+
       {reassignModal.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h4 className="text-base font-semibold text-gray-900">
-                Reassign Recheck
+                {reassignModal.reassignType === 'checker'
+                  ? 'Reassign to Another Checker'
+                  : 'Reassign to Another Rechecker'}
                 <span className="text-sm font-normal text-gray-400 ml-2">
                   {isBulkMode
                     ? `${reassignModal.sheetIds?.length || 0} sheets`
@@ -1007,7 +1435,8 @@ export default function WorkQueue() {
                   setReassignModal({
                     open: false,
                     sheetId: null,
-                    currentRecheckerId: null,
+                    currentAssigneeId: null,
+                    reassignType: null,
                   });
                   setIsBulkMode(false);
                 }}
@@ -1020,75 +1449,178 @@ export default function WorkQueue() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Select New Rechecker
+                  Select New{' '}
+                  {reassignModal.reassignType === 'checker'
+                    ? 'Checker'
+                    : 'Rechecker'}
                 </label>
-                {availableRecheckers.length === 0 ? (
-                  <div className="text-sm text-amber-600 bg-amber-50 px-4 py-3 rounded-lg">
-                    <i className="ri-information-line mr-1"></i>
-                    No other recheckers available.
-                    {reassignModal.currentRecheckerId && (
-                      <span className="block mt-1 text-xs">
-                        Current rechecker has the only active rechecker role.
-                      </span>
+                {reassignModal.reassignType === 'checker' ? (
+                  <>
+                    {availableCheckers.length === 0 ? (
+                      <div className="text-sm text-amber-600 bg-amber-50 px-4 py-3 rounded-lg">
+                        <i className="ri-information-line mr-1"></i>
+                        No other checkers available for this exam.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="relative">
+                          <select
+                            value={selectedReassigner}
+                            onChange={(e) => {
+                              setSelectedReassigner(e.target.value);
+                              if (reassignError) setReassignError('');
+                            }}
+                            className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white cursor-pointer appearance-none pr-10"
+                          >
+                            <option value="">Select checker...</option>
+                            {availableCheckers.map((c) => {
+                              // ✅ Create display text with truncation
+                              let displayText = c.name;
+                              if (c.subject) displayText += ` (${c.subject})`;
+                              if (c.role) displayText += ` - ${c.role}`;
+                              if (c.assigned_count !== undefined)
+                                displayText += ` - ${c.assigned_count} assigned`;
+                              if (c.hasConflict)
+                                displayText += ` - ⚠️ ${c.conflictReason}`;
+
+                              return (
+                                <option
+                                  key={c.id}
+                                  value={c.id}
+                                  className={`py-1 px-2 ${c.hasConflict ? 'text-red-500' : ''}`}
+                                  title={displayText}
+                                >
+                                  {displayText}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                            <i className="ri-arrow-down-s-line"></i>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1.5 flex items-center gap-1">
+                          <i className="ri-information-line"></i>
+                          Showing checkers with active status
+                          {availableCheckers.some((c) => c.hasConflict) && (
+                            <span className="text-red-400 ml-1">
+                              (⚠️ Subject mismatch)
+                            </span>
+                          )}
+                        </p>
+                      </>
                     )}
-                  </div>
+                  </>
                 ) : (
                   <>
-                    <select
-                      value={selectedReassigner}
-                      onChange={(e) => {
-                        setSelectedReassigner(e.target.value);
-                        if (reassignError) setReassignError('');
-                      }}
-                      className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white cursor-pointer"
-                    >
-                      <option value="">Select rechecker...</option>
-                      {availableRecheckers.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                          {r.subject ? ` (${r.subject})` : ''}
-                          {r.role && ` - ${r.role}`}
-                          {r.pending_count !== undefined &&
-                            r.pending_count > 0 &&
-                            ` - ${r.pending_count} pending`}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1.5">
-                      <i className="ri-information-line mr-0.5"></i>
-                      Showing recheckers with active status (excluding current)
-                    </p>
+                    {availableRecheckers.length === 0 ? (
+                      <div className="text-sm text-amber-600 bg-amber-50 px-4 py-3 rounded-lg">
+                        <i className="ri-information-line mr-1"></i>
+                        No other recheckers available.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="relative">
+                          <select
+                            value={selectedReassigner}
+                            onChange={(e) => {
+                              setSelectedReassigner(e.target.value);
+                              if (reassignError) setReassignError('');
+                            }}
+                            className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white cursor-pointer appearance-none pr-10"
+                          >
+                            <option value="">Select rechecker...</option>
+                            {availableRecheckers.map((r) => {
+                              let displayText = r.name;
+                              if (r.subject) displayText += ` (${r.subject})`;
+                              if (r.role) displayText += ` - ${r.role}`;
+                              if (
+                                r.pending_count !== undefined &&
+                                r.pending_count > 0
+                              ) {
+                                displayText += ` - ${r.pending_count} pending`;
+                              }
+
+                              return (
+                                <option
+                                  key={r.id}
+                                  value={r.id}
+                                  title={displayText}
+                                >
+                                  {displayText}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                            <i className="ri-arrow-down-s-line"></i>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1.5 flex items-center gap-1">
+                          <i className="ri-information-line"></i>
+                          Showing recheckers with active status
+                        </p>
+                      </>
+                    )}
                   </>
                 )}
                 {reassignError && (
-                  <p className="text-xs text-rose-500 mt-1">{reassignError}</p>
+                  <p className="text-xs text-rose-500 mt-1 flex items-center gap-1">
+                    <i className="ri-error-warning-line"></i>
+                    {reassignError}
+                  </p>
                 )}
               </div>
 
               {isBulkMode && reassignModal.sheetIds && (
-                <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-                  <p className="text-xs text-amber-700">
+                <div
+                  className={`rounded-lg p-3 border ${
+                    reassignModal.reassignType === 'checker'
+                      ? 'bg-blue-50 border-blue-200'
+                      : 'bg-amber-50 border-amber-200'
+                  }`}
+                >
+                  <p
+                    className={`text-xs ${
+                      reassignModal.reassignType === 'checker'
+                        ? 'text-blue-700'
+                        : 'text-amber-700'
+                    }`}
+                  >
                     <i className="ri-information-line mr-1"></i>
                     Reassigning <strong>
                       {reassignModal.sheetIds.length}
                     </strong>{' '}
-                    sheets to the selected rechecker
+                    sheets to the selected{' '}
+                    {reassignModal.reassignType === 'checker'
+                      ? 'checker'
+                      : 'rechecker'}
                   </p>
-                  <p className="text-[10px] text-amber-600 mt-1">
+                  <p
+                    className={`text-[10px] mt-1 ${
+                      reassignModal.reassignType === 'checker'
+                        ? 'text-blue-600'
+                        : 'text-amber-600'
+                    }`}
+                  >
                     Sheet IDs: {reassignModal.sheetIds.join(', ')}
                   </p>
                 </div>
               )}
 
-              {reassignModal.currentRecheckerId && (
+              {reassignModal.currentAssigneeId && (
                 <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-600">
-                    <i className="ri-user-line mr-1"></i>
-                    Current rechecker:{' '}
+                  <p className="text-xs text-gray-600 flex items-center gap-1">
+                    <i className="ri-user-line"></i>
+                    Current{' '}
+                    {reassignModal.reassignType === 'checker'
+                      ? 'checker'
+                      : 'rechecker'}
+                    :{' '}
                     <span className="font-medium">
                       {sheets.find(
                         (s) =>
-                          s.assigned_to === reassignModal.currentRecheckerId,
+                          s.assigned_to === reassignModal.currentAssigneeId,
                       )?.assigned_to_name || 'Unknown'}
                     </span>
                   </p>
@@ -1102,7 +1634,8 @@ export default function WorkQueue() {
                   setReassignModal({
                     open: false,
                     sheetId: null,
-                    currentRecheckerId: null,
+                    currentAssigneeId: null,
+                    reassignType: null,
                   });
                   setIsBulkMode(false);
                 }}
@@ -1115,9 +1648,15 @@ export default function WorkQueue() {
                 disabled={
                   !selectedReassigner ||
                   reassignLoading ||
-                  availableRecheckers.length === 0
+                  (reassignModal.reassignType === 'checker'
+                    ? availableCheckers.length === 0
+                    : availableRecheckers.length === 0)
                 }
-                className="flex-1 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap flex items-center justify-center gap-2"
+                className={`flex-1 py-2.5 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap flex items-center justify-center gap-2 ${
+                  reassignModal.reassignType === 'checker'
+                    ? 'bg-blue-600 hover:bg-blue-700'
+                    : 'bg-amber-600 hover:bg-amber-700'
+                }`}
               >
                 {reassignLoading ? (
                   <>

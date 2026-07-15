@@ -8,6 +8,8 @@ import {
   getSubmittedMarks,
   escalateSheet,
   getEscalatedSheets,
+  getCheckedSheets,
+  getCheckedSheetById,
 } from './checkerMarkingCont.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
@@ -32,5 +34,16 @@ router.post('/sheet/:sheetId/escalate', verifyToken, escalateSheet);
 
 // Get escalated sheets
 router.get('/escalated', verifyToken, getEscalatedSheets);
+
+// ─── CHECKED SHEETS ROUTES ─────────────────────────────────────
+
+// Get all checked sheets
+router.get('/checked-sheets', verifyToken, getCheckedSheets);
+
+// Get checked sheets by exam
+router.get('/checked-sheets/:examId', verifyToken, getCheckedSheets);
+
+// Get checked sheet by ID
+router.get('/checked-sheet/:id', verifyToken, getCheckedSheetById);
 
 export default router;

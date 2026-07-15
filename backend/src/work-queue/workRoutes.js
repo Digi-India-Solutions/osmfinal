@@ -1,3 +1,5 @@
+// src/work-queue/workRoutes.js
+
 import { Router } from 'express';
 import {
   getSheets,
@@ -11,7 +13,7 @@ import {
   assignSheet,
   reassignRecheckRequests,
   getAvailableRecheckers,
-} from '../work-queue/workController.js';
+} from './workController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
 const router = Router();
@@ -49,14 +51,13 @@ router.get('/users/recheckers', verifyToken, getRecheckUsers);
 
 // ─── REASSIGN ROUTES ────────────────────────────────────────────
 
-// ✅ Reassign single sheet
+// Reassign single sheet
 router.post('/recheck/:sheetId/reassign', verifyToken, reassignRecheckRequests);
 
-// ✅ Reassign multiple sheets (bulk)
+// Reassign multiple sheets (bulk)
 router.post('/recheck/bulk/reassign', verifyToken, reassignRecheckRequests);
 
-// ✅ Get available recheckers (excluding current)
-// Use two separate routes instead of optional parameter
+// Get available recheckers (excluding current)
 router.get('/recheckers/available', verifyToken, getAvailableRecheckers);
 router.get(
   '/recheckers/available/:excludeId',

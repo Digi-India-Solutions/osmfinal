@@ -1,9 +1,28 @@
 // src/checker/checkerMarkingCont.js
 
 import pool from '../pool.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ✅ Uploads directory - project root ke andar
+const PROJECT_ROOT = path.join(__dirname, '..', '..'); // backend folder
+const UPLOADS_DIR = path.join(PROJECT_ROOT, 'uploads');
+
+console.log('📁 Uploads directory:', UPLOADS_DIR);
+
+// ─── HELPER: Make a safe folder/file-name segment ──────────────
+const sanitizeForFolderName = (value) => {
+  if (!value) return null;
+  return String(value)
+    .trim()
+    .replace(/[^a-zA-Z0-9-_]/g, '_');
+};
 
 // ─── SAVE DRAFT MARKS ──────────────────────────────────────────
-
 export const saveDraft = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -17,7 +36,6 @@ export const saveDraft = async (req, res) => {
       timeSpent,
     } = req.body;
 
-    // Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
       `SELECT a.sheet_id, s.exam_id 
        FROM assignments a
@@ -35,7 +53,6 @@ export const saveDraft = async (req, res) => {
 
     const examId = assignmentCheck.rows[0].exam_id;
 
-    // Check if already submitted
     const existing = await pool.query(
       `SELECT id, is_submitted FROM checker_markings 
        WHERE sheet_id = $1 AND checker_id = $2`,
@@ -52,7 +69,6 @@ export const saveDraft = async (req, res) => {
     let result;
 
     if (existing.rows.length > 0) {
-      // Update existing - always save as draft
       result = await pool.query(
         `UPDATE checker_markings 
          SET marks_data = $1,
@@ -77,7 +93,6 @@ export const saveDraft = async (req, res) => {
         ],
       );
     } else {
-      // Insert new
       result = await pool.query(
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
@@ -99,7 +114,6 @@ export const saveDraft = async (req, res) => {
       );
     }
 
-    // Update sheet status to 'checking' if it's not already
     await pool.query(
       `UPDATE sheets 
        SET marks = $1, 
@@ -126,7 +140,6 @@ export const saveDraft = async (req, res) => {
 };
 
 // ─── SUBMIT MARKS ──────────────────────────────────────────────
-
 export const submitMarks = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -140,9 +153,9 @@ export const submitMarks = async (req, res) => {
       timeSpent,
     } = req.body;
 
-    // Check if sheet is assigned to this checker
+    // ✅ Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
-      `SELECT a.sheet_id, s.exam_id 
+      `SELECT a.sheet_id, s.exam_id, s.file_url, s.file_name, s.student_name, s.roll_no, s.barcode
        FROM assignments a
        JOIN sheets s ON a.sheet_id = s.id
        WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
@@ -157,8 +170,9 @@ export const submitMarks = async (req, res) => {
     }
 
     const examId = assignmentCheck.rows[0].exam_id;
+    const sheetData = assignmentCheck.rows[0];
 
-    // Check if marking record exists
+    // ✅ Check if marking record exists
     const existing = await pool.query(
       `SELECT id FROM checker_markings 
        WHERE sheet_id = $1 AND checker_id = $2`,
@@ -166,12 +180,9 @@ export const submitMarks = async (req, res) => {
     );
 
     let result;
-
-    // ✅ Calculate final time spent (if provided)
     const finalTimeSpent = timeSpent || 0;
 
     if (existing.rows.length > 0) {
-      // Update existing record
       result = await pool.query(
         `UPDATE checker_markings 
          SET marks_data = $1,
@@ -198,7 +209,6 @@ export const submitMarks = async (req, res) => {
         ],
       );
     } else {
-      // Insert new record
       result = await pool.query(
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
@@ -221,15 +231,110 @@ export const submitMarks = async (req, res) => {
       );
     }
 
-    // ✅ Update sheet marks, status AND time spent
+    // ✅ ========================================================
+    // ✅ CHECKED SHEETS FOLDER MEIN FILE SAVE KARO
+    // ✅ ========================================================
+
+    let fileMoved = false;
+    let newFilePath = null;
+    let checkedFolder = null;
+
+    try {
+      // ✅ Folder name: barcode use karo, agar nahi hai toh sheetId
+      const folderKey =
+        sanitizeForFolderName(sheetData.barcode) || `sheet-${sheetId}`;
+
+      // ✅ Folder path: checked-sheets/{examId}/{barcode}/
+      checkedFolder = `checked-sheets/${examId}/${folderKey}`;
+
+      // ✅ File name
+      let fileName = sheetData.file_name;
+      if (!fileName && sheetData.file_url) {
+        fileName = path.basename(sheetData.file_url);
+      }
+      if (!fileName) {
+        fileName = `${folderKey}.pdf`;
+      }
+
+      // ✅ Source file path (where file currently is)
+      let sourcePath = null;
+
+      // ✅ Check multiple possible locations for the file
+      const possiblePaths = [
+        path.join(UPLOADS_DIR, 'sheets', fileName), // uploads/sheets/BAR055.pdf
+        path.join(UPLOADS_DIR, fileName), // uploads/BAR055.pdf
+        path.join(UPLOADS_DIR, 'uploads', 'sheets', fileName), // uploads/uploads/sheets/BAR055.pdf
+      ];
+
+      console.log(`🔍 Looking for file: ${fileName}`);
+      console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
+
+      for (const p of possiblePaths) {
+        console.log(`   Checking: ${p}`);
+        if (fs.existsSync(p)) {
+          sourcePath = p;
+          console.log(`✅ Found file at: ${p}`);
+          break;
+        }
+      }
+
+      if (sourcePath) {
+        // ✅ Destination path: uploads/checked-sheets/{examId}/{barcode}/{fileName}
+        const destPath = path.join(UPLOADS_DIR, checkedFolder, fileName);
+        console.log(`📄 Destination: ${destPath}`);
+
+        // ✅ Create directory if not exists
+        const dir = path.dirname(destPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+          console.log(`📁 Created directory: ${dir}`);
+        }
+
+        // ✅ Copy file to checked-sheets folder
+        fs.copyFileSync(sourcePath, destPath);
+        console.log(`✅ File copied to: ${destPath}`);
+
+        fileMoved = true;
+        newFilePath = `/${checkedFolder}/${fileName}`;
+      } else {
+        console.error(`❌ File not found in any location!`);
+        console.error(`   Tried:`, possiblePaths);
+
+        // ✅ Dump what's in sheets folder for debugging
+        const sheetsDir = path.join(UPLOADS_DIR, 'sheets');
+        if (fs.existsSync(sheetsDir)) {
+          const files = fs.readdirSync(sheetsDir);
+          console.log(`📂 Files in sheets folder (${files.length}):`, files);
+        }
+      }
+    } catch (err) {
+      console.error(`❌ File copy error:`, err.message);
+    }
+
+    // ✅ Update sheet in database
+    const finalFileUrl = fileMoved ? newFilePath : sheetData.file_url;
+
     await pool.query(
       `UPDATE sheets 
        SET marks = $1, 
            status = 'checked', 
            checking_time_spent = $2,
+           is_checked = true,
+           checked_at = CURRENT_TIMESTAMP,
+           archived_folder = $3,
+           file_url = $4,
            updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $3`,
-      [totalMarks || 0, finalTimeSpent, sheetId],
+       WHERE id = $5`,
+      [totalMarks || 0, finalTimeSpent, checkedFolder, finalFileUrl, sheetId],
+    );
+
+    // ✅ Update assignment status
+    await pool.query(
+      `UPDATE assignments 
+       SET status = 'completed',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE sheet_id = $1 AND checker_id = $2`,
+      [sheetId, userId],
     );
 
     return res.status(200).json({
@@ -238,6 +343,9 @@ export const submitMarks = async (req, res) => {
       data: {
         ...result.rows[0],
         time_spent: finalTimeSpent,
+        archived_folder: checkedFolder,
+        new_file_path: newFilePath,
+        file_moved: fileMoved,
       },
     });
   } catch (error) {
@@ -251,7 +359,6 @@ export const submitMarks = async (req, res) => {
 };
 
 // ─── GET SAVED DRAFT ───────────────────────────────────────────
-
 export const getDraft = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -296,7 +403,7 @@ export const getDraft = async (req, res) => {
         stamps_data: row.stamps_data || [],
         total_marks: row.total_marks,
         remarks: row.remarks,
-        time_spent: row.time_spent || 0, // ✅ Return time spent
+        time_spent: row.time_spent || 0,
         is_draft: row.is_draft,
         is_submitted: row.is_submitted,
         submitted_at: row.submitted_at,
@@ -321,11 +428,9 @@ export const getDraft = async (req, res) => {
 };
 
 // ─── GET SUBMITTED MARKS ───────────────────────────────────────
-
 export const getSubmittedMarks = async (req, res) => {
   try {
     const { sheetId } = req.params;
-    const userId = req.user.id;
 
     const result = await pool.query(
       `SELECT 
@@ -334,6 +439,8 @@ export const getSubmittedMarks = async (req, res) => {
         s.student_name,
         s.roll_no,
         s.checking_time_spent,
+        s.archived_folder,
+        s.is_checked,
         e.name AS exam_name,
         e.subject AS exam_subject,
         u.name AS checker_name
@@ -368,21 +475,11 @@ export const getSubmittedMarks = async (req, res) => {
 };
 
 // ─── ESCALATE SHEET ─────────────────────────────────────────────
-
 export const escalateSheet = async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user.id;
     const { reason, escalateType, remarks, timeSpent } = req.body;
-
-    console.log('🔍 Escalate request:', {
-      sheetId,
-      userId,
-      reason,
-      escalateType,
-      remarks,
-      timeSpent,
-    });
 
     if (!reason) {
       return res.status(400).json({
@@ -406,7 +503,6 @@ export const escalateSheet = async (req, res) => {
 
     const examId = assignmentCheck.rows[0].exam_id;
 
-    // ✅ Update sheet status to 'escalated' with time spent
     const result = await pool.query(
       `UPDATE sheets 
        SET status = 'escalated',
@@ -436,7 +532,6 @@ export const escalateSheet = async (req, res) => {
       });
     }
 
-    // ✅ Also update checker_markings with time_spent
     const markingExists = await pool.query(
       `SELECT id FROM checker_markings 
        WHERE sheet_id = $1 AND checker_id = $2`,
@@ -452,7 +547,6 @@ export const escalateSheet = async (req, res) => {
         [timeSpent || 0, sheetId, userId],
       );
     } else {
-      // Insert if not exists
       await pool.query(
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
@@ -481,11 +575,8 @@ export const escalateSheet = async (req, res) => {
 };
 
 // ─── GET ESCALATED SHEETS ──────────────────────────────────────
-
 export const getEscalatedSheets = async (req, res) => {
   try {
-    const userId = req.user.id;
-
     const result = await pool.query(
       `SELECT 
         s.id,
@@ -520,6 +611,115 @@ export const getEscalatedSheets = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get escalated sheets',
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET CHECKED SHEETS ────────────────────────────────────────
+export const getCheckedSheets = async (req, res) => {
+  try {
+    const { examId } = req.params;
+
+    let query = `
+      SELECT DISTINCT ON (s.id)
+        s.id,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.marks,
+        s.checking_time_spent,
+        s.archived_folder,
+        s.file_url,
+        s.checked_at,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        u.name AS checker_name
+      FROM sheets s
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'completed'
+      LEFT JOIN users u ON a.checker_id = u.id
+      WHERE s.is_checked = true AND s.status = 'checked'
+    `;
+
+    const params = [];
+
+    if (examId) {
+      query += ` AND s.exam_id = $1`;
+      params.push(examId);
+    }
+
+    query += ` ORDER BY s.id, s.checked_at DESC`;
+
+    const result = await pool.query(query, params);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Checked sheets retrieved successfully',
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error('getCheckedSheets error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get checked sheets',
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET CHECKED SHEET BY ID ──────────────────────────────────
+export const getCheckedSheetById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT 
+        s.id,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.marks,
+        s.checking_time_spent,
+        s.archived_folder,
+        s.file_url,
+        s.checked_at,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        e."maxMarks" AS total_marks,
+        u.name AS checker_name,
+        cm.marks_data,
+        cm.annotations_data,
+        cm.remarks,
+        cm.submitted_at
+      FROM sheets s
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'completed'
+      LEFT JOIN users u ON a.checker_id = u.id
+      LEFT JOIN checker_markings cm ON s.id = cm.sheet_id AND cm.is_submitted = true
+      WHERE s.id = $1 AND s.is_checked = true
+      ORDER BY a.updated_at DESC
+      LIMIT 1`,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Checked sheet not found',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Checked sheet retrieved successfully',
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error('getCheckedSheetById error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get checked sheet',
       error: error.message,
     });
   }
