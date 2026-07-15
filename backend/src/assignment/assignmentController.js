@@ -631,11 +631,14 @@ export const getMyAssignedSheets = async (req, res) => {
 
 // ─── GET SHEET FOR MARKING ─────────────────────────────────────
 
+// ─── GET SHEET FOR MARKING ─────────────────────────────────────
+
 export const getSheetForMarking = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
 
+    // ✅ FIX: Include both 'assigned' AND 'completed' assignments
     const { rows } = await pool.query(
       `SELECT 
         s.id,
@@ -650,6 +653,9 @@ export const getSheetForMarking = async (req, res) => {
         s.marks,
         s.created_at,
         s.updated_at,
+        s.archived_folder,
+        s.is_checked,
+        s.checked_at,
         e.name AS exam_name,
         e.subject AS exam_subject,
         e."totalQuestions",
@@ -661,10 +667,12 @@ export const getSheetForMarking = async (req, res) => {
         ms.model_answer_pdf,
         ms.question_paper_pdf
       FROM sheets s
-      INNER JOIN assignments a ON s.id = a.sheet_id AND a.status = 'assigned'
+      INNER JOIN assignments a ON s.id = a.sheet_id 
+        AND a.checker_id = $2 
+        AND a.status IN ('assigned', 'completed')
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN mark_schemes ms ON ms."examId" = e.id
-      WHERE s.id = $1 AND a.checker_id = $2`,
+      WHERE s.id = $1`,
       [id, userId],
     );
 
@@ -702,6 +710,9 @@ export const getSheetForMarking = async (req, res) => {
           file_url: sheet.file_url,
           status: sheet.status,
           marks: sheet.marks,
+          archived_folder: sheet.archived_folder,
+          is_checked: sheet.is_checked,
+          checked_at: sheet.checked_at,
         },
         exam: {
           id: sheet.exam_id,
@@ -809,16 +820,20 @@ export const updateCheckerSheetStatus = async (req, res) => {
 
 // ─── SAVE DRAFT MARKS ──────────────────────────────────────────
 
+// ─── SAVE DRAFT MARKS ──────────────────────────────────────────
+
 export const saveDraftMarks = async (req, res) => {
   try {
     const { id } = req.params;
     const { marks } = req.body;
     const userId = req.user.id;
 
+    // ✅ FIX: Include both 'assigned' AND 'completed' assignments
     const checkResult = await pool.query(
       `SELECT a.sheet_id 
        FROM assignments a
-       WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
+       WHERE a.sheet_id = $1 AND a.checker_id = $2 
+       AND a.status IN ('assigned', 'completed')`,
       [id, userId],
     );
 

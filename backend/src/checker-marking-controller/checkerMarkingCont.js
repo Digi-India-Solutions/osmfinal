@@ -8,57 +8,21 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ─── HELPER: Normalize a stored file_url into a real relative path ──
-// Handles: windows backslashes, full URLs, leading slashes, and a
-// leading "uploads/" segment (since uploadsDir already points at .../uploads)
-const normalizeStoredPath = (storedPath) => {
-  if (!storedPath) return null;
-  let p = storedPath.replace(/\\/g, '/'); // windows backslash -> forward slash
-  p = p.replace(/^https?:\/\/[^/]+/, ''); // strip domain if a full URL was stored
-  p = p.replace(/^\/+/, ''); // strip leading slashes
-  if (p.startsWith('uploads/')) {
-    p = p.slice('uploads/'.length); // avoid uploads/uploads/... double join
-  }
-  return p;
-};
+// ✅ Uploads directory - project root ke andar
+const PROJECT_ROOT = path.join(__dirname, '..', '..'); // backend folder
+const UPLOADS_DIR = path.join(PROJECT_ROOT, 'uploads');
+
+console.log('📁 Uploads directory:', UPLOADS_DIR);
 
 // ─── HELPER: Make a safe folder/file-name segment ──────────────
 const sanitizeForFolderName = (value) => {
   if (!value) return null;
   return String(value)
     .trim()
-    .replace(/[^a-zA-Z0-9-_]/g, '_'); // strip anything unsafe for a path segment
-};
-
-// ─── HELPER: Move file to checked folder ──────────────────────
-
-const moveFileToCheckedFolder = (oldPath, newPath) => {
-  try {
-    // Create directory if not exists
-    const dir = path.dirname(newPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-      console.log(`📁 Created directory: ${dir}`);
-    }
-
-    // Check if source file exists
-    if (!fs.existsSync(oldPath)) {
-      console.warn(`⚠️ Source file not found: ${oldPath}`);
-      return false;
-    }
-
-    // Move file
-    fs.renameSync(oldPath, newPath);
-    console.log(`✅ File moved to: ${newPath}`);
-    return true;
-  } catch (error) {
-    console.error(`❌ Error moving file: ${error.message}`);
-    return false;
-  }
+    .replace(/[^a-zA-Z0-9-_]/g, '_');
 };
 
 // ─── SAVE DRAFT MARKS ──────────────────────────────────────────
-
 export const saveDraft = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -72,7 +36,6 @@ export const saveDraft = async (req, res) => {
       timeSpent,
     } = req.body;
 
-    // Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
       `SELECT a.sheet_id, s.exam_id 
        FROM assignments a
@@ -90,7 +53,6 @@ export const saveDraft = async (req, res) => {
 
     const examId = assignmentCheck.rows[0].exam_id;
 
-    // Check if already submitted
     const existing = await pool.query(
       `SELECT id, is_submitted FROM checker_markings 
        WHERE sheet_id = $1 AND checker_id = $2`,
@@ -107,7 +69,6 @@ export const saveDraft = async (req, res) => {
     let result;
 
     if (existing.rows.length > 0) {
-      // Update existing - always save as draft
       result = await pool.query(
         `UPDATE checker_markings 
          SET marks_data = $1,
@@ -132,7 +93,6 @@ export const saveDraft = async (req, res) => {
         ],
       );
     } else {
-      // Insert new
       result = await pool.query(
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
@@ -154,7 +114,6 @@ export const saveDraft = async (req, res) => {
       );
     }
 
-    // Update sheet status to 'checking' if it's not already
     await pool.query(
       `UPDATE sheets 
        SET marks = $1, 
@@ -181,7 +140,6 @@ export const saveDraft = async (req, res) => {
 };
 
 // ─── SUBMIT MARKS ──────────────────────────────────────────────
-
 export const submitMarks = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -195,7 +153,7 @@ export const submitMarks = async (req, res) => {
       timeSpent,
     } = req.body;
 
-    // Check if sheet is assigned to this checker
+    // ✅ Check if sheet is assigned to this checker
     const assignmentCheck = await pool.query(
       `SELECT a.sheet_id, s.exam_id, s.file_url, s.file_name, s.student_name, s.roll_no, s.barcode
        FROM assignments a
@@ -214,7 +172,7 @@ export const submitMarks = async (req, res) => {
     const examId = assignmentCheck.rows[0].exam_id;
     const sheetData = assignmentCheck.rows[0];
 
-    // Check if marking record exists
+    // ✅ Check if marking record exists
     const existing = await pool.query(
       `SELECT id FROM checker_markings 
        WHERE sheet_id = $1 AND checker_id = $2`,
@@ -222,11 +180,9 @@ export const submitMarks = async (req, res) => {
     );
 
     let result;
-
     const finalTimeSpent = timeSpent || 0;
 
     if (existing.rows.length > 0) {
-      // Update existing record
       result = await pool.query(
         `UPDATE checker_markings 
          SET marks_data = $1,
@@ -253,7 +209,6 @@ export const submitMarks = async (req, res) => {
         ],
       );
     } else {
-      // Insert new record
       result = await pool.query(
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
@@ -276,53 +231,89 @@ export const submitMarks = async (req, res) => {
       );
     }
 
-    // ✅ Create checked folder path — use barcode (matches file_name pattern
-    // like "BAR025.pdf") instead of the raw sheetId, falling back to sheetId
-    // if barcode is missing for some reason
-    const folderKey = sanitizeForFolderName(sheetData.barcode) || sheetId;
-    const checkedFolder = `checked-sheets/${examId}/${folderKey}`;
+    // ✅ ========================================================
+    // ✅ CHECKED SHEETS FOLDER MEIN FILE SAVE KARO
+    // ✅ ========================================================
 
-    // ✅ Get current file path from sheet
-    const currentFilePath = sheetData.file_url;
-    let newFilePath = null;
     let fileMoved = false;
+    let newFilePath = null;
+    let checkedFolder = null;
 
-    if (currentFilePath) {
-      // ✅ Generate new file path in checked folder
-      const fileName = sheetData.file_name || `sheet-${sheetId}.pdf`;
-      newFilePath = `/${checkedFolder}/${fileName}`;
+    try {
+      // ✅ Folder name: barcode use karo, agar nahi hai toh sheetId
+      const folderKey =
+        sanitizeForFolderName(sheetData.barcode) || `sheet-${sheetId}`;
 
-      // ✅ Get full paths for file moving
-      const uploadsDir = path.join(__dirname, '..', 'uploads');
+      // ✅ Folder path: checked-sheets/{examId}/{barcode}/
+      checkedFolder = `checked-sheets/${examId}/${folderKey}`;
 
-      // ✅ Normalize the DB-stored path before joining, so we never end up
-      // with a double "uploads/uploads/..." path (main cause of silent
-      // "Source file not found" failures)
-      const relativeOldPath = normalizeStoredPath(currentFilePath);
-      const oldFullPath = path.join(uploadsDir, relativeOldPath);
-      const newFullPath = path.join(uploadsDir, checkedFolder, fileName);
-
-      console.log(
-        `📁 Moving sheet ${sheetId} to checked folder: ${checkedFolder}`,
-      );
-      console.log(`📄 Raw file_url from DB: ${currentFilePath}`);
-      console.log(`📄 Normalized relative path: ${relativeOldPath}`);
-      console.log(`📄 Old full path: ${oldFullPath}`);
-      console.log(`📄 New full path: ${newFullPath}`);
-
-      // ✅ Move the file physically
-      fileMoved = moveFileToCheckedFolder(oldFullPath, newFullPath);
-
-      if (fileMoved) {
-        console.log(`✅ File moved successfully for sheet ${sheetId}`);
-      } else {
-        console.warn(
-          `⚠️ File not moved for sheet ${sheetId}, keeping original path`,
-        );
+      // ✅ File name
+      let fileName = sheetData.file_name;
+      if (!fileName && sheetData.file_url) {
+        fileName = path.basename(sheetData.file_url);
       }
+      if (!fileName) {
+        fileName = `${folderKey}.pdf`;
+      }
+
+      // ✅ Source file path (where file currently is)
+      let sourcePath = null;
+
+      // ✅ Check multiple possible locations for the file
+      const possiblePaths = [
+        path.join(UPLOADS_DIR, 'sheets', fileName), // uploads/sheets/BAR055.pdf
+        path.join(UPLOADS_DIR, fileName), // uploads/BAR055.pdf
+        path.join(UPLOADS_DIR, 'uploads', 'sheets', fileName), // uploads/uploads/sheets/BAR055.pdf
+      ];
+
+      console.log(`🔍 Looking for file: ${fileName}`);
+      console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
+
+      for (const p of possiblePaths) {
+        console.log(`   Checking: ${p}`);
+        if (fs.existsSync(p)) {
+          sourcePath = p;
+          console.log(`✅ Found file at: ${p}`);
+          break;
+        }
+      }
+
+      if (sourcePath) {
+        // ✅ Destination path: uploads/checked-sheets/{examId}/{barcode}/{fileName}
+        const destPath = path.join(UPLOADS_DIR, checkedFolder, fileName);
+        console.log(`📄 Destination: ${destPath}`);
+
+        // ✅ Create directory if not exists
+        const dir = path.dirname(destPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+          console.log(`📁 Created directory: ${dir}`);
+        }
+
+        // ✅ Copy file to checked-sheets folder
+        fs.copyFileSync(sourcePath, destPath);
+        console.log(`✅ File copied to: ${destPath}`);
+
+        fileMoved = true;
+        newFilePath = `/${checkedFolder}/${fileName}`;
+      } else {
+        console.error(`❌ File not found in any location!`);
+        console.error(`   Tried:`, possiblePaths);
+
+        // ✅ Dump what's in sheets folder for debugging
+        const sheetsDir = path.join(UPLOADS_DIR, 'sheets');
+        if (fs.existsSync(sheetsDir)) {
+          const files = fs.readdirSync(sheetsDir);
+          console.log(`📂 Files in sheets folder (${files.length}):`, files);
+        }
+      }
+    } catch (err) {
+      console.error(`❌ File copy error:`, err.message);
     }
 
-    // ✅ Update sheet marks, status AND time spent + checked folder info
+    // ✅ Update sheet in database
+    const finalFileUrl = fileMoved ? newFilePath : sheetData.file_url;
+
     await pool.query(
       `UPDATE sheets 
        SET marks = $1, 
@@ -334,16 +325,10 @@ export const submitMarks = async (req, res) => {
            file_url = $4,
            updated_at = CURRENT_TIMESTAMP 
        WHERE id = $5`,
-      [
-        totalMarks || 0,
-        finalTimeSpent,
-        checkedFolder,
-        fileMoved ? newFilePath : currentFilePath,
-        sheetId,
-      ],
+      [totalMarks || 0, finalTimeSpent, checkedFolder, finalFileUrl, sheetId],
     );
 
-    // ✅ Update assignment status to completed
+    // ✅ Update assignment status
     await pool.query(
       `UPDATE assignments 
        SET status = 'completed',
@@ -359,7 +344,7 @@ export const submitMarks = async (req, res) => {
         ...result.rows[0],
         time_spent: finalTimeSpent,
         archived_folder: checkedFolder,
-        new_file_path: fileMoved ? newFilePath : null,
+        new_file_path: newFilePath,
         file_moved: fileMoved,
       },
     });
@@ -374,7 +359,6 @@ export const submitMarks = async (req, res) => {
 };
 
 // ─── GET SAVED DRAFT ───────────────────────────────────────────
-
 export const getDraft = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -444,11 +428,9 @@ export const getDraft = async (req, res) => {
 };
 
 // ─── GET SUBMITTED MARKS ───────────────────────────────────────
-
 export const getSubmittedMarks = async (req, res) => {
   try {
     const { sheetId } = req.params;
-    const userId = req.user.id;
 
     const result = await pool.query(
       `SELECT 
@@ -493,21 +475,11 @@ export const getSubmittedMarks = async (req, res) => {
 };
 
 // ─── ESCALATE SHEET ─────────────────────────────────────────────
-
 export const escalateSheet = async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user.id;
     const { reason, escalateType, remarks, timeSpent } = req.body;
-
-    console.log('🔍 Escalate request:', {
-      sheetId,
-      userId,
-      reason,
-      escalateType,
-      remarks,
-      timeSpent,
-    });
 
     if (!reason) {
       return res.status(400).json({
@@ -531,7 +503,6 @@ export const escalateSheet = async (req, res) => {
 
     const examId = assignmentCheck.rows[0].exam_id;
 
-    // ✅ Update sheet status to 'escalated' with time spent
     const result = await pool.query(
       `UPDATE sheets 
        SET status = 'escalated',
@@ -561,7 +532,6 @@ export const escalateSheet = async (req, res) => {
       });
     }
 
-    // ✅ Also update checker_markings with time_spent
     const markingExists = await pool.query(
       `SELECT id FROM checker_markings 
        WHERE sheet_id = $1 AND checker_id = $2`,
@@ -577,7 +547,6 @@ export const escalateSheet = async (req, res) => {
         [timeSpent || 0, sheetId, userId],
       );
     } else {
-      // Insert if not exists
       await pool.query(
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
@@ -606,11 +575,8 @@ export const escalateSheet = async (req, res) => {
 };
 
 // ─── GET ESCALATED SHEETS ──────────────────────────────────────
-
 export const getEscalatedSheets = async (req, res) => {
   try {
-    const userId = req.user.id;
-
     const result = await pool.query(
       `SELECT 
         s.id,
@@ -651,13 +617,10 @@ export const getEscalatedSheets = async (req, res) => {
 };
 
 // ─── GET CHECKED SHEETS ────────────────────────────────────────
-
 export const getCheckedSheets = async (req, res) => {
   try {
     const { examId } = req.params;
 
-    // ✅ DISTINCT ON (s.id) avoids duplicate rows when a sheet has more
-    // than one assignment row (e.g. it was reassigned before being checked)
     let query = `
       SELECT DISTINCT ON (s.id)
         s.id,
@@ -686,7 +649,6 @@ export const getCheckedSheets = async (req, res) => {
       params.push(examId);
     }
 
-    // DISTINCT ON requires the ORDER BY to start with the same expression
     query += ` ORDER BY s.id, s.checked_at DESC`;
 
     const result = await pool.query(query, params);
@@ -707,7 +669,6 @@ export const getCheckedSheets = async (req, res) => {
 };
 
 // ─── GET CHECKED SHEET BY ID ──────────────────────────────────
-
 export const getCheckedSheetById = async (req, res) => {
   try {
     const { id } = req.params;
