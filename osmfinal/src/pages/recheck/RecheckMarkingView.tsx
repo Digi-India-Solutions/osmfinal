@@ -76,6 +76,7 @@ interface RecheckDraftStorageData {
     isComplete: boolean;
   }[];
   savedAt: string;
+  timerSeconds?: number;
 }
 
 export default function RecheckMarkingView() {
@@ -112,6 +113,17 @@ export default function RecheckMarkingView() {
   const [recheckStampsData, setRecheckStampsData] = useState<RecheckStamp[]>(
     [],
   );
+
+  // ✅ NEW: Original checker markings
+  const [originalAnnotationsData, setOriginalAnnotationsData] = useState<
+    Annotation[]
+  >([]);
+  const [originalStampsData, setOriginalStampsData] = useState<RecheckStamp[]>(
+    [],
+  );
+  const [originalMarksData, setOriginalMarksData] = useState<
+    Record<string, number>
+  >({});
 
   // ─── MINIMUM TIME STATE ──────────────────────────────────────
 
@@ -168,14 +180,26 @@ export default function RecheckMarkingView() {
             question_paper: toFullUrl(data.pdfs?.question_paper),
           });
 
+          // ✅ STORE ORIGINAL MARKINGS (checker ke)
+          setOriginalAnnotationsData(data.originalAnnotations || []);
+          setOriginalStampsData(data.originalStamps || []);
+          setOriginalMarksData(data.originalMarks || {});
+
           const spentTime = data.exam?.spentTime || 0;
           setMinTimeRequired(spentTime);
           setIsTimeRequirementMet(spentTime === 0);
 
+          // ✅ Agar recheck already completed hai toh recheck markings show karo
+          // Warna original markings show karo (pending recheck ke liye)
           if (data.request?.isReadOnly && data.recheckMarks) {
             setRecheckMarksData(data.recheckMarks || {});
             setRecheckAnnotationsData(data.recheckAnnotations || []);
             setRecheckStampsData(data.recheckStamps || []);
+          } else {
+            // ✅ PENDING RECHECK: Original markings show karo
+            setRecheckMarksData(data.originalMarks || {});
+            setRecheckAnnotationsData(data.originalAnnotations || []);
+            setRecheckStampsData(data.originalStamps || []);
           }
         } else {
           setError(response.message || 'Failed to load recheck data');
@@ -269,12 +293,16 @@ export default function RecheckMarkingView() {
         id: questionName,
         criterion: displayName,
         max: details.maxMarks || 0,
-        round1: previousMarksData[questionName] ?? 0,
-        round2: null,
+        // ✅ Round1: Original marks se lo (checker ke marks)
+        round1:
+          originalMarksData[questionName] ??
+          previousMarksData[questionName] ??
+          0,
+        round2: null, // Recheck marks abhi null hain
         remark: '',
       };
     });
-  }, [markSchemeData, previousMarksData]);
+  }, [markSchemeData, originalMarksData, previousMarksData]);
 
   // ─── State ───
   const [currentPage, setCurrentPage] = useState(1);
@@ -293,7 +321,7 @@ export default function RecheckMarkingView() {
     if (initialMarks.length > 0) {
       let updatedMarks = initialMarks.map((m) => ({
         ...m,
-        round1: previousMarksData[m.id] || 0,
+        round1: originalMarksData[m.id] ?? previousMarksData[m.id] ?? 0,
       }));
 
       if (requestData?.isReadOnly && recheckMarksData) {
@@ -316,6 +344,7 @@ export default function RecheckMarkingView() {
     }
   }, [
     initialMarks,
+    originalMarksData,
     previousMarksData,
     requestData?.isReadOnly,
     recheckMarksData,
@@ -330,62 +359,19 @@ export default function RecheckMarkingView() {
   // Track which marks have been explicitly entered
   const manuallySetMarksRef = useRef<Set<string>>(new Set());
 
-  // ─── LOAD RECHECK DRAFT FROM API ─────────────────────────────
-
-  useEffect(() => {
-    const loadDraft = async () => {
-      if (!requestIdNum || marks.length === 0 || requestData?.isReadOnly)
-        return;
-
-      try {
-        const response = await recheckQueueService.getDraft(requestIdNum);
-        if (response.success && response.data) {
-          const data = response.data;
-
-          if (data.marks_data && Object.keys(data.marks_data).length > 0) {
-            const restoredMarks = marks.map((m) => {
-              const draftValue = data.marks_data[m.id];
-              return {
-                ...m,
-                round2: draftValue !== undefined ? draftValue : null,
-              };
-            });
-            setMarks(restoredMarks);
-
-            Object.keys(data.marks_data).forEach((id) => {
-              if (
-                data.marks_data[id] !== undefined &&
-                data.marks_data[id] !== null
-              ) {
-                manuallySetMarksRef.current.add(id);
-              }
-            });
-          }
-
-          if (data.stamps_data && data.stamps_data.length > 0) {
-            setStamps(data.stamps_data);
-          }
-
-          if (data.annotations_data && data.annotations_data.length > 0) {
-            setAnnotations(data.annotations_data);
-            const maxId = Math.max(
-              ...data.annotations_data.map((a: Annotation) => a.id),
-              0,
-            );
-            annotationIdCounter = maxId + 1;
-          }
-        }
-      } catch (error) {
-        console.error('Load recheck draft error:', error);
-      }
-    };
-
-    loadDraft();
-  }, [requestIdNum, marks.length, requestData?.isReadOnly]);
-
-  // ─── Click-to-place stamp state ───
+  // ─── INITIAL STAMPS ──────────────────────────────────────────
 
   const initialStamps = useMemo((): RecheckStamp[] => {
+    if (requestData?.isReadOnly && recheckStampsData.length > 0) {
+      return recheckStampsData;
+    }
+
+    // ✅ Agar original stamps exist karti hain toh unko use karo
+    if (originalStampsData.length > 0) {
+      return originalStampsData;
+    }
+
+    // ✅ Nahi toh empty stamps create karo
     return initialMarks.map((m) => ({
       markId: m.id,
       placed: false,
@@ -394,28 +380,57 @@ export default function RecheckMarkingView() {
       page: 0,
       value: null,
     }));
-  }, [initialMarks]);
+  }, [
+    initialMarks,
+    requestData?.isReadOnly,
+    recheckStampsData,
+    originalStampsData,
+  ]);
 
   const [stamps, setStamps] = useState<RecheckStamp[]>([]);
   const stampsInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (initialStamps.length === 0) return;
+    if (stampsInitializedRef.current) return;
+    setStamps(initialStamps);
+    stampsInitializedRef.current = true;
+  }, [initialStamps]);
+
+  // ─── LOAD ANNOTATIONS ────────────────────────────────────────
+
+  useEffect(() => {
+    // ✅ Agar read only hai toh recheck annotations use karo
+    if (requestData?.isReadOnly && recheckAnnotationsData.length > 0) {
+      setAnnotations(recheckAnnotationsData);
+      const maxId = Math.max(
+        ...recheckAnnotationsData.map((a: Annotation) => a.id),
+        0,
+      );
+      annotationIdCounter = maxId + 1;
+      return;
+    }
+
+    // ✅ Agar original annotations exist karti hain toh unko show karo
+    if (originalAnnotationsData.length > 0) {
+      setAnnotations(originalAnnotationsData);
+      const maxId = Math.max(
+        ...originalAnnotationsData.map((a: Annotation) => a.id),
+        0,
+      );
+      annotationIdCounter = maxId + 1;
+    }
+  }, [
+    requestData?.isReadOnly,
+    recheckAnnotationsData,
+    originalAnnotationsData,
+  ]);
 
   const [escalateData, setEscalateData] = useState<{
     reason: string;
     escalateType: string;
     remarks: string;
   } | null>(null);
-
-  useEffect(() => {
-    if (initialStamps.length === 0) return;
-    if (stampsInitializedRef.current) return;
-
-    if (requestData?.isReadOnly && recheckStampsData.length > 0) {
-      setStamps(recheckStampsData);
-    } else {
-      setStamps(initialStamps);
-    }
-    stampsInitializedRef.current = true;
-  }, [initialStamps, requestData?.isReadOnly, recheckStampsData]);
 
   const [placingMarkId, setPlacingMarkId] = useState<string | null>(null);
   const [instructionBanner, setInstructionBanner] = useState<string | null>(
@@ -454,17 +469,6 @@ export default function RecheckMarkingView() {
   const [zoom, setZoom] = useState(100);
 
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
-
-  useEffect(() => {
-    if (requestData?.isReadOnly && recheckAnnotationsData.length > 0) {
-      setAnnotations(recheckAnnotationsData);
-      const maxId = Math.max(
-        ...recheckAnnotationsData.map((a: Annotation) => a.id),
-        0,
-      );
-      annotationIdCounter = maxId + 1;
-    }
-  }, [requestData?.isReadOnly, recheckAnnotationsData]);
 
   const actionHistoryRef = useRef<ActionType[]>([]);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -535,6 +539,7 @@ export default function RecheckMarkingView() {
           };
         }),
         savedAt: now.toISOString(),
+        timerSeconds: timerSecondsRef.current,
       };
       localStorage.setItem(
         `osm_recheck_draft_request_${rid}`,
@@ -658,6 +663,105 @@ export default function RecheckMarkingView() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [requestData?.isReadOnly]);
+
+  // ─── LOAD RECHECK DRAFT FROM API ─────────────────────────────
+
+  useEffect(() => {
+    const loadDraft = async () => {
+      if (!requestIdNum || marks.length === 0 || requestData?.isReadOnly)
+        return;
+
+      try {
+        const response = await recheckQueueService.getDraft(requestIdNum);
+        if (response.success && response.data) {
+          const data = response.data;
+
+          // ✅ Draft marks ko original ke saath merge karo
+          if (data.marks_data && Object.keys(data.marks_data).length > 0) {
+            const restoredMarks = marks.map((m) => {
+              const draftValue = data.marks_data[m.id];
+              // ✅ Agar draft mein value hai toh use karo, warna original marks show karo
+              return {
+                ...m,
+                round2: draftValue !== undefined ? draftValue : m.round2,
+              };
+            });
+            setMarks(restoredMarks);
+
+            Object.keys(data.marks_data).forEach((id) => {
+              if (
+                data.marks_data[id] !== undefined &&
+                data.marks_data[id] !== null
+              ) {
+                manuallySetMarksRef.current.add(id);
+              }
+            });
+          }
+
+          // ✅ Stamps: Draft stamps ko original ke saath merge karo
+          if (data.stamps_data && data.stamps_data.length > 0) {
+            setStamps(data.stamps_data);
+          } else if (originalStampsData.length > 0) {
+            // Agar draft stamps nahi hain toh original stamps show karo
+            setStamps(originalStampsData);
+          }
+
+          // ✅ Annotations: Draft annotations ko original ke saath merge karo
+          if (data.annotations_data && data.annotations_data.length > 0) {
+            setAnnotations(data.annotations_data);
+            const maxId = Math.max(
+              ...data.annotations_data.map((a: Annotation) => a.id),
+              0,
+            );
+            annotationIdCounter = maxId + 1;
+          } else if (originalAnnotationsData.length > 0) {
+            // Agar draft annotations nahi hain toh original annotations show karo
+            setAnnotations(originalAnnotationsData);
+            const maxId = Math.max(
+              ...originalAnnotationsData.map((a: Annotation) => a.id),
+              0,
+            );
+            annotationIdCounter = maxId + 1;
+          }
+
+          // ✅ Restore timer from draft
+          if (data.time_spent && data.time_spent > 0) {
+            timerSecondsRef.current = data.time_spent;
+            setTimerDisplay(formatTime(data.time_spent));
+            localStorage.setItem(
+              `osm_recheck_timer_${requestIdNum}`,
+              String(data.time_spent),
+            );
+          }
+        } else {
+          // ✅ Agar draft nahi hai toh original markings show karo
+          if (originalAnnotationsData.length > 0) {
+            setAnnotations(originalAnnotationsData);
+          }
+          if (originalStampsData.length > 0) {
+            setStamps(originalStampsData);
+          }
+        }
+      } catch (error) {
+        console.error('Load recheck draft error:', error);
+        // ✅ Error par bhi original markings show karo
+        if (originalAnnotationsData.length > 0) {
+          setAnnotations(originalAnnotationsData);
+        }
+        if (originalStampsData.length > 0) {
+          setStamps(originalStampsData);
+        }
+      }
+    };
+
+    loadDraft();
+  }, [
+    requestIdNum,
+    marks.length,
+    requestData?.isReadOnly,
+    originalAnnotationsData,
+    originalStampsData,
+  ]);
 
   // ─── RESUME: check localStorage on mount ───
 

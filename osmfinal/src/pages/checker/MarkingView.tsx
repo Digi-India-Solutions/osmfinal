@@ -1657,6 +1657,9 @@ export default function MarkingView() {
   );
 
   // ─── FETCH SHEET/EXAM/SCHEME/PDF DATA ───────────────────────
+  // src/pages/checker/MarkingView.tsx
+
+  // ─── FETCH SHEET/EXAM/SCHEME/PDF DATA ───────────────────────
   useEffect(() => {
     const fetchData = async () => {
       if (!sheetIdNum) {
@@ -1677,14 +1680,13 @@ export default function MarkingView() {
             if (!path) return null;
             if (path.startsWith('https://') || path.startsWith('http://'))
               return path;
+            // ✅ Fix: Properly handle path that already starts with /uploads
             const prefix = path.startsWith('/') ? '' : '/';
-            return `${API_URL}${prefix}${path}`;
+            // ✅ Remove double slashes
+            const cleanPath = path.startsWith('/') ? path : `/${path}`;
+            return `${API_URL}${cleanPath}`;
           };
-          console.log('DDDDDDDDDDD===>', {
-            ...data.sheet,
-            file_url: toFullUrl(data.sheet?.file_url),
-            is_submitted: data.sheet?.is_submitted || false,
-          })
+
           setSheetData({
             ...data.sheet,
             file_url: toFullUrl(data.sheet?.file_url),
@@ -1692,9 +1694,19 @@ export default function MarkingView() {
           });
           setExamData(data.exam);
           setMarkSchemeData(data.markScheme || {});
+
+          // ✅ Fix: Properly set PDF URLs
+          const modelAnswerPath = data.pdfs?.model_answer;
+          const questionPaperPath = data.pdfs?.question_paper;
+
+          console.log('📄 PDFs from API:', {
+            model_answer: modelAnswerPath,
+            question_paper: questionPaperPath,
+          });
+
           setPdfsData({
-            model_answer: toFullUrl(data.pdfs?.model_answer),
-            question_paper: toFullUrl(data.pdfs?.question_paper),
+            model_answer: toFullUrl(modelAnswerPath),
+            question_paper: toFullUrl(questionPaperPath),
           });
 
           const spentTime = data.exam?.spentTime || 0;
@@ -1710,7 +1722,12 @@ export default function MarkingView() {
 
     fetchData();
   }, [sheetIdNum]);
-  console.log('SheetData===>', sheetData)
+
+  // ─── LOG PDF URLs AFTER SET ──────────────────────────────────
+  useEffect(() => {
+    console.log('📄 PDFs Data after set:', pdfsData);
+  }, [pdfsData]);
+  console.log('SheetData===>', sheetData);
   // ─── PAGE / TOOL / THUMBNAIL STATE ───────────────────────────
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTool, setActiveTool] = useState<AnnotationTool>('tick');
@@ -2482,9 +2499,7 @@ export default function MarkingView() {
     setZoom((prev) => {
       const idx = FIT_PRESETS.indexOf(prev);
       // If current zoom matches a preset, go to next; otherwise snap to 100%
-      return idx !== -1
-        ? FIT_PRESETS[(idx + 1) % FIT_PRESETS.length]
-        : 100;
+      return idx !== -1 ? FIT_PRESETS[(idx + 1) % FIT_PRESETS.length] : 100;
     });
   }, []);
 
@@ -2591,13 +2606,13 @@ export default function MarkingView() {
         prev.map((s) =>
           s.markId === placingMarkId
             ? {
-              ...s,
-              placed: true,
-              x: xPercent,
-              y: yPercent,
-              page,
-              value: null,
-            }
+                ...s,
+                placed: true,
+                x: xPercent,
+                y: yPercent,
+                page,
+                value: null,
+              }
             : s,
         ),
       );
@@ -2820,11 +2835,15 @@ export default function MarkingView() {
   const isPageAnnotated = (page: number) => {
     if (blankPages.has(page)) return true;
     if (annotations.some((ann) => ann.page === page)) return true;
-    if (stamps.some((stamp) => stamp.page === page && stamp.placed)) return true;
+    if (stamps.some((stamp) => stamp.page === page && stamp.placed))
+      return true;
     return false;
   };
 
-  const annotatedPagesCount = Array.from({ length: totalPages }, (_, i) => i + 1).filter(isPageAnnotated).length;
+  const annotatedPagesCount = Array.from(
+    { length: totalPages },
+    (_, i) => i + 1,
+  ).filter(isPageAnnotated).length;
 
   const examName = examData
     ? `${examData.name} — ${examData.subject}`
@@ -2842,10 +2861,11 @@ export default function MarkingView() {
           </span>
           {minTimeRequired > 0 && (
             <span
-              className={`text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5 ${isTimeRequirementMet
+              className={`text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
+                isTimeRequirementMet
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                }`}
+              }`}
             >
               <i
                 className={`${isTimeRequirementMet ? 'ri-check-line' : 'ri-timer-line'} text-xs`}
@@ -2878,10 +2898,11 @@ export default function MarkingView() {
         <aside className="w-9 shrink-0 bg-[#1e293b] flex flex-col items-center py-2 gap-1 border-r border-slate-700">
           <button
             onClick={() => setThumbnailOpen(!thumbnailOpen)}
-            className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${thumbnailOpen
+            className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
+              thumbnailOpen
                 ? 'bg-amber-500/25 text-amber-400'
                 : 'text-slate-400 hover:text-white hover:bg-white/10'
-              }`}
+            }`}
             title="Toggle thumbnails"
           >
             <i className="ri-layout-grid-line text-sm"></i>
@@ -2920,18 +2941,23 @@ export default function MarkingView() {
               <div className="w-5 h-px bg-slate-600 my-1.5" />
 
               {toolbarTools.map(({ tool, icon, label }) => {
-                const isSelectedAnnotTool = activeTool === "handSelect" && selectedAnnotationId && annotations.find(a => a.id === selectedAnnotationId)?.tool === tool;
+                const isSelectedAnnotTool =
+                  activeTool === 'handSelect' &&
+                  selectedAnnotationId &&
+                  annotations.find((a) => a.id === selectedAnnotationId)
+                    ?.tool === tool;
                 const isActive = activeTool === tool || isSelectedAnnotTool;
                 return (
                   <button
                     key={tool}
                     onClick={() => handleToolSelect(tool)}
-                    className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${isActive
+                    className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-colors ${
+                      isActive
                         ? tool === 'eraser'
                           ? 'bg-rose-500/25 text-rose-400'
                           : 'bg-sky-500/25 text-sky-400'
                         : 'text-slate-400 hover:text-white hover:bg-white/10'
-                      }`}
+                    }`}
                     title={label}
                   >
                     <i className={`${icon} text-sm`}></i>
@@ -2943,7 +2969,9 @@ export default function MarkingView() {
               {activeTool === 'eraser' && (
                 <>
                   <button
-                    onClick={() => setEraserSize((prev) => Math.max(10, prev - 5))}
+                    onClick={() =>
+                      setEraserSize((prev) => Math.max(10, prev - 5))
+                    }
                     className="w-7 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer transition-colors text-[10px]"
                     title="Decrease eraser size"
                   >
@@ -2953,7 +2981,9 @@ export default function MarkingView() {
                     {eraserSize}
                   </span>
                   <button
-                    onClick={() => setEraserSize((prev) => Math.min(50, prev + 5))}
+                    onClick={() =>
+                      setEraserSize((prev) => Math.min(50, prev + 5))
+                    }
                     className="w-7 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer transition-colors text-[10px]"
                     title="Increase eraser size"
                   >
@@ -2980,7 +3010,9 @@ export default function MarkingView() {
                     setToastMessage('Stamp removed');
                     setTimeout(() => setToastMessage(null), 2500);
                   } else if (selectedAnnotationId) {
-                    setAnnotations((prev) => prev.filter((a) => a.id !== selectedAnnotationId));
+                    setAnnotations((prev) =>
+                      prev.filter((a) => a.id !== selectedAnnotationId),
+                    );
                     setSelectedAnnotationId(null);
                     setToastMessage('Annotation removed');
                     setTimeout(() => setToastMessage(null), 2500);
@@ -2990,10 +3022,20 @@ export default function MarkingView() {
                 className="w-7 h-7 rounded flex items-center justify-center transition-colors"
                 style={{
                   opacity: selectedStampId || selectedAnnotationId ? 1 : 0.3,
-                  cursor: selectedStampId || selectedAnnotationId ? 'pointer' : 'not-allowed',
-                  pointerEvents: selectedStampId || selectedAnnotationId ? 'auto' : 'none',
-                  color: selectedStampId || selectedAnnotationId ? '#DC2626' : undefined,
-                  backgroundColor: selectedStampId || selectedAnnotationId ? '#FEE2E2' : 'transparent',
+                  cursor:
+                    selectedStampId || selectedAnnotationId
+                      ? 'pointer'
+                      : 'not-allowed',
+                  pointerEvents:
+                    selectedStampId || selectedAnnotationId ? 'auto' : 'none',
+                  color:
+                    selectedStampId || selectedAnnotationId
+                      ? '#DC2626'
+                      : undefined,
+                  backgroundColor:
+                    selectedStampId || selectedAnnotationId
+                      ? '#FEE2E2'
+                      : 'transparent',
                 }}
                 title={
                   selectedStampId || selectedAnnotationId
@@ -3027,112 +3069,116 @@ export default function MarkingView() {
         {/* ─── SHEET VIEWER ─── */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
           <SheetViewer
-          ref={sheetViewerRef}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          blankPages={blankPages}
-          onPageChange={setCurrentPage}
-          zoom={zoom}
-          activeTool={activeTool}
-          annotations={annotations}
-          stamps={visibleStamps}
-          activeMarkId={activeMarkId}
-          placingMarkId={placingMarkId}
-          instructionBanner={instructionBanner}
-          selectedStampId={selectedStampId}
-          dragStampId={dragStampId}
-          selectedAnnotationId={selectedAnnotationId}
-          annotationDragId={annotationDragId}
-          pdfUrl={sheetData?.file_url || null}
-          onAnnotationAdd={handleAnnotationAdd}
-          onAnnotationDelete={handleAnnotationDelete}
-          onEraserNoHit={handleEraserNoHit}
-          onPencilStroke={handlePencilStroke}
-          onSheetClickForPlacement={handleSheetClickForPlacement}
-          onStampReposition={handleStampReposition}
-          onDismissBanner={handleDismissBanner}
-          onStampSelect={handleSelectStamp}
-          onStampDeselect={handleDeselectAll}
-          onStampDoubleClick={handleEnterDragMode}
-          onStampRemove={handleRemoveStamp}
-          onStampDragStart={handleStampDragStart}
-          onStampDragEnd={handleStampDragEnd}
-          onSheetBackgroundClick={handleDeselectAll}
-          onStampContextMenu={handleStampContextMenu}
-          onAnnotationSelect={handleAnnotationSelect}
-          onAnnotationDeselect={handleAnnotationDeselect}
-          onAnnotationReposition={handleAnnotationReposition}
-          onAnnotationDragStart={handleAnnotationDragStart}
-          onAnnotationDragEnd={handleAnnotationDragEnd}
-          onAnnotationContextMenu={handleAnnotationContextMenu}
-          onAnnotationDeleteRequest={handleAnnotationDelete}
-          onMoveItemToPage={handleMoveItemToPage}
-          onDragOverThumbnailChange={setDragOverThumbnailPage}
-          onPageRender={(pageNum: number, imageData: string) => {
-            setPdfPageImages((prev) => ({ ...prev, [pageNum]: imageData }));
-          }}
-          onPageCount={(count: number) => {
-            setPdfPageCount(count);
-          }}
-          pageRefs={pageRefs}
-          scrollToPage={scrollToPage}
-          eraserSize={eraserSize}
-        />
+            ref={sheetViewerRef}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            blankPages={blankPages}
+            onPageChange={setCurrentPage}
+            zoom={zoom}
+            activeTool={activeTool}
+            annotations={annotations}
+            stamps={visibleStamps}
+            activeMarkId={activeMarkId}
+            placingMarkId={placingMarkId}
+            instructionBanner={instructionBanner}
+            selectedStampId={selectedStampId}
+            dragStampId={dragStampId}
+            selectedAnnotationId={selectedAnnotationId}
+            annotationDragId={annotationDragId}
+            pdfUrl={sheetData?.file_url || null}
+            onAnnotationAdd={handleAnnotationAdd}
+            onAnnotationDelete={handleAnnotationDelete}
+            onEraserNoHit={handleEraserNoHit}
+            onPencilStroke={handlePencilStroke}
+            onSheetClickForPlacement={handleSheetClickForPlacement}
+            onStampReposition={handleStampReposition}
+            onDismissBanner={handleDismissBanner}
+            onStampSelect={handleSelectStamp}
+            onStampDeselect={handleDeselectAll}
+            onStampDoubleClick={handleEnterDragMode}
+            onStampRemove={handleRemoveStamp}
+            onStampDragStart={handleStampDragStart}
+            onStampDragEnd={handleStampDragEnd}
+            onSheetBackgroundClick={handleDeselectAll}
+            onStampContextMenu={handleStampContextMenu}
+            onAnnotationSelect={handleAnnotationSelect}
+            onAnnotationDeselect={handleAnnotationDeselect}
+            onAnnotationReposition={handleAnnotationReposition}
+            onAnnotationDragStart={handleAnnotationDragStart}
+            onAnnotationDragEnd={handleAnnotationDragEnd}
+            onAnnotationContextMenu={handleAnnotationContextMenu}
+            onAnnotationDeleteRequest={handleAnnotationDelete}
+            onMoveItemToPage={handleMoveItemToPage}
+            onDragOverThumbnailChange={setDragOverThumbnailPage}
+            onPageRender={(pageNum: number, imageData: string) => {
+              setPdfPageImages((prev) => ({ ...prev, [pageNum]: imageData }));
+            }}
+            onPageCount={(count: number) => {
+              setPdfPageCount(count);
+            }}
+            pageRefs={pageRefs}
+            scrollToPage={scrollToPage}
+            eraserSize={eraserSize}
+          />
 
-        {/* ─── BOTTOM PAGINATION BAR ─── */}
-        <div className="h-[60px] shrink-0 bg-[#1e293b] flex flex-col border-t border-slate-700 select-none z-[40]">
-          <div className="flex-1 flex items-center overflow-x-auto overflow-y-hidden w-full custom-scrollbar">
-            <div className="flex items-center gap-1.5 min-w-max px-3 mx-auto md:justify-center">
-              <button
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage <= 1}
-                className="flex items-center justify-center flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer mr-1"
-                title="Previous Page"
-              >
-                <i className="ri-arrow-left-s-line text-lg" />
-              </button>
+          {/* ─── BOTTOM PAGINATION BAR ─── */}
+          <div className="h-[60px] shrink-0 bg-[#1e293b] flex flex-col border-t border-slate-700 select-none z-[40]">
+            <div className="flex-1 flex items-center overflow-x-auto overflow-y-hidden w-full custom-scrollbar">
+              <div className="flex items-center gap-1.5 min-w-max px-3 mx-auto md:justify-center">
+                <button
+                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                  disabled={currentPage <= 1}
+                  className="flex items-center justify-center flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer mr-1"
+                  title="Previous Page"
+                >
+                  <i className="ri-arrow-left-s-line text-lg" />
+                </button>
 
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                const annotated = isPageAnnotated(page);
-                const isActive = page === currentPage;
-                return (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`relative flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-xs sm:text-[13px] font-medium transition-colors cursor-pointer ${
-                      isActive
-                        ? 'bg-sky-500 text-white shadow-sm'
-                        : 'bg-[#334155] text-slate-300 hover:bg-slate-600'
-                    }`}
-                  >
-                    {page}
-                    <span
-                      className={`absolute bottom-1 right-1 w-1.5 h-1.5 sm:w-[5px] sm:h-[5px] rounded-full shadow-sm ${
-                        annotated ? 'bg-emerald-400' : 'bg-amber-500'
-                      }`}
-                    />
-                  </button>
-                );
-              })}
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                  (page) => {
+                    const annotated = isPageAnnotated(page);
+                    const isActive = page === currentPage;
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`relative flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-xs sm:text-[13px] font-medium transition-colors cursor-pointer ${
+                          isActive
+                            ? 'bg-sky-500 text-white shadow-sm'
+                            : 'bg-[#334155] text-slate-300 hover:bg-slate-600'
+                        }`}
+                      >
+                        {page}
+                        <span
+                          className={`absolute bottom-1 right-1 w-1.5 h-1.5 sm:w-[5px] sm:h-[5px] rounded-full shadow-sm ${
+                            annotated ? 'bg-emerald-400' : 'bg-amber-500'
+                          }`}
+                        />
+                      </button>
+                    );
+                  },
+                )}
 
-              <button
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage >= totalPages}
-                className="flex items-center justify-center flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer ml-1"
-                title="Next Page"
-              >
-                <i className="ri-arrow-right-s-line text-lg" />
-              </button>
+                <button
+                  onClick={() =>
+                    setCurrentPage(Math.min(totalPages, currentPage + 1))
+                  }
+                  disabled={currentPage >= totalPages}
+                  className="flex items-center justify-center flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer ml-1"
+                  title="Next Page"
+                >
+                  <i className="ri-arrow-right-s-line text-lg" />
+                </button>
+              </div>
+            </div>
+            <div className="h-6 shrink-0 flex items-center justify-center text-[10px] sm:text-[11px] font-medium text-amber-500/90 bg-[#151c28] border-t border-slate-700/50">
+              <i className="ri-error-warning-fill mr-1.5 text-xs"></i>
+              Pages annotated: {annotatedPagesCount} / {totalPages}
             </div>
           </div>
-          <div className="h-6 shrink-0 flex items-center justify-center text-[10px] sm:text-[11px] font-medium text-amber-500/90 bg-[#151c28] border-t border-slate-700/50">
-            <i className="ri-error-warning-fill mr-1.5 text-xs"></i>
-            Pages annotated: {annotatedPagesCount} / {totalPages}
-          </div>
         </div>
-      </div>
 
-      {/* ─── RIGHT SIDE: Resume banner + Mark Panel ─── */}
+        {/* ─── RIGHT SIDE: Resume banner + Mark Panel ─── */}
         <div className="w-[255px] shrink-0 flex flex-col">
           {resumeBanner && (
             <div className="shrink-0 bg-amber-500/15 border-b border-amber-500/30 px-3 py-2.5">
