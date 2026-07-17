@@ -1,4 +1,5 @@
-// exam-admin-routes.js
+// backend/src/routes/exam-admin-routes.js
+
 import { Router } from 'express';
 import {
   login,
@@ -17,34 +18,48 @@ import {
   registerSuperAdmin,
   sendOtp,
   verifyOtp,
+  toggleUserStatus,
+  activateUser,
+  deactivateUser,
 } from './admin-controller.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
 const router = Router();
 
-// Auth routes
-router.post('/auth/register-super-admin', registerSuperAdmin);
+// ─── AUTH ROUTES (Public) ──────────────────────────────────────────────────
+
+router.post('/register-super-admin', registerSuperAdmin);
 router.post('/login', login);
 router.post('/logout', verifyToken, logout);
 router.post('/refresh-token', refreshToken);
 router.get('/me', verifyToken, verifyLoggedIn);
 
-// Password routes
+// ─── PASSWORD ROUTES ──────────────────────────────────────────────────────
+
 router.post('/forgot-password', ForgotPassword);
 router.post('/reset-password/:token', ResetPassword);
-
-// Change password (protected - only admin)
 router.post('/change-password', verifyToken, changePassword);
 
-// Update profile name (protected - only admin)
-router.put('/users/profile', verifyToken, updateProfile);
+// ─── PROFILE ROUTES ──────────────────────────────────────────────────────
 
-// User management
-router.get('/user', verifyToken, GetSingleUser);
-router.post('/users', verifyToken, createUserByAdmin);
+router.put('/profile', verifyToken, updateProfile);
+
+// ─── USER MANAGEMENT ROUTES ──────────────────────────────────────────────
+
+router.get('/users/me', verifyToken, GetSingleUser);
 router.get('/users', verifyToken, getAllUsers);
+router.post('/users', verifyToken, createUserByAdmin);
 router.patch('/users/:id', verifyToken, updateUserByAdmin);
 router.delete('/users/:id', verifyToken, deleteUserByAdmin);
+
+// ─── USER STATUS ROUTES ──────────────────────────────────────────────────
+
+router.patch('/users/:id/activate', verifyToken, activateUser);
+router.patch('/users/:id/deactivate', verifyToken, deactivateUser);
+router.patch('/users/:id/status', verifyToken, toggleUserStatus);
+
+// ─── OTP ROUTES (Public) ──────────────────────────────────────────────────
+
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 

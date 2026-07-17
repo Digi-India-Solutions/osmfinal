@@ -1,4 +1,5 @@
-// exam-admin-controller.js (FINAL FIXED VERSION)
+// backend/src/controllers/exam-admin-controller.js
+
 import { connectDB } from '../pool.js';
 import {
   hashPassword,
@@ -10,6 +11,7 @@ import sendEmail from '../../utils/sendEmail.js';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import nodemailer from 'nodemailer';
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────
 
@@ -30,7 +32,6 @@ const ROLES = {
 
 const ROLE_PERMISSIONS = {
   super_admin: {
-    // ✅ ADD THIS
     dashboard: { view: true },
     exams: { view: true, create: true, edit: true, delete: true },
     'mark-scheme': { view: true, create: true, edit: true },
@@ -39,7 +40,7 @@ const ROLE_PERMISSIONS = {
     queue: { view: true, manage: true },
     users: { view: true, create: true, edit: true, delete: true },
     reports: { view: true, export: true },
-    settings: { view: true, edit: true }, // ✅ Settings available
+    settings: { view: true, edit: true },
   },
   admin: {
     dashboard: { view: true },
@@ -50,7 +51,6 @@ const ROLE_PERMISSIONS = {
     queue: { view: true, manage: true },
     users: { view: true, create: true, edit: true, delete: true },
     reports: { view: true, export: true },
-    // settings: { view: true, edit: true },
   },
   teacher: {
     'teacher-dashboard': { view: true },
@@ -81,6 +81,33 @@ const ROLE_PERMISSIONS = {
     'recheck-marking': { view: true, process: true },
   },
 };
+
+// ─── OTP STORE ──────────────────────────────────────────────────────────────
+
+const OTP_EXPIRY_MS = 10 * 60 * 1000;
+const MAX_ATTEMPTS = 5;
+const otpStore = new Map();
+
+// ─── EMAIL TRANSPORTER ─────────────────────────────────────────────────────
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+transporter.verify((error) => {
+  if (error) {
+    console.error('❌ Email transport error:', error.message);
+  } else {
+    console.log('✅ Email transport ready');
+  }
+});
+
+const generateOtp = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
 
 // ─── PERMISSION HELPERS ─────────────────────────────────────────────────────
 
@@ -189,7 +216,7 @@ export const login = async (req, res) => {
             name: user.name,
             email: user.email,
             role: user.role,
-            subject: user.subject || null, // ✅ ADDED
+            subject: user.subject || null,
             permissions: permissions,
             isActive: user.is_active,
           },
@@ -479,7 +506,6 @@ export const createUserByAdmin = async (req, res) => {
     const defaultPassword = password || 'User@123';
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
-    // ✅ Subject logic for create
     let finalSubject = null;
     if (role === 'teacher' || role === 'teacher_checker') {
       finalSubject = subject || null;
@@ -540,17 +566,328 @@ export const createUserByAdmin = async (req, res) => {
   }
 };
 
-// src/exam-admin-controller.js
+// ─── ACTIVATE USER ─────────────────────────────────────────────────────────
 
-// ─── TEMPORARY SUPER ADMIN REGISTER ──────────────────────────────────────
-// ⚠️ REMOVE THIS AFTER CREATING SUPER ADMIN
+export const activateUser = async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const userCheck = await connectDB.query(
+      `SELECT id, role, is_active FROM users WHERE id = $1`,
+      [userId],
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    const currentUser = userCheck.rows[0];
+
+    if (currentUser.is_active === true) {
+      return res.status(400).json({
+        success: false,
+        message: 'User is already active',
+      });
+    }
+
+    if (currentUser.role === ROLES.SUPER_ADMIN) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot modify Super Admin status',
+      });
+    }
+
+    await connectDB.query(
+      `UPDATE users 
+       SET is_active = true, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $1`,
+      [userId],
+    );
+
+    const updatedResult = await connectDB.query(
+      `SELECT u.id, u.name, u.email, u.role, u.is_active, u.subject,
+              up.permissions as user_permissions
+       FROM users u
+       LEFT JOIN user_permissions up ON u.id = up.user_id
+       WHERE u.id = $1`,
+      [userId],
+    );
+    const user = updatedResult.rows[0];
+
+    try {
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+          <h2>Account Activated</h2>
+          <p>Your account has been <strong>activated</strong> by an administrator.</p>
+          <p>You can now login to the Exam Management System.</p>
+          <a href="${process.env.FRONTEND_URL}/login">Login Now</a>
+        </div>
+      `;
+      await sendEmail(user.email, 'Account Activated', html);
+    } catch (mailErr) {
+      console.error('Activation email failed:', mailErr.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'User activated successfully',
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        subject: user.subject || null,
+        isActive: user.is_active,
+        permissions:
+          user.user_permissions || resolvePermissionsByRole(user.role),
+      },
+    });
+  } catch (error) {
+    console.error('Activate User Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// ─── DEACTIVATE USER ───────────────────────────────────────────────────────
+
+export const deactivateUser = async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const userCheck = await connectDB.query(
+      `SELECT id, role, is_active FROM users WHERE id = $1`,
+      [userId],
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    const currentUser = userCheck.rows[0];
+
+    if (currentUser.id === req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You cannot deactivate your own account',
+      });
+    }
+
+    if (currentUser.role === ROLES.SUPER_ADMIN) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot deactivate Super Admin user',
+      });
+    }
+
+    if (currentUser.role === ROLES.ADMIN) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot deactivate Admin user',
+      });
+    }
+
+    if (currentUser.is_active === false) {
+      return res.status(400).json({
+        success: false,
+        message: 'User is already inactive',
+      });
+    }
+
+    await connectDB.query(
+      `UPDATE users 
+       SET is_active = false, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $1`,
+      [userId],
+    );
+
+    const updatedResult = await connectDB.query(
+      `SELECT u.id, u.name, u.email, u.role, u.is_active, u.subject,
+              up.permissions as user_permissions
+       FROM users u
+       LEFT JOIN user_permissions up ON u.id = up.user_id
+       WHERE u.id = $1`,
+      [userId],
+    );
+    const user = updatedResult.rows[0];
+
+    try {
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+          <h2>Account Deactivated</h2>
+          <p>Your account has been <strong>deactivated</strong> by an administrator.</p>
+          <p>If you think this was a mistake, please contact support.</p>
+        </div>
+      `;
+      await sendEmail(user.email, 'Account Deactivated', html);
+    } catch (mailErr) {
+      console.error('Deactivation email failed:', mailErr.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'User deactivated successfully',
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        subject: user.subject || null,
+        isActive: user.is_active,
+        permissions:
+          user.user_permissions || resolvePermissionsByRole(user.role),
+      },
+    });
+  } catch (error) {
+    console.error('Deactivate User Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// ─── TOGGLE USER STATUS ───────────────────────────────────────────────────
+
+export const toggleUserStatus = async (req, res) => {
+  const userId = req.params.id;
+  const { isActive } = req.body;
+
+  try {
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'isActive must be a boolean value (true/false)',
+      });
+    }
+
+    const userCheck = await connectDB.query(
+      `SELECT id, role, is_active FROM users WHERE id = $1`,
+      [userId],
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    const currentUser = userCheck.rows[0];
+
+    if (currentUser.id === req.user.id && isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'You cannot deactivate your own account',
+      });
+    }
+
+    if (currentUser.role === ROLES.SUPER_ADMIN && isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot deactivate Super Admin user',
+      });
+    }
+
+    if (currentUser.role === ROLES.ADMIN && isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot deactivate Admin user',
+      });
+    }
+
+    if (currentUser.is_active === isActive) {
+      return res.status(400).json({
+        success: false,
+        message: `User is already ${isActive ? 'active' : 'inactive'}`,
+      });
+    }
+
+    await connectDB.query(
+      `UPDATE users 
+       SET is_active = $1, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $2`,
+      [isActive, userId],
+    );
+
+    const updatedResult = await connectDB.query(
+      `SELECT u.id, u.name, u.email, u.role, u.is_active, u.subject,
+              up.permissions as user_permissions
+       FROM users u
+       LEFT JOIN user_permissions up ON u.id = up.user_id
+       WHERE u.id = $1`,
+      [userId],
+    );
+    const user = updatedResult.rows[0];
+
+    try {
+      const statusText = isActive ? 'activated' : 'deactivated';
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+          <h2>Account ${isActive ? 'Activated' : 'Deactivated'}</h2>
+          <p>Your account has been <strong>${statusText}</strong> by an administrator.</p>
+          ${
+            isActive
+              ? '<p>You can now login to the Exam Management System.</p><a href="${process.env.FRONTEND_URL}/login">Login Now</a>'
+              : '<p>If you think this was a mistake, please contact support.</p>'
+          }
+        </div>
+      `;
+      await sendEmail(
+        user.email,
+        `Account ${isActive ? 'Activated' : 'Deactivated'}`,
+        html,
+      );
+    } catch (mailErr) {
+      console.error('Status change email failed:', mailErr.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `User ${isActive ? 'activated' : 'deactivated'} successfully`,
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        subject: user.subject || null,
+        isActive: user.is_active,
+        permissions:
+          user.user_permissions || resolvePermissionsByRole(user.role),
+      },
+    });
+  } catch (error) {
+    console.error('Toggle User Status Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// ─── REGISTER SUPER ADMIN ──────────────────────────────────────────────────
 
 export const registerSuperAdmin = async (req, res) => {
   try {
     const { name, email, password, secretKey } = req.body;
 
-    // ✅ Secret key protection
-    const SUPER_ADMIN_SECRET = process.env.SUPER_ADMIN_SECRET || 'your-super-secret-key-123';
+    const SUPER_ADMIN_SECRET = process.env.SUPER_ADMIN_SECRET;
+
+    if (!SUPER_ADMIN_SECRET) {
+      console.error('❌ SUPER_ADMIN_SECRET not set in environment variables');
+      return res.status(500).json({
+        success: false,
+        message: 'Server configuration error',
+      });
+    }
 
     if (secretKey !== SUPER_ADMIN_SECRET) {
       return res.status(403).json({
@@ -559,7 +896,6 @@ export const registerSuperAdmin = async (req, res) => {
       });
     }
 
-    // Validation
     if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
@@ -574,7 +910,6 @@ export const registerSuperAdmin = async (req, res) => {
       });
     }
 
-    // Check if user already exists
     const existingUser = await connectDB.query(
       `SELECT id FROM users WHERE email = $1`,
       [email],
@@ -587,10 +922,8 @@ export const registerSuperAdmin = async (req, res) => {
       });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert Super Admin
     const result = await connectDB.query(
       `INSERT INTO users (id, name, email, password_hash, role, is_active, created_at)
        VALUES (gen_random_uuid(), $1, $2, $3, 'super_admin', true, NOW())
@@ -598,7 +931,6 @@ export const registerSuperAdmin = async (req, res) => {
       [name, email, hashedPassword],
     );
 
-    // Add permissions for super admin
     const superAdminPermissions = {
       dashboard: { view: true },
       exams: { view: true, create: true, edit: true, delete: true },
@@ -634,12 +966,13 @@ export const registerSuperAdmin = async (req, res) => {
   }
 };
 
+// ─── CHANGE PASSWORD ───────────────────────────────────────────────────────
+
 export const changePassword = async (req, res) => {
   const userId = req.user.id;
   const { currentPassword, newPassword } = req.body;
 
   try {
-    // 1. Validation
     if (!currentPassword || !newPassword) {
       return res.status(400).json({
         success: false,
@@ -654,7 +987,6 @@ export const changePassword = async (req, res) => {
       });
     }
 
-    // 2. Get user from database
     const result = await connectDB.query(
       `SELECT id, email, password_hash, role FROM users WHERE id = $1 AND is_active = true`,
       [userId],
@@ -668,7 +1000,6 @@ export const changePassword = async (req, res) => {
       });
     }
 
-    // 3. Verify current password
     const isMatch = await comparePassword(currentPassword, user.password_hash);
     if (!isMatch) {
       return res.status(401).json({
@@ -677,10 +1008,8 @@ export const changePassword = async (req, res) => {
       });
     }
 
-    // 4. Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // 5. Update password
     await connectDB.query(
       `UPDATE users 
        SET password_hash = $1, updated_at = CURRENT_TIMESTAMP 
@@ -688,7 +1017,6 @@ export const changePassword = async (req, res) => {
       [hashedPassword, userId],
     );
 
-    // 6. Send success response
     res.status(200).json({
       success: true,
       message: 'Password changed successfully',
@@ -702,6 +1030,16 @@ export const changePassword = async (req, res) => {
   }
 };
 
+// ─── GET ALL USERS ─────────────────────────────────────────────────────────
+
+// backend/src/controllers/exam-admin-controller.js
+
+// ─── GET ALL USERS ─────────────────────────────────────────────────────────
+
+// backend/src/controllers/exam-admin-controller.js
+
+// ─── GET ALL USERS ─────────────────────────────────────────────────────────
+
 export const getAllUsers = async (req, res) => {
   try {
     const page = Number(req.query.page || 1);
@@ -710,9 +1048,18 @@ export const getAllUsers = async (req, res) => {
     const role = (req.query.role || '').toString().trim();
     const offset = (page - 1) * limit;
 
+    // ✅ Sirf Admin role wale user ko Super Admin hide karo
+    const currentUserRole = req.user?.role;
+
     let conditions = [];
     let values = [];
     let index = 1;
+
+    // ✅ Agar current user Admin hai toh Super Admin hide karo
+    // ✅ Agar current user Super Admin hai toh sab dikhao
+    if (currentUserRole === 'admin') {
+      conditions.push(`u.role != 'super_admin'`);
+    }
 
     if (search) {
       conditions.push(`(u.name ILIKE $${index} OR u.email ILIKE $${index})`);
@@ -770,6 +1117,12 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
+// ─── UPDATE USER ───────────────────────────────────────────────────────────
+
+// backend/src/controllers/exam-admin-controller.js
+
+// ─── UPDATE USER ───────────────────────────────────────────────────────────
+
 export const updateUserByAdmin = async (req, res) => {
   const userId = req.params.id;
   const { name, email, role, permissions, isActive, password, subject } =
@@ -784,6 +1137,25 @@ export const updateUserByAdmin = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'User not found',
+      });
+    }
+
+    const currentUserRole = req.user?.role;
+    const targetUserRole = userCheck.rows[0].role;
+
+    // ✅ Prevent non-Super Admin from updating Super Admin
+    if (targetUserRole === ROLES.SUPER_ADMIN && currentUserRole !== 'super_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to modify Super Admin user',
+      });
+    }
+
+    // ✅ Prevent updating role to Super Admin if not Super Admin
+    if (role === ROLES.SUPER_ADMIN && currentUserRole !== 'super_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to assign Super Admin role',
       });
     }
 
@@ -803,18 +1175,15 @@ export const updateUserByAdmin = async (req, res) => {
     addField('email', email);
     addField('is_active', isActive);
 
-    // ✅ Role update with subject logic
     if (role !== undefined) {
       addField('role', role);
 
-      // Subject handling based on role
       if (role === 'teacher' || role === 'teacher_checker') {
         addField('subject', subject || null);
       } else {
         addField('subject', null);
       }
     } else {
-      // If role not changing, check current role for subject
       const currentRole = userCheck.rows[0].role;
       if (currentRole === 'teacher' || currentRole === 'teacher_checker') {
         if (subject !== undefined) {
@@ -879,16 +1248,30 @@ export const updateUserByAdmin = async (req, res) => {
     });
   }
 };
+// ─── DELETE USER ───────────────────────────────────────────────────────────
+
+// backend/src/controllers/exam-admin-controller.js
+
+// ─── DELETE USER ───────────────────────────────────────────────────────────
+
+// backend/src/controllers/exam-admin-controller.js
+
+// ─── DELETE USER ───────────────────────────────────────────────────────────
+
+// backend/src/controllers/exam-admin-controller.js
+
+// ─── DELETE USER ───────────────────────────────────────────────────────────
 
 export const deleteUserByAdmin = async (req, res) => {
   const userId = req.params.id;
 
   try {
-    // 1. Check user exists
+    // 1. Check if user exists
     const userCheck = await connectDB.query(
       `SELECT id, role FROM users WHERE id = $1`,
       [userId],
     );
+    
     if (userCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -896,35 +1279,203 @@ export const deleteUserByAdmin = async (req, res) => {
       });
     }
 
-    // 2. Prevent deleting admin
-    if (userCheck.rows[0].role === ROLES.ADMIN) {
+    const userRole = userCheck.rows[0].role;
+
+    // 2. Prevent deleting Super Admin
+    if (userRole === ROLES.SUPER_ADMIN) {
       return res.status(403).json({
         success: false,
-        message: 'Cannot delete admin user',
+        message: 'Cannot delete Super Admin user',
       });
     }
 
-    // 3. ✅ HARD DELETE - Permanently delete user
-    // Pehle user_permissions delete karo
-    await connectDB.query(`DELETE FROM user_permissions WHERE user_id = $1`, [
-      userId,
-    ]);
+    // 3. Prevent deleting Admin
+    if (userRole === ROLES.ADMIN) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot delete Admin user',
+      });
+    }
 
-    // Phir user delete karo
-    await connectDB.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    // 4. ✅ Delete from all tables that reference users table
+    // Order matters: child tables first, then parent
+    
+    const deleteQueries = [
+      // 1. Recheck markings
+      {
+        table: 'recheck_markings',
+        column: 'checker_id',
+      },
+      // 2. Checker markings
+      {
+        table: 'checker_markings',
+        column: 'checker_id',
+      },
+      // 3. Recheck requests (multiple columns)
+      {
+        table: 'recheck_requests',
+        column: 'assign_to',
+      },
+      {
+        table: 'recheck_requests',
+        column: 'requested_by',
+      },
+      {
+        table: 'recheck_requests',
+        column: 'resolved_by',
+      },
+      {
+        table: 'recheck_requests',
+        column: 'escalated_by',
+      },
+      {
+        table: 'recheck_requests',
+        column: 'reassigned_by',
+      },
+      // 4. Sheet activity logs
+      {
+        table: 'sheet_activity_logs',
+        column: 'performed_by',
+      },
+      // 5. Assignments
+      {
+        table: 'assignments',
+        column: 'checker_id',
+      },
+      {
+        table: 'assignments',
+        column: 'assigned_by',
+      },
+      // 6. Sheets
+      {
+        table: 'sheets',
+        column: 'uploaded_by',
+      },
+      {
+        table: 'sheets',
+        column: 'escalated_by',
+      },
+      {
+        table: 'sheets',
+        column: 'assigned_to',
+      },
+      // 7. User permissions
+      {
+        table: 'user_permissions',
+        column: 'user_id',
+      },
+    ];
+
+    // Execute all delete queries
+    let deletedCount = 0;
+    for (const q of deleteQueries) {
+      try {
+        const result = await connectDB.query(
+          `DELETE FROM ${q.table} WHERE ${q.column} = $1`,
+          [userId]
+        );
+        if (result.rowCount > 0) {
+          deletedCount += result.rowCount;
+          console.log(`✅ Deleted ${result.rowCount} records from ${q.table} (${q.column})`);
+        }
+      } catch (err) {
+        // Table or column might not exist, continue
+        console.log(`ℹ️ Skipped ${q.table}.${q.column}: ${err.message}`);
+      }
+    }
+
+    // 5. ✅ Also delete from any other possible tables
+    const additionalTables = [
+      'user_sessions',
+      'refresh_tokens',
+      'audit_logs',
+      'notification_tokens',
+      'login_attempts',
+      'password_reset_tokens',
+      'email_verification_tokens',
+      'user_activity_logs',
+      'student_data', // If this has user_id
+      'exam_assignments', // If this has user_id
+      'checking_queue', // If this has user_id
+      'mark_scheme_assignments', // If this has user_id
+    ];
+
+    for (const table of additionalTables) {
+      try {
+        // Check if table exists and has user_id column
+        const tableCheck = await connectDB.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.columns 
+            WHERE table_name = $1 AND column_name = 'user_id'
+          )
+        `, [table]);
+        
+        if (tableCheck.rows[0].exists) {
+          const result = await connectDB.query(
+            `DELETE FROM ${table} WHERE user_id = $1`,
+            [userId]
+          );
+          if (result.rowCount > 0) {
+            deletedCount += result.rowCount;
+            console.log(`✅ Deleted ${result.rowCount} records from ${table}`);
+          }
+        }
+      } catch (err) {
+        // Table might not exist
+        console.log(`ℹ️ Table ${table} not found`);
+      }
+    }
+
+    // 6. ✅ Finally delete the user
+    const deleteResult = await connectDB.query(
+      `DELETE FROM users WHERE id = $1 RETURNING id, name, email`,
+      [userId]
+    );
+
+    if (deleteResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found or already deleted',
+      });
+    }
+
+    console.log(`✅ User ${deleteResult.rows[0].name} (${deleteResult.rows[0].email}) deleted successfully`);
+    console.log(`✅ Total records deleted: ${deletedCount}`);
 
     res.status(200).json({
       success: true,
-      message: 'User deleted successfully', // ✅ Changed message
+      message: 'User deleted successfully',
+      data: {
+        deletedRecords: deletedCount,
+        user: deleteResult.rows[0]
+      }
     });
+    
   } catch (error) {
-    console.error('Delete User Error:', error.message);
+    console.error('❌ Delete User Error:', error.message);
+    console.error('Stack:', error.stack);
+    
+    // Handle specific errors
+    if (error.code === '23503') {
+      const tableMatch = error.message.match(/table "([^"]+)"/);
+      const constraintMatch = error.message.match(/constraint "([^"]+)"/);
+      
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete user. Associated records exist in table: ${tableMatch ? tableMatch[1] : 'unknown'}`,
+        table: tableMatch ? tableMatch[1] : undefined,
+        constraint: constraintMatch ? constraintMatch[1] : undefined,
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 };
+// ─── GET SINGLE USER ──────────────────────────────────────────────────────
 
 export const GetSingleUser = async (req, res) => {
   try {
@@ -969,6 +1520,8 @@ export const GetSingleUser = async (req, res) => {
   }
 };
 
+// ─── UPDATE PROFILE ────────────────────────────────────────────────────────
+
 export const updateProfile = async (req, res) => {
   const userId = req.user.id;
   const { name } = req.body;
@@ -1010,47 +1563,8 @@ export const updateProfile = async (req, res) => {
   }
 };
 
+// ─── OTP ENDPOINTS ─────────────────────────────────────────────────────────
 
-
-// backend/src/controllers/otp.controller.js
-// Routes:
-//   POST /api/v1/auth/send-otp    → sendOtp
-//   POST /api/v1/auth/verify-otp  → verifyOtp
-
-import nodemailer from 'nodemailer';
-
-// ─── Config ──────────────────────────────────────────────────────
-const OTP_EXPIRY_MS  = 10 * 60 * 1000; // 10 minutes
-const MAX_ATTEMPTS   = 5;
-
-// ─── In-memory OTP store ─────────────────────────────────────────
-// { 'email@x.com': { otp, expiresAt, attempts } }
-// ✅ Replace with Redis in production for multi-instance deployments
-const otpStore = new Map();
-
-// ─── ✅ Nodemailer — uses your existing EMAIL_USER / EMAIL_PASS ──
-const transporter = nodemailer.createTransport({
-  service: 'gmail',               // Gmail — matches ishika325g@gmail.com
-  auth: {
-    user: process.env.EMAIL_USER, // ishika325g@gmail.com
-    pass: process.env.EMAIL_PASS, // dhssllvbwumqygga (App Password)
-  },
-});
-
-// Verify transport on startup
-transporter.verify((error) => {
-  if (error) {
-    console.error('❌ Email transport error:', error.message);
-  } else {
-    console.log('✅ Email transport ready');
-  }
-});
-
-// ─── Helper: generate 6-digit OTP ────────────────────────────────
-const generateOtp = () =>
-  Math.floor(100000 + Math.random() * 900000).toString();
-
-// ─── POST /api/v1/auth/send-otp ──────────────────────────────────
 export const sendOtp = async (req, res) => {
   try {
     const { email } = req.body;
@@ -1063,16 +1577,14 @@ export const sendOtp = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const otp             = generateOtp();
-    const expiresAt       = Date.now() + OTP_EXPIRY_MS;
+    const otp = generateOtp();
+    const expiresAt = Date.now() + OTP_EXPIRY_MS;
 
-    // ✅ Store OTP (overwrites any previous OTP for same email)
     otpStore.set(normalizedEmail, { otp, expiresAt, attempts: 0 });
 
-    // ✅ Send email
     await transporter.sendMail({
-      from:    `"OSM System" <${process.env.EMAIL_USER}>`,
-      to:      email.trim(),
+      from: `"OSM System" <${process.env.EMAIL_USER}>`,
+      to: email.trim(),
       subject: 'Email Verification OTP — OSM',
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:auto;
@@ -1102,7 +1614,6 @@ export const sendOtp = async (req, res) => {
       success: true,
       message: `OTP sent to ${email.trim()}`,
     });
-
   } catch (error) {
     console.error('sendOtp error:', error);
     return res.status(500).json({
@@ -1112,7 +1623,6 @@ export const sendOtp = async (req, res) => {
   }
 };
 
-// ─── POST /api/v1/auth/verify-otp ────────────────────────────────
 export const verifyOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -1125,9 +1635,8 @@ export const verifyOtp = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const record          = otpStore.get(normalizedEmail);
+    const record = otpStore.get(normalizedEmail);
 
-    // OTP never sent or already used
     if (!record) {
       return res.status(400).json({
         success: false,
@@ -1135,7 +1644,6 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // Expired
     if (Date.now() > record.expiresAt) {
       otpStore.delete(normalizedEmail);
       return res.status(400).json({
@@ -1144,7 +1652,6 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // Too many wrong attempts
     if (record.attempts >= MAX_ATTEMPTS) {
       otpStore.delete(normalizedEmail);
       return res.status(400).json({
@@ -1153,7 +1660,6 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // Wrong OTP
     if (record.otp !== otp.trim()) {
       record.attempts += 1;
       const remaining = MAX_ATTEMPTS - record.attempts;
@@ -1163,14 +1669,12 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // ✅ Correct — delete (one-time use)
     otpStore.delete(normalizedEmail);
 
     return res.status(200).json({
       success: true,
       message: 'Email verified successfully',
     });
-
   } catch (error) {
     console.error('verifyOtp error:', error);
     return res.status(500).json({

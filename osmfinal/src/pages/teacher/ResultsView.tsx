@@ -17,6 +17,7 @@ export default function ResultsView() {
   const [results, setResults] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   // ✅ Fetch exams and filter by teacher's subject (exclude archived)
   useEffect(() => {
@@ -44,7 +45,6 @@ export default function ResultsView() {
           console.log('📋 Filtered exams (by subject):', filteredExams);
           setExams(filteredExams);
 
-          // ✅ If no exams found, show message
           if (filteredExams.length === 0) {
             console.log('⚠️ No exams found for subject:', subject);
           }
@@ -141,13 +141,180 @@ export default function ResultsView() {
     },
   ];
 
+  // ─── ✅ EXCEL EXPORT FUNCTION ──────────────────────────────────
+
+  const exportToExcel = () => {
+    if (!selectedExam || examSheets.length === 0) {
+      setToastMsg('No data to export');
+      setTimeout(() => setToastMsg(null), 3000);
+      return;
+    }
+
+    setIsExporting(true);
+
+    try {
+      // ✅ Prepare data for export
+      const exportData = examSheets.map((sheet: TeacherSheet) => {
+        const totalMarks = sheet.marks || 0;
+        const percentage =
+          selectedExam.max_marks > 0
+            ? ((totalMarks / selectedExam.max_marks) * 100).toFixed(1)
+            : '0.0';
+        const passed = parseFloat(percentage) >= 40;
+
+        return {
+          'Roll No': sheet.roll_no || '',
+          'Student Name': sheet.student_name || '',
+          'Total Marks': totalMarks,
+          'Max Marks': selectedExam.max_marks || 0,
+          'Percentage (%)': percentage,
+          Result: passed ? 'Pass' : 'Fail',
+          Status: sheet.status || 'pending',
+        };
+      });
+
+      // ✅ Add summary row
+      const summaryRow = {
+        'Roll No': '--- SUMMARY ---',
+        'Student Name': '',
+        'Total Marks': '',
+        'Max Marks': '',
+        'Percentage (%)': '',
+        Result: '',
+        Status: '',
+      };
+
+      const summaryData = [
+        summaryRow,
+        {
+          'Roll No': 'Total Students',
+          'Student Name': stats.totalStudents,
+          'Total Marks': '',
+          'Max Marks': '',
+          'Percentage (%)': '',
+          Result: '',
+          Status: '',
+        },
+        {
+          'Roll No': 'Class Average',
+          'Student Name': `${stats.average}%`,
+          'Total Marks': '',
+          'Max Marks': '',
+          'Percentage (%)': '',
+          Result: '',
+          Status: '',
+        },
+        {
+          'Roll No': 'Highest Marks',
+          'Student Name': stats.highest,
+          'Total Marks': '',
+          'Max Marks': '',
+          'Percentage (%)': '',
+          Result: '',
+          Status: '',
+        },
+        {
+          'Roll No': 'Lowest Marks',
+          'Student Name': stats.lowest,
+          'Total Marks': '',
+          'Max Marks': '',
+          'Percentage (%)': '',
+          Result: '',
+          Status: '',
+        },
+        {
+          'Roll No': 'Pass Count',
+          'Student Name': stats.passCount,
+          'Total Marks': '',
+          'Max Marks': '',
+          'Percentage (%)': '',
+          Result: '',
+          Status: '',
+        },
+        {
+          'Roll No': 'Fail Count',
+          'Student Name': stats.failCount,
+          'Total Marks': '',
+          'Max Marks': '',
+          'Percentage (%)': '',
+          Result: '',
+          Status: '',
+        },
+      ];
+
+      // ✅ Combine data
+      const finalData = [...exportData, ...summaryData];
+
+      // ✅ Convert to CSV
+      const headers = Object.keys(finalData[0]);
+      const csvRows = [];
+
+      // Add headers
+      csvRows.push(headers.join(','));
+
+      // Add rows
+      for (const row of finalData) {
+        const values = headers.map((header) => {
+          const val = row[header as keyof typeof row] ?? '';
+          // Handle strings with commas
+          if (typeof val === 'string' && val.includes(',')) {
+            return `"${val}"`;
+          }
+          return val;
+        });
+        csvRows.push(values.join(','));
+      }
+
+      // Create CSV content with BOM for Excel
+      const csvContent = '\uFEFF' + csvRows.join('\n');
+      const blob = new Blob([csvContent], {
+        type: 'text/csv;charset=utf-8;',
+      });
+
+      // Create download link
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+
+      // Generate filename with exam name and date
+      const fileName = `Results_${selectedExam.name.replace(/\s+/g, '_')}_${selectedExam.date}.csv`;
+      link.setAttribute('download', fileName);
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setToastMsg('✅ Results exported successfully!');
+      setTimeout(() => setToastMsg(null), 3000);
+    } catch (error) {
+      console.error('Export error:', error);
+      setToastMsg('Failed to export results');
+      setTimeout(() => setToastMsg(null), 3000);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   if (loading || isLoading) return <LoadingSpinner fullPage />;
 
   return (
     <div className="space-y-6">
       {toastMsg && (
-        <div className="fixed top-6 right-6 z-50 bg-red-600 text-white px-5 py-3 rounded-xl text-sm font-medium shadow-lg">
-          <i className="ri-error-warning-line mr-2"></i>
+        <div
+          className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 ${
+            toastMsg.includes('✅')
+              ? 'bg-emerald-600 text-white'
+              : 'bg-red-600 text-white'
+          }`}
+        >
+          <i
+            className={
+              toastMsg.includes('✅')
+                ? 'ri-check-line'
+                : 'ri-error-warning-line'
+            }
+          ></i>
           {toastMsg}
         </div>
       )}
@@ -227,10 +394,25 @@ export default function ResultsView() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => alert('Export to Excel - Coming soon')}
-                className="px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors duration-150 whitespace-nowrap cursor-pointer"
+                onClick={exportToExcel}
+                disabled={isExporting || examSheets.length === 0}
+                className={`px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium transition-colors duration-150 whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                  isExporting || examSheets.length === 0
+                    ? 'text-gray-400 bg-gray-50 cursor-not-allowed'
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
               >
-                <i className="ri-file-excel-2-line mr-1.5"></i> Export
+                {isExporting ? (
+                  <>
+                    <i className="ri-loader-4-line animate-spin"></i>
+                    Exporting...
+                  </>
+                ) : (
+                  <>
+                    <i className="ri-file-excel-2-line"></i>
+                    Export Excel
+                  </>
+                )}
               </button>
               <button
                 onClick={() => window.print()}
@@ -273,6 +455,9 @@ export default function ResultsView() {
                     </th>
                     <th className="text-center py-3 px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">
                       Result
+                    </th>
+                    <th className="text-center py-3 px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                      Status
                     </th>
                   </tr>
                 </thead>
@@ -326,6 +511,11 @@ export default function ResultsView() {
                                 : '!bg-rose-100 !text-rose-600'
                             }
                           />
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className="text-xs text-gray-500 whitespace-nowrap">
+                            {sheet.status || 'pending'}
+                          </span>
                         </td>
                       </tr>
                     );
