@@ -4,11 +4,44 @@ import pool from '../pool.js';
 import fs from 'fs';
 import path from 'path';
 
-// ─── GET MARK SCHEME BY EXAM ───────────────────────────────────
+// ─── HELPER: Get Base URL ──────────────────────────────────────
+
+const getBaseUrl = () => {
+  return process.env.API_URL || 'http://localhost:7000';
+};
+
+// ─── HELPER: Convert relative path to full URL ────────────────
+
+const toFullUrl = (relativePath) => {
+  if (!relativePath) return null;
+  // If already a full URL, return as is
+  if (
+    relativePath.startsWith('http://') ||
+    relativePath.startsWith('https://')
+  ) {
+    return relativePath;
+  }
+  return `${getBaseUrl()}${relativePath}`;
+};
+
+// ─── HELPER: Convert array of rows to full URLs ───────────────
+
+const convertRowsToFullUrls = (rows) => {
+  return rows.map((row) => ({
+    ...row,
+    model_answer_pdf: toFullUrl(row.model_answer_pdf),
+    question_paper_pdf: toFullUrl(row.question_paper_pdf),
+  }));
+};
+
+// ════════════════════════════════════════════════════════════════
+// GET MARK SCHEME BY EXAM
+// ════════════════════════════════════════════════════════════════
 
 export const getMarkSchemeByExam = async (req, res) => {
   try {
     const { examId } = req.params;
+
     const { rows } = await pool.query(
       `SELECT 
         id, "examId", "questionName", "maxMarks", guidelines,
@@ -19,7 +52,14 @@ export const getMarkSchemeByExam = async (req, res) => {
        ORDER BY "questionName" ASC`,
       [examId],
     );
-    return res.status(200).json({ success: true, data: rows });
+
+    // ✅ Convert relative paths to full URLs
+    const data = convertRowsToFullUrls(rows);
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
   } catch (error) {
     console.error('getMarkSchemeByExam error:', error);
     return res
@@ -28,12 +68,14 @@ export const getMarkSchemeByExam = async (req, res) => {
   }
 };
 
-// ─── SAVE MARK SCHEME (WITH LOCAL PDF UPLOAD) ──────────────────
+// ════════════════════════════════════════════════════════════════
+// SAVE MARK SCHEME (WITH LOCAL PDF UPLOAD)
+// ════════════════════════════════════════════════════════════════
 
 export const saveMarkScheme = async (req, res) => {
   const { examId } = req.params;
 
-  // ✅ Parse schemes from body
+  // Parse schemes from body
   let schemes = req.body.schemes;
   if (typeof schemes === 'string') {
     try {
@@ -46,18 +88,22 @@ export const saveMarkScheme = async (req, res) => {
     }
   }
 
-  // ✅ Handle local file uploads
+  if (!Array.isArray(schemes)) {
+    return res
+      .status(400)
+      .json({ success: false, message: '"schemes" must be an array' });
+  }
+
+  // Handle local file uploads
   let modelAnswerPdf = null;
   let questionPaperPdf = null;
 
   try {
-    // Get model answer PDF path
     if (req.files && req.files.model_answer_pdf) {
       const file = req.files.model_answer_pdf[0];
       modelAnswerPdf = `/uploads/mark-scheme/model-answers/${file.filename}`;
     }
 
-    // Get question paper PDF path
     if (req.files && req.files.question_paper_pdf) {
       const file = req.files.question_paper_pdf[0];
       questionPaperPdf = `/uploads/mark-scheme/question-papers/${file.filename}`;
@@ -71,12 +117,6 @@ export const saveMarkScheme = async (req, res) => {
     });
   }
 
-  if (!Array.isArray(schemes)) {
-    return res
-      .status(400)
-      .json({ success: false, message: '"schemes" must be an array' });
-  }
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -86,6 +126,7 @@ export const saveMarkScheme = async (req, res) => {
       'SELECT model_answer_pdf, question_paper_pdf FROM mark_schemes WHERE "examId" = $1 LIMIT 1',
       [examId],
     );
+
     const existingModelAnswer =
       existingRows.length > 0 ? existingRows[0].model_answer_pdf : null;
     const existingQuestionPaper =
@@ -99,7 +140,7 @@ export const saveMarkScheme = async (req, res) => {
       examId,
     ]);
 
-    // ✅ Calculate total marks
+    // Calculate total marks
     let totalMarks = 0;
 
     // Insert new mark schemes with local PDF URLs
@@ -126,7 +167,7 @@ export const saveMarkScheme = async (req, res) => {
       );
     }
 
-    // ✅ Update exams table with total marks
+    // Update exams table with total marks
     await client.query(`UPDATE exams SET "maxMarks" = $1 WHERE id = $2`, [
       totalMarks,
       examId,
@@ -134,6 +175,7 @@ export const saveMarkScheme = async (req, res) => {
 
     await client.query('COMMIT');
 
+    // Fetch the saved data
     const { rows } = await client.query(
       `SELECT 
         id, "examId", "questionName", "maxMarks", guidelines,
@@ -145,14 +187,17 @@ export const saveMarkScheme = async (req, res) => {
       [examId],
     );
 
+    // ✅ Convert to full URLs
+    const data = convertRowsToFullUrls(rows);
+
     return res.status(200).json({
       success: true,
       message: 'Mark scheme saved successfully',
-      data: rows,
+      data: data,
       totalMarks: totalMarks,
       files: {
-        modelAnswerPdf,
-        questionPaperPdf,
+        modelAnswerPdf: toFullUrl(modelAnswerPdf),
+        questionPaperPdf: toFullUrl(questionPaperPdf),
       },
     });
   } catch (error) {
@@ -166,7 +211,9 @@ export const saveMarkScheme = async (req, res) => {
   }
 };
 
-// ─── UPLOAD ONLY MODEL ANSWER PDF (LOCAL) ──────────────────────
+// ════════════════════════════════════════════════════════════════
+// UPLOAD ONLY MODEL ANSWER PDF
+// ════════════════════════════════════════════════════════════════
 
 export const uploadModelAnswer = async (req, res) => {
   try {
@@ -179,17 +226,21 @@ export const uploadModelAnswer = async (req, res) => {
       });
     }
 
-    const pdfUrl = `/uploads/mark-scheme/model-answers/${req.file.filename}`;
+    const pdfPath = `/uploads/mark-scheme/model-answers/${req.file.filename}`;
 
     await pool.query(
       `UPDATE mark_schemes SET model_answer_pdf = $1 WHERE "examId" = $2`,
-      [pdfUrl, examId],
+      [pdfPath, examId],
     );
 
+    // ✅ Return full URL
     return res.status(200).json({
       success: true,
       message: 'Model answer uploaded successfully',
-      data: { url: pdfUrl },
+      data: {
+        url: toFullUrl(pdfPath),
+        path: pdfPath,
+      },
     });
   } catch (error) {
     console.error('uploadModelAnswer error:', error);
@@ -201,7 +252,9 @@ export const uploadModelAnswer = async (req, res) => {
   }
 };
 
-// ─── UPLOAD ONLY QUESTION PAPER PDF (LOCAL) ─────────────────────
+// ════════════════════════════════════════════════════════════════
+// UPLOAD ONLY QUESTION PAPER PDF
+// ════════════════════════════════════════════════════════════════
 
 export const uploadQuestionPaper = async (req, res) => {
   try {
@@ -214,17 +267,21 @@ export const uploadQuestionPaper = async (req, res) => {
       });
     }
 
-    const pdfUrl = `/uploads/mark-scheme/question-papers/${req.file.filename}`;
+    const pdfPath = `/uploads/mark-scheme/question-papers/${req.file.filename}`;
 
     await pool.query(
       `UPDATE mark_schemes SET question_paper_pdf = $1 WHERE "examId" = $2`,
-      [pdfUrl, examId],
+      [pdfPath, examId],
     );
 
+    // ✅ Return full URL
     return res.status(200).json({
       success: true,
       message: 'Question paper uploaded successfully',
-      data: { url: pdfUrl },
+      data: {
+        url: toFullUrl(pdfPath),
+        path: pdfPath,
+      },
     });
   } catch (error) {
     console.error('uploadQuestionPaper error:', error);
@@ -236,7 +293,9 @@ export const uploadQuestionPaper = async (req, res) => {
   }
 };
 
-// ─── DELETE PDF ──────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// DELETE PDF
+// ════════════════════════════════════════════════════════════════
 
 export const deletePDF = async (req, res) => {
   try {
@@ -290,7 +349,9 @@ export const deletePDF = async (req, res) => {
   }
 };
 
-// ─── GET TOTAL MARKS FOR EXAM ──────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// GET TOTAL MARKS FOR EXAM
+// ════════════════════════════════════════════════════════════════
 
 export const getTotalMarks = async (req, res) => {
   try {
@@ -324,7 +385,9 @@ export const getTotalMarks = async (req, res) => {
   }
 };
 
-// ─── ✅ DELETE ENTIRE MARK SCHEME ──────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// DELETE ENTIRE MARK SCHEME
+// ════════════════════════════════════════════════════════════════
 
 export const deleteMarkScheme = async (req, res) => {
   const { examId } = req.params;
@@ -401,7 +464,9 @@ export const deleteMarkScheme = async (req, res) => {
   }
 };
 
-// ─── ✅ DELETE SPECIFIC QUESTION ───────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// DELETE SPECIFIC QUESTION
+// ════════════════════════════════════════════════════════════════
 
 export const deleteQuestion = async (req, res) => {
   const { examId, questionNum } = req.params;
@@ -410,7 +475,6 @@ export const deleteQuestion = async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Get the question to delete
     const questionName = `Qn${questionNum}`;
 
     // Check if question exists
@@ -469,7 +533,9 @@ export const deleteQuestion = async (req, res) => {
   }
 };
 
-// ─── ✅ DELETE SPECIFIC SUB-PART ──────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// DELETE SPECIFIC SUB-PART
+// ════════════════════════════════════════════════════════════════
 
 export const deleteSubPart = async (req, res) => {
   const { examId, questionNum, subLabel } = req.params;
@@ -534,4 +600,20 @@ export const deleteSubPart = async (req, res) => {
   } finally {
     client.release();
   }
+};
+
+// ════════════════════════════════════════════════════════════════
+// EXPORT ALL FUNCTIONS
+// ════════════════════════════════════════════════════════════════
+
+export default {
+  getMarkSchemeByExam,
+  saveMarkScheme,
+  uploadModelAnswer,
+  uploadQuestionPaper,
+  deletePDF,
+  getTotalMarks,
+  deleteMarkScheme,
+  deleteQuestion,
+  deleteSubPart,
 };

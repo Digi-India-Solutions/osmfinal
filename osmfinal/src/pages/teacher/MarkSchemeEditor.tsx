@@ -385,6 +385,7 @@ export default function MarkSchemeEditor() {
       );
 
       if (response.success) {
+        console.log('✅ Model Answer uploaded:', response.data.url);
         setModelAnswerPdf(response.data.url);
         setModelAnswerFile(file);
         showToast('Model answer uploaded successfully', 'success');
@@ -423,6 +424,7 @@ export default function MarkSchemeEditor() {
         file,
       );
       if (response.success) {
+        console.log('✅ Question Paper uploaded:', response.data.url);
         setQuestionPaperPdf(response.data.url);
         setQuestionPaperFile(file);
         showToast('Question paper uploaded successfully', 'success');

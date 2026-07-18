@@ -185,7 +185,7 @@ export default function WorkQueue() {
         const statsData = response.data.stats || {};
 
         setStats({
-          all: filteredSheets.length,
+          all: parseInt(statsData.all || 0),
           pending: parseInt(statsData.pending || 0),
           checking: parseInt(statsData.checking || 0),
           rechecking: parseInt(statsData.rechecking || 0),
@@ -556,7 +556,7 @@ export default function WorkQueue() {
 
   const getTabCount = (key: TabKey): number => {
     const map: Record<TabKey, number> = {
-      all: sheets.length,
+      all: stats.all,
       pending: stats.pending,
       checking: stats.checking,
       rechecking: stats.rechecking,
@@ -620,14 +620,38 @@ export default function WorkQueue() {
     return false;
   };
 
+  // ─── ✅ SHOULD SHOW REASSIGN BUTTON ──────────────────────────
+
+  const shouldShowReassignButton = (sheet: Sheet): boolean => {
+    // ✅ All tab mein assigned sheets ke liye reassign button dikhao
+    if (activeTab === 'all' && sheet.status === 'assigned') {
+      return true;
+    }
+    // ✅ Pending tab mein assigned sheets ke liye reassign button dikhao
+    if (activeTab === 'pending' && sheet.status === 'assigned') {
+      return true;
+    }
+    // ✅ Rechecking tab mein recheck sheets ke liye reassign button dikhao
+    if (activeTab === 'rechecking' && sheet.status === 'recheck') {
+      return true;
+    }
+    return false;
+  };
+
+  // ─── ✅ GET REASSIGN TYPE FOR SHEET ──────────────────────────
+
+  const getReassignTypeForSheet = (sheet: Sheet): 'checker' | 'rechecker' => {
+    if (sheet.status === 'assigned') return 'checker';
+    if (sheet.status === 'recheck') return 'rechecker';
+    return 'checker'; // fallback
+  };
+
   // ─── ✅ SHOULD SHOW VIEW BUTTON ──────────────────────────────
 
   const shouldShowViewButton = (sheet: Sheet): boolean => {
-    // ✅ Completed tab mein checked/rechecked sheets par View dikhega
     if (activeTab === 'completed') {
       return sheet.status === 'checked' || sheet.status === 'rechecked';
     }
-    // ✅ All tab mein bhi View dikhega completed sheets ke liye
     if (activeTab === 'all') {
       return sheet.status === 'checked' || sheet.status === 'rechecked';
     }
@@ -636,21 +660,17 @@ export default function WorkQueue() {
 
   // ─── ✅ HANDLE VIEW BUTTON CLICK ─────────────────────────────
 
-  // ─── ✅ HANDLE VIEW BUTTON CLICK ─────────────────────────────
-
- const handleViewSheet = (sheet: Sheet) => {
-   if (sheet.status === 'rechecked') {
-     // ✅ FIX: sheet.id nahi, recheck_request_id use karo
-     if (sheet.recheck_request_id) {
-       navigate(`/admin/view-rechecked-sheet/${sheet.recheck_request_id}`);
-     } else {
-       // fallback — agar kisi purani sheet mein field na aaye
-       navigate(`/admin/view-rechecked-sheet/${sheet.id}`);
-     }
-   } else {
-     navigate(`/admin/view-checked-sheet/${sheet.id}`);
-   }
- };
+  const handleViewSheet = (sheet: Sheet) => {
+    if (sheet.status === 'rechecked') {
+      if (sheet.recheck_request_id) {
+        navigate(`/admin/view-rechecked-sheet/${sheet.recheck_request_id}`);
+      } else {
+        navigate(`/admin/view-rechecked-sheet/${sheet.id}`);
+      }
+    } else {
+      navigate(`/admin/view-checked-sheet/${sheet.id}`);
+    }
+  };
 
   // ─── ✅ CHECK IF CHECKBOX SHOULD BE SHOWN ────────────────────
 
@@ -661,18 +681,6 @@ export default function WorkQueue() {
   // ─── ✅ CHECK IF SHEET IS SELECTABLE ─────────────────────────
 
   const isSheetSelectable = (sheet: Sheet): boolean => {
-    if (activeTab === 'pending') {
-      return sheet.status === 'assigned';
-    }
-    if (activeTab === 'rechecking') {
-      return sheet.status === 'recheck';
-    }
-    return false;
-  };
-
-  // ─── ✅ CHECK IF REASSIGN ACTION SHOULD BE SHOWN ─────────────
-
-  const shouldShowReassignAction = (sheet: Sheet): boolean => {
     if (activeTab === 'pending') {
       return sheet.status === 'assigned';
     }
@@ -1025,6 +1033,8 @@ export default function WorkQueue() {
                   const uniqueKey = `${sheet.id}-${index}`;
                   const selectable = isSheetSelectable(sheet);
                   const showView = shouldShowViewButton(sheet);
+                  const showReassign = shouldShowReassignButton(sheet);
+                  const reassignType = getReassignTypeForSheet(sheet);
 
                   return (
                     <tr
@@ -1167,6 +1177,33 @@ export default function WorkQueue() {
                                 </button>
                               )}
 
+                              {/* ✅ REASSIGN BUTTON - All tab + Pending tab (assigned) & Rechecking tab (recheck) */}
+                              {showReassign && (
+                                <button
+                                  onClick={() =>
+                                    openReassignModal(
+                                      sheet.id,
+                                      sheet.assigned_to || null,
+                                      sheet.exam_id,
+                                      reassignType,
+                                    )
+                                  }
+                                  className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                                    reassignType === 'checker'
+                                      ? 'text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100'
+                                      : 'text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100'
+                                  }`}
+                                  title={
+                                    reassignType === 'checker'
+                                      ? 'Reassign to another checker'
+                                      : 'Reassign to another rechecker'
+                                  }
+                                >
+                                  <i className="ri-exchange-line mr-0.5"></i>
+                                  Reassign
+                                </button>
+                              )}
+
                               {/* Flag button - using shouldShowFlagButton function */}
                               {shouldShowFlagButton(sheet) && (
                                 <button
@@ -1184,44 +1221,6 @@ export default function WorkQueue() {
                                   }
                                 >
                                   Flag
-                                </button>
-                              )}
-
-                              {/* Reassign Button - ONLY for pending tab assigned sheets */}
-                              {activeTab === 'pending' && isAssigned && (
-                                <button
-                                  onClick={() =>
-                                    openReassignModal(
-                                      sheet.id,
-                                      sheet.assigned_to || null,
-                                      sheet.exam_id,
-                                      'checker',
-                                    )
-                                  }
-                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100"
-                                  title="Reassign to another checker"
-                                >
-                                  <i className="ri-exchange-line mr-0.5"></i>
-                                  Reassign
-                                </button>
-                              )}
-
-                              {/* Reassign Button - for rechecking tab recheck sheets */}
-                              {activeTab === 'rechecking' && isRecheck && (
-                                <button
-                                  onClick={() =>
-                                    openReassignModal(
-                                      sheet.id,
-                                      sheet.assigned_to || null,
-                                      sheet.exam_id,
-                                      'rechecker',
-                                    )
-                                  }
-                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100"
-                                  title="Reassign to another rechecker"
-                                >
-                                  <i className="ri-exchange-line mr-0.5"></i>
-                                  Reassign
                                 </button>
                               )}
 

@@ -42,7 +42,7 @@ export interface Sheet {
   escalated_by_name?: string;
   time_spent?: number;
   checking_time_spent?: number;
-  recheck_request_id?: number;
+  // recheck_request_id?: number;
   recheck_status?: string;
   is_checked?: boolean;
   checked_at?: string;

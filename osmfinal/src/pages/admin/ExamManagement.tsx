@@ -10,6 +10,59 @@ import { useNavigate } from 'react-router-dom';
 import { examApi, type ExamResponse } from '../../api/exam';
 import subjectService, { ISubject } from '../../api/subject';
 
+// ─── HELPERS: Time conversion ──────────────────────────────────
+
+/**
+ * Parse MM:SS string to seconds
+ * Examples: "1:30" => 90, "5" => 5, "0:45" => 45
+ */
+function parseTimeToSeconds(timeStr: string): number {
+  if (!timeStr || timeStr.trim() === '') return 0;
+
+  const trimmed = timeStr.trim();
+
+  // If it's just a number (seconds)
+  if (/^\d+$/.test(trimmed)) {
+    return parseInt(trimmed, 10);
+  }
+
+  // If it's MM:SS format
+  if (/^\d+:\d{2}$/.test(trimmed)) {
+    const parts = trimmed.split(':');
+    const mins = parseInt(parts[0], 10) || 0;
+    const secs = parseInt(parts[1], 10) || 0;
+    return mins * 60 + secs;
+  }
+
+  // Try to parse as number
+  const num = parseFloat(trimmed);
+  if (!isNaN(num)) {
+    return Math.floor(num);
+  }
+
+  return 0;
+}
+
+/**
+ * Format seconds to MM:SS
+ * Examples: 90 => "1:30", 65 => "1:05", 5 => "0:05"
+ */
+function formatSecondsToTime(seconds: number): string {
+  if (!seconds || seconds <= 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+/**
+ * Validate time input format
+ */
+function isValidTimeFormat(value: string): boolean {
+  if (!value || value.trim() === '') return false;
+  const trimmed = value.trim();
+  return /^\d+$/.test(trimmed) || /^\d+:\d{2}$/.test(trimmed);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Toast Component
 // ─────────────────────────────────────────────────────────────
@@ -215,7 +268,7 @@ export default function ExamManagement() {
     date: '',
     totalQuestions: '',
     maxMarks: '',
-    spentTime: '',
+    spentTime: '', // ✅ Store as MM:SS string
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -340,13 +393,43 @@ export default function ExamManagement() {
     return true;
   };
 
+  // ✅ Custom validation for spent time
+  const validateSpentTime = (value: string) => {
+    if (!value.trim()) {
+      setErrors((prev) => ({ ...prev, spentTime: 'This field is required' }));
+      return false;
+    }
+
+    if (!isValidTimeFormat(value)) {
+      setErrors((prev) => ({
+        ...prev,
+        spentTime: 'Use format: MM:SS (e.g., 1:30) or just seconds (e.g., 90)',
+      }));
+      return false;
+    }
+
+    const seconds = parseTimeToSeconds(value);
+    if (seconds <= 0) {
+      setErrors((prev) => ({ ...prev, spentTime: 'Must be greater than 0' }));
+      return false;
+    }
+
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.spentTime;
+      return next;
+    });
+    return true;
+  };
+
   const isFormValid =
     form.name.trim() &&
     form.subject.trim() &&
     form.date.trim() &&
     form.totalQuestions.trim() &&
     form.maxMarks.trim() &&
-    form.spentTime.trim();
+    form.spentTime.trim() &&
+    !errors.spentTime;
 
   // ─── ADD/EDIT MODAL ──────────────────────────────────────────
 
@@ -372,7 +455,8 @@ export default function ExamManagement() {
       date: exam.date,
       totalQuestions: String(exam.totalQuestions),
       maxMarks: String(exam.maxMarks),
-      spentTime: String(exam.spentTime || 0),
+      // ✅ Convert seconds to MM:SS format
+      spentTime: formatSecondsToTime(exam.spentTime || 0),
     });
     setErrors({});
     setShowModal(true);
@@ -388,27 +472,27 @@ export default function ExamManagement() {
 
     setSaving(true);
     try {
+      // ✅ Convert MM:SS to seconds
+      const spentTimeInSeconds = parseTimeToSeconds(form.spentTime);
+
+      const examData = {
+        name: form.name,
+        subject: form.subject,
+        date: form.date,
+        totalQuestions: Number(form.totalQuestions),
+        maxMarks: Number(form.maxMarks),
+        spentTime: spentTimeInSeconds,
+      };
+
       if (editingExam) {
-        const updated = await examApi.updateExam(editingExam.id, {
-          name: form.name,
-          subject: form.subject,
-          date: form.date,
-          totalQuestions: Number(form.totalQuestions),
-          maxMarks: Number(form.maxMarks),
-          spentTime: Number(form.spentTime) || 0,
-        });
+        const updated = await examApi.updateExam(editingExam.id, examData);
         setExamList((prev) =>
           prev.map((e) => (e.id === editingExam.id ? updated : e)),
         );
         showToast('Exam updated successfully', 'success');
       } else {
         const created = await examApi.createExam({
-          name: form.name,
-          subject: form.subject,
-          date: form.date,
-          totalQuestions: Number(form.totalQuestions),
-          maxMarks: Number(form.maxMarks),
-          spentTime: Number(form.spentTime) || 0,
+          ...examData,
           status: 'active',
           createdBy: user?.id,
         });
@@ -537,7 +621,6 @@ export default function ExamManagement() {
         setShowSingleDeleteModal(false);
         setSingleDeletePreview(null);
         setSingleDeleteData(null);
-        // ✅ Remove from list and clear selection
         setExamList((prev) => prev.filter((e) => e.id !== singleDeleteData.id));
         setSelectedIds((prev) =>
           prev.filter((id) => id !== singleDeleteData.id),
@@ -571,7 +654,6 @@ export default function ExamManagement() {
 
   const activeExams = examList.filter((e) => e.status !== 'archived');
 
-  // ✅ Calculate selection state
   const isAllSelected =
     activeExams.length > 0 && selectedIds.length === activeExams.length;
   const isSomeSelected = selectedIds.length > 0 && !isAllSelected;
@@ -763,7 +845,8 @@ export default function ExamManagement() {
                         {exam.maxMarks}
                       </td>
                       <td className="py-3 px-4 text-center text-gray-700 whitespace-nowrap">
-                        {exam.spentTime || 0} min
+                        {/* ✅ Display formatted time */}
+                        {formatSecondsToTime(exam.spentTime || 0)}
                       </td>
                       <td className="py-3 px-4">
                         <StatusBadge status={exam.status} />
@@ -794,7 +877,6 @@ export default function ExamManagement() {
                               } text-sm`}
                             ></i>
                           </button>
-                          {/* ✅ DELETE BUTTON - only for non-archived */}
                           {!isArchived && (
                             <button
                               onClick={() =>
@@ -973,24 +1055,27 @@ export default function ExamManagement() {
                 </div>
               </div>
 
+              {/* ✅ UPDATED: Spent Time with MM:SS format */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Spent Time (minutes)
+                  Spent Time
                   <span className="text-xs text-gray-400 ml-1">
-                    (minimum time to spend)
+                    (MM:SS format - e.g., 1:30 for 1 min 30 sec)
                   </span>
                 </label>
                 <input
-                  type="number"
+                  type="text"
                   value={form.spentTime}
                   onChange={(e) => {
-                    setForm({ ...form, spentTime: e.target.value });
-                    if (errors.spentTime)
-                      validateField('spentTime', e.target.value);
+                    const value = e.target.value;
+                    // Allow: numbers, colon, and backspace
+                    if (value === '' || /^[\d:]*$/.test(value)) {
+                      setForm({ ...form, spentTime: value });
+                      if (errors.spentTime) validateSpentTime(value);
+                    }
                   }}
-                  onBlur={() => validateField('spentTime', form.spentTime)}
-                  placeholder="e.g. 60"
-                  min="1"
+                  onBlur={() => validateSpentTime(form.spentTime)}
+                  placeholder="e.g., 1:30 or 90"
                   className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${
                     errors.spentTime ? 'border-rose-400' : 'border-gray-200'
                   }`}
@@ -1002,7 +1087,7 @@ export default function ExamManagement() {
                 )}
                 <p className="text-xs text-gray-400 mt-1">
                   <i className="ri-information-line mr-1"></i>
-                  Checker/Rechecker must spend at least this many minutes while
+                  Checker/Rechecker must spend at least this much time while
                   checking this exam
                 </p>
               </div>
@@ -1108,7 +1193,8 @@ export default function ExamManagement() {
                     <div className="bg-gray-50 rounded-xl p-4">
                       <p className="text-xs text-gray-500 mb-1">Spent Time</p>
                       <p className="text-sm font-medium text-gray-900">
-                        {detailExam.spentTime || 0} minutes
+                        {/* ✅ Display formatted time */}
+                        {formatSecondsToTime(detailExam.spentTime || 0)}
                       </p>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-4">
