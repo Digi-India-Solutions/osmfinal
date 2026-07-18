@@ -1,4 +1,4 @@
-// src/routes/recheck-queue.routes.js
+// src/recheck-queue/recheckRoutes.js
 
 import { Router } from 'express';
 import {
@@ -8,37 +8,33 @@ import {
   startRecheckMarking,
   saveRecheckMarks,
   completeRecheck,
-  saveRecheckDraft, // ✅ ADD
+  saveRecheckDraft,
   getRecheckDraft,
   escalateRecheckRequest,
+  getRecheckedSheetById, // ✅ IMPORT ADD KARO
 } from './recheckController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
 const router = Router();
 
-// ─── RECHECK QUEUE ROUTES ──────────────────────────────────────
+// ─── RECHECKER ROUTES (with assign_to check) ──────────────────
 
-// Get my recheck requests (assigned to current user)
 router.get('/my-requests', verifyToken, getMyRecheckRequests);
+router.get('/my-requests/:id', verifyToken, getRecheckRequestById);
+router.patch(
+  '/my-requests/:id/status',
+  verifyToken,
+  updateRecheckRequestStatus,
+);
+router.get('/my-requests/:id/mark', verifyToken, startRecheckMarking);
+router.post('/my-requests/:id/save-draft', verifyToken, saveRecheckDraft);
+router.get('/my-requests/:id/draft', verifyToken, getRecheckDraft);
+router.post('/my-requests/:id/complete', verifyToken, completeRecheck);
+router.post('/my-requests/:id/escalate', verifyToken, escalateRecheckRequest);
 
-// Get recheck request by ID
-router.get('/requests/:id', verifyToken, getRecheckRequestById);
+// ─── ADMIN ROUTES (without assign_to check) ────────────────────
 
-// Update recheck request status
-router.patch('/requests/:id/status', verifyToken, updateRecheckRequestStatus);
-
-// Start recheck marking (get sheet details)
-router.get('/requests/:id/marking', verifyToken, startRecheckMarking);
-
-// Save recheck marks
-router.post('/requests/:id/marks', verifyToken, saveRecheckMarks);
-
-// Complete recheck
-router.post('/requests/:id/complete', verifyToken, completeRecheck);
-
-router.post('/requests/:id/draft', verifyToken, saveRecheckDraft);   // ✅ ADD
-router.get('/requests/:id/draft', verifyToken, getRecheckDraft);     // ✅ ADD
-router.patch('/requests/:id/escalate', verifyToken, escalateRecheckRequest); // ✅ Add route
-
+// ✅ Admin view rechecked sheet by ID - IMPORTANT: Ye route pehle hona chahiye
+router.get('/admin/rechecked/:id', verifyToken, getRecheckedSheetById);
 
 export default router;

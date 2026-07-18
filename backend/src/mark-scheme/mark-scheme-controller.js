@@ -84,10 +84,12 @@ export const saveMarkScheme = async (req, res) => {
     // Fetch existing PDFs to retain if new ones are not provided
     const { rows: existingRows } = await client.query(
       'SELECT model_answer_pdf, question_paper_pdf FROM mark_schemes WHERE "examId" = $1 LIMIT 1',
-      [examId]
+      [examId],
     );
-    const existingModelAnswer = existingRows.length > 0 ? existingRows[0].model_answer_pdf : null;
-    const existingQuestionPaper = existingRows.length > 0 ? existingRows[0].question_paper_pdf : null;
+    const existingModelAnswer =
+      existingRows.length > 0 ? existingRows[0].model_answer_pdf : null;
+    const existingQuestionPaper =
+      existingRows.length > 0 ? existingRows[0].question_paper_pdf : null;
 
     modelAnswerPdf = modelAnswerPdf || existingModelAnswer;
     questionPaperPdf = questionPaperPdf || existingQuestionPaper;
@@ -147,7 +149,7 @@ export const saveMarkScheme = async (req, res) => {
       success: true,
       message: 'Mark scheme saved successfully',
       data: rows,
-      totalMarks: totalMarks, // ✅ Send total marks in response
+      totalMarks: totalMarks,
       files: {
         modelAnswerPdf,
         questionPaperPdf,
@@ -319,5 +321,217 @@ export const getTotalMarks = async (req, res) => {
       message: 'Failed to get total marks',
       error: error.message,
     });
+  }
+};
+
+// ─── ✅ DELETE ENTIRE MARK SCHEME ──────────────────────────────
+
+export const deleteMarkScheme = async (req, res) => {
+  const { examId } = req.params;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Get PDF paths before deleting
+    const { rows: pdfRows } = await client.query(
+      `SELECT model_answer_pdf, question_paper_pdf FROM mark_schemes WHERE "examId" = $1 LIMIT 1`,
+      [examId],
+    );
+
+    // 2. Delete all mark scheme entries
+    const deleteResult = await client.query(
+      `DELETE FROM mark_schemes WHERE "examId" = $1 RETURNING id`,
+      [examId],
+    );
+
+    if (deleteResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        message: 'Mark scheme not found for this exam',
+      });
+    }
+
+    // 3. Update exam total marks to 0
+    await client.query(`UPDATE exams SET "maxMarks" = 0 WHERE id = $1`, [
+      examId,
+    ]);
+
+    await client.query('COMMIT');
+
+    // 4. Delete PDF files from disk (after commit)
+    if (pdfRows.length > 0) {
+      const pdfs = pdfRows[0];
+      const filesToDelete = [
+        pdfs.model_answer_pdf,
+        pdfs.question_paper_pdf,
+      ].filter(Boolean);
+
+      for (const pdfUrl of filesToDelete) {
+        try {
+          const filePath = path.join(process.cwd(), pdfUrl);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log(`Deleted file: ${filePath}`);
+          }
+        } catch (err) {
+          console.error('Error deleting file:', err);
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Mark scheme deleted successfully',
+      data: {
+        deletedCount: deleteResult.rowCount,
+      },
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('deleteMarkScheme error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete mark scheme',
+      error: error.message,
+    });
+  } finally {
+    client.release();
+  }
+};
+
+// ─── ✅ DELETE SPECIFIC QUESTION ───────────────────────────────
+
+export const deleteQuestion = async (req, res) => {
+  const { examId, questionNum } = req.params;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Get the question to delete
+    const questionName = `Qn${questionNum}`;
+
+    // Check if question exists
+    const checkResult = await client.query(
+      `SELECT id, questionName FROM mark_schemes 
+       WHERE "examId" = $1 AND "questionName" LIKE $2`,
+      [examId, `${questionName}%`],
+    );
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        message: `Question ${questionNum} not found`,
+      });
+    }
+
+    // Delete all entries for this question (including sub-parts)
+    await client.query(
+      `DELETE FROM mark_schemes 
+       WHERE "examId" = $1 AND "questionName" LIKE $2`,
+      [examId, `${questionName}%`],
+    );
+
+    // Update total marks
+    const totalResult = await client.query(
+      `SELECT SUM("maxMarks") as total FROM mark_schemes WHERE "examId" = $1`,
+      [examId],
+    );
+    const totalMarks = parseInt(totalResult.rows[0]?.total) || 0;
+
+    await client.query(`UPDATE exams SET "maxMarks" = $1 WHERE id = $2`, [
+      totalMarks,
+      examId,
+    ]);
+
+    await client.query('COMMIT');
+
+    return res.status(200).json({
+      success: true,
+      message: `Question ${questionNum} deleted successfully`,
+      data: {
+        totalMarks,
+      },
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('deleteQuestion error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete question',
+      error: error.message,
+    });
+  } finally {
+    client.release();
+  }
+};
+
+// ─── ✅ DELETE SPECIFIC SUB-PART ──────────────────────────────
+
+export const deleteSubPart = async (req, res) => {
+  const { examId, questionNum, subLabel } = req.params;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const questionName = `Qn${questionNum}_${subLabel}`;
+
+    // Check if sub-part exists
+    const checkResult = await client.query(
+      `SELECT id FROM mark_schemes 
+       WHERE "examId" = $1 AND "questionName" = $2`,
+      [examId, questionName],
+    );
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        message: `Sub-part ${subLabel} of Question ${questionNum} not found`,
+      });
+    }
+
+    // Delete the sub-part
+    await client.query(
+      `DELETE FROM mark_schemes 
+       WHERE "examId" = $1 AND "questionName" = $2`,
+      [examId, questionName],
+    );
+
+    // Update total marks
+    const totalResult = await client.query(
+      `SELECT SUM("maxMarks") as total FROM mark_schemes WHERE "examId" = $1`,
+      [examId],
+    );
+    const totalMarks = parseInt(totalResult.rows[0]?.total) || 0;
+
+    await client.query(`UPDATE exams SET "maxMarks" = $1 WHERE id = $2`, [
+      totalMarks,
+      examId,
+    ]);
+
+    await client.query('COMMIT');
+
+    return res.status(200).json({
+      success: true,
+      message: `Sub-part ${subLabel} of Question ${questionNum} deleted successfully`,
+      data: {
+        totalMarks,
+      },
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('deleteSubPart error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete sub-part',
+      error: error.message,
+    });
+  } finally {
+    client.release();
   }
 };

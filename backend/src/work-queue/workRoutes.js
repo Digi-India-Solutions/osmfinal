@@ -13,6 +13,9 @@ import {
   assignSheet,
   reassignRecheckRequests,
   getAvailableRecheckers,
+  getCheckedSheetById, // ✅ Add this
+  getCheckedSheets, // ✅ Add this
+  getEscalatedSheets, // ✅ Add this
 } from './workController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
@@ -34,6 +37,19 @@ router.post('/sheets/:id/flag-for-recheck', verifyToken, flagForRecheck);
 
 // Assign sheet to checker
 router.post('/sheets/:id/assign', verifyToken, assignSheet);
+
+// ─── CHECKED SHEETS ROUTES ────────────────────────────────────
+
+// ✅ Get all checked sheets
+router.get('/checked-sheets', verifyToken, getCheckedSheets);
+
+// ✅ Get checked sheet by ID
+router.get('/checked-sheets/:id', verifyToken, getCheckedSheetById);
+
+// ─── ESCALATED SHEETS ROUTES ──────────────────────────────────
+
+// ✅ Get escalated sheets
+router.get('/escalated-sheets', verifyToken, getEscalatedSheets);
 
 // ─── RECHECK ROUTES ─────────────────────────────────────────────
 

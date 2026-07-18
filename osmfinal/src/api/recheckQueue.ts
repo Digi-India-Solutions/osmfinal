@@ -119,6 +119,29 @@ class RecheckQueueService {
       };
     }
   }
+  // src/api/recheckQueue.ts
+
+  // ─── GET RECHECKED SHEET FOR VIEWING ───────────────────────────
+
+  // src/api/recheckQueue.ts
+
+  // ─── GET RECHECKED SHEET FOR ADMIN VIEW ─────────────────────────
+
+  async getRecheckedSheetForAdmin(requestId: number): Promise<any> {
+    try {
+      const response = await api.get(
+        `/api/v1/recheck-queue/admin/rechecked/${requestId}`,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Get rechecked sheet error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get rechecked sheet',
+      };
+    }
+  }
 
   // Get recheck request by ID
   async getRequestById(id: number): Promise<any> {

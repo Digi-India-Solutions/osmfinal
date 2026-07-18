@@ -169,4 +169,66 @@ export const markSchemeApi = {
       return { modelAnswer: null, questionPaper: null };
     }
   },
+
+  // ✅ Delete entire mark scheme
+  // FIX: prefix "mark-scheme" tha missing — route file mein registered path
+  // /api/v1/mark-scheme/exams/:examId/mark-scheme hai, /api/v1/exams/... nahi.
+  deleteByExam: async (
+    examId: string,
+  ): Promise<{ success: boolean; message?: string }> => {
+    try {
+      const response = await axiosInstance.delete(
+        `/api/v1/mark-scheme/exams/${examId}/mark-scheme`,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Delete mark scheme error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to delete mark scheme',
+      };
+    }
+  },
+
+  // ✅ Delete specific question
+  // FIX: same prefix issue
+  deleteQuestion: async (
+    examId: string,
+    questionNum: number,
+  ): Promise<{ success: boolean; message?: string; data?: any }> => {
+    try {
+      const response = await axiosInstance.delete(
+        `/api/v1/mark-scheme/exams/${examId}/mark-scheme/question/${questionNum}`,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Delete question error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to delete question',
+      };
+    }
+  },
+
+  // ✅ Delete specific sub-part
+  // FIX: same prefix issue
+  deleteSubPart: async (
+    examId: string,
+    questionNum: number,
+    subLabel: string,
+  ): Promise<{ success: boolean; message?: string; data?: any }> => {
+    try {
+      const response = await axiosInstance.delete(
+        `/api/v1/mark-scheme/exams/${examId}/mark-scheme/question/${questionNum}/subpart/${subLabel}`,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Delete sub-part error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to delete sub-part',
+      };
+    }
+  },
 };

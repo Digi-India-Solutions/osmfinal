@@ -681,6 +681,10 @@ export const assignSheet = async (req, res) => {
 
 // ─── REASSIGN RECHECK REQUESTS ──────────────────────────────────
 
+// src/work-queue/workController.js
+
+// ─── REASSIGN RECHECK REQUESTS ──────────────────────────────────
+
 export const reassignRecheckRequests = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -752,14 +756,16 @@ export const reassignRecheckRequests = async (req, res) => {
 
           const sheet = sheetCheck.rows[0];
 
+          // ✅ Check if columns exist before using them
+          // Simple approach: Update without reassigned_by/reassigned_at if they don't exist
+          // Or use COALESCE with NULL
+          
           await client.query(
             `UPDATE recheck_requests 
              SET assign_to = $1, 
-                 reassigned_by = $2,
-                 reassigned_at = NOW(),
                  updated_at = NOW()
-             WHERE id = $3 AND status = 'pending'`,
-            [assignTo, userId, sheet.recheck_id],
+             WHERE id = $2 AND status = 'pending'`,
+            [assignTo, sheet.recheck_id],
           );
 
           await client.query(
@@ -842,6 +848,232 @@ export const getAvailableRecheckers = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get available recheckers',
+      error: error.message,
+    });
+  }
+};
+
+
+// src/work-queue/workController.js
+
+// ─── GET CHECKED SHEET BY ID ──────────────────────────────────
+
+export const getCheckedSheetById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT 
+        s.id,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.marks,
+        s.checking_time_spent,
+        s.archived_folder,
+        s.file_url,
+        s.checked_at,
+        s.status,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        e."maxMarks" AS total_marks,
+        u.name AS checker_name,
+        cm.marks_data,
+        cm.annotations_data,
+        cm.stamps_data,
+        cm.remarks,
+        cm.submitted_at
+      FROM sheets s
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'completed'
+      LEFT JOIN users u ON a.checker_id = u.id
+      LEFT JOIN checker_markings cm ON s.id = cm.sheet_id AND cm.is_submitted = true
+      WHERE s.id = $1 AND s.is_checked = true
+      ORDER BY a.updated_at DESC
+      LIMIT 1`,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Checked sheet not found',
+      });
+    }
+
+    // ✅ Build full URL for file
+    const baseUrl = process.env.API_URL || 'http://localhost:7000';
+    const fileUrl = result.rows[0].file_url;
+    const fullFileUrl = fileUrl ? `${baseUrl}${fileUrl}` : null;
+
+    return res.status(200).json({
+      success: true,
+      message: 'Checked sheet retrieved successfully',
+      data: {
+        ...result.rows[0],
+        file_url: fullFileUrl,
+      },
+    });
+  } catch (error) {
+    console.error('getCheckedSheetById error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get checked sheet',
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET ALL CHECKED SHEETS ────────────────────────────────────
+
+export const getCheckedSheets = async (req, res) => {
+  try {
+    const { examId, page = 1, limit = 50 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    let query = `
+      SELECT 
+        s.id,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.marks,
+        s.checking_time_spent,
+        s.archived_folder,
+        s.file_url,
+        s.checked_at,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        e."maxMarks" AS total_marks,
+        u.name AS checker_name
+      FROM sheets s
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'completed'
+      LEFT JOIN users u ON a.checker_id = u.id
+      WHERE s.is_checked = true AND s.status = 'checked'
+    `;
+
+    const params = [];
+    let paramCount = 1;
+
+    if (examId) {
+      query += ` AND s.exam_id = $${paramCount}`;
+      params.push(examId);
+      paramCount++;
+    }
+
+    query += ` ORDER BY s.checked_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    params.push(parseInt(limit), offset);
+
+    const result = await pool.query(query, params);
+
+    // Count total
+    let countQuery = `
+      SELECT COUNT(*)::int AS total 
+      FROM sheets s
+      WHERE s.is_checked = true AND s.status = 'checked'
+    `;
+    const countParams = [];
+    if (examId) {
+      countQuery += ` AND s.exam_id = $1`;
+      countParams.push(examId);
+    }
+    const countResult = await pool.query(countQuery, countParams);
+    const total = countResult.rows[0]?.total || 0;
+
+    return res.status(200).json({
+      success: true,
+      message: 'Checked sheets retrieved successfully',
+      data: {
+        items: result.rows,
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    console.error('getCheckedSheets error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get checked sheets',
+      error: error.message,
+    });
+  }
+};
+
+// ─── GET ESCALATED SHEETS ──────────────────────────────────────
+
+export const getEscalatedSheets = async (req, res) => {
+  try {
+    const { examId, page = 1, limit = 50 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    let query = `
+      SELECT 
+        s.id,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.status,
+        s.escalate_reason,
+        s.escalate_type,
+        s.escalate_remarks,
+        s.escalated_by,
+        s.escalated_at,
+        s.checking_time_spent,
+        e.name AS exam_name,
+        e.subject AS exam_subject,
+        u.name AS escalated_by_name
+      FROM sheets s
+      JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN users u ON s.escalated_by = u.id
+      WHERE s.status = 'escalated'
+    `;
+
+    const params = [];
+    let paramCount = 1;
+
+    if (examId) {
+      query += ` AND s.exam_id = $${paramCount}`;
+      params.push(examId);
+      paramCount++;
+    }
+
+    query += ` ORDER BY s.escalated_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    params.push(parseInt(limit), offset);
+
+    const result = await pool.query(query, params);
+
+    let countQuery = `
+      SELECT COUNT(*)::int AS total 
+      FROM sheets s
+      WHERE s.status = 'escalated'
+    `;
+    const countParams = [];
+    if (examId) {
+      countQuery += ` AND s.exam_id = $1`;
+      countParams.push(examId);
+    }
+    const countResult = await pool.query(countQuery, countParams);
+    const total = countResult.rows[0]?.total || 0;
+
+    return res.status(200).json({
+      success: true,
+      message: 'Escalated sheets retrieved successfully',
+      data: {
+        items: result.rows,
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    console.error('getEscalatedSheets error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get escalated sheets',
       error: error.message,
     });
   }

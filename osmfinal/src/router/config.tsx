@@ -19,6 +19,8 @@ import ResultReport from '@/pages/admin/ResultReport';
 import RecheckReport from '@/pages/admin/RecheckReport';
 import CheckerPerformance from '@/pages/admin/CheckerPerformance';
 import SettingsPage from '@/pages/admin/SettingsPage';
+// ✅ ADD THIS IMPORT
+import CheckedSheetView from '@/pages/admin/CheckedSheetView';
 
 // ─── TEACHER PAGES ────────────────────────────────────────────────────
 import TeacherDashboard from '@/pages/teacher/TeacherDashboard';
@@ -39,6 +41,7 @@ import RecheckHistory from '@/pages/recheck/RecheckHistory';
 import RecheckMarkingView from '@/pages/recheck/RecheckMarkingView';
 
 import Layout from '@/components/layout/Layout';
+import RecheckedSheetView from '@/pages/admin/RecheckedSheetView';
 
 // ─── PROTECTED ROUTE COMPONENT ──────────────────────────────────────
 
@@ -122,6 +125,15 @@ const routes: RouteObject[] = [
               {
                 path: '/admin/reports/performance',
                 element: <CheckerPerformance />,
+              },
+              // ✅ ADD THIS ROUTE - Admin se checked sheet view karne ke liye
+              {
+                path: '/admin/view-checked-sheet/:sheetId',
+                element: <CheckedSheetView />,
+              },
+              {
+                path: '/admin/view-rechecked-sheet/:requestId',
+                element: <RecheckedSheetView />,
               },
               { path: '/admin/*', element: <AdminDashboard /> },
             ],

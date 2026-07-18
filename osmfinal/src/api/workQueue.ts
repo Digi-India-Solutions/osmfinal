@@ -1,3 +1,5 @@
+// src/api/workQueue.ts
+
 import api from './axios';
 
 export interface Sheet {
@@ -19,29 +21,36 @@ export interface Sheet {
     | 'recheck'
     | 'rechecked'
     | 'escalated'
-    | 'linked';
+    | 'linked'
+    | 'rechecking';
   marks: string;
-  total_marks?: number; // ✅ Added: Total marks from exam
+  total_marks?: number;
   uploaded_by: string;
   created_at: string;
   updated_at: string;
   exam_name: string;
   exam_subject: string;
   uploaded_by_name: string;
-  pending_recheck_count: string;
+  pending_recheck_count: number;
   assigned_to_name?: string;
   assigned_to?: string;
-  // Escalation fields
   escalate_reason?: string;
   escalate_type?: string;
   escalate_remarks?: string;
   escalated_by?: string;
   escalated_at?: string;
   escalated_by_name?: string;
+  time_spent?: number;
+  checking_time_spent?: number;
+  recheck_request_id?: number;
+  recheck_status?: string;
+  is_checked?: boolean;
+  checked_at?: string;
+  archived_folder?: string;
 }
 
 export interface RecheckUser {
-  id: number;
+  id: string;
   name: string;
   email: string;
   subject: string | null;
@@ -55,10 +64,10 @@ export interface RecheckRequest {
   exam_id: number;
   scope: 'single' | 'entire';
   reason: string;
-  assign_to: number;
-  status: 'pending' | 'assigned' | 'completed' | 'rejected';
-  requested_by: number;
-  resolved_by: number | null;
+  assign_to: string;
+  status: 'pending' | 'assigned' | 'completed' | 'rejected' | 'escalated';
+  requested_by: string;
+  resolved_by: string | null;
   resolved_at: string | null;
   remarks: string | null;
   created_at: string;
@@ -69,6 +78,28 @@ export interface RecheckRequest {
   assign_to_name: string;
   requested_by_name: string;
   resolved_by_name: string | null;
+  time_spent?: number;
+}
+
+export interface CheckedSheet {
+  id: number;
+  student_name: string;
+  roll_no: string;
+  barcode: string;
+  marks: string;
+  checking_time_spent: number;
+  archived_folder: string;
+  file_url: string;
+  checked_at: string;
+  exam_name: string;
+  exam_subject: string;
+  total_marks: number;
+  checker_name: string;
+  marks_data?: any;
+  annotations_data?: any;
+  stamps_data?: any;
+  remarks?: string;
+  submitted_at?: string;
 }
 
 export interface SheetStats {
@@ -93,10 +124,24 @@ export interface SheetsResponse {
   };
 }
 
+export interface CheckedSheetsResponse {
+  success: boolean;
+  message: string;
+  data: {
+    items: CheckedSheet[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
 class WorkQueueService {
+  // ─── SHEET ROUTES ──────────────────────────────────────────────
+
   // Get all sheets with filters
   async getSheets(params?: {
-    examId?: number;
+    examId?: string | number;
     status?: string;
     search?: string;
     assignedTo?: number;
@@ -147,7 +192,7 @@ class WorkQueueService {
   // Update sheet status
   async updateSheetStatus(
     id: number,
-    data: { status: string; marks?: number },
+    data: { status: string; marks?: number; assigned_to?: string },
   ): Promise<any> {
     try {
       const response = await api.patch(
@@ -188,6 +233,102 @@ class WorkQueueService {
       };
     }
   }
+
+  // Assign sheet to checker
+  async assignSheet(
+    sheetId: number,
+    data: { assigned_to: string },
+  ): Promise<any> {
+    try {
+      const response = await api.post(
+        `/api/v1/work-queue/sheets/${sheetId}/assign`,
+        data,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Assign sheet error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to assign sheet',
+      };
+    }
+  }
+
+  // ─── CHECKED SHEETS ROUTES ────────────────────────────────────
+
+  // ✅ Get checked sheet by ID for viewing (with full details)
+  async getCheckedSheetById(sheetId: number): Promise<{
+    success: boolean;
+    message: string;
+    data?: CheckedSheet;
+  }> {
+    try {
+      const response = await api.get(
+        `/api/v1/work-queue/checked-sheets/${sheetId}`,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Get checked sheet error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to get checked sheet',
+      };
+    }
+  }
+
+  // ✅ Get all checked sheets
+  async getCheckedSheets(params?: {
+    examId?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<CheckedSheetsResponse> {
+    try {
+      const response = await api.get('/api/v1/work-queue/checked-sheets', {
+        params,
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Get checked sheets error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get checked sheets',
+        data: {
+          items: [],
+          total: 0,
+          page: 1,
+          limit: 50,
+          totalPages: 0,
+        },
+      };
+    }
+  }
+
+  // ─── ESCALATED SHEETS ROUTES ──────────────────────────────────
+
+  // ✅ Get escalated sheets
+  async getEscalatedSheets(params?: {
+    examId?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<any> {
+    try {
+      const response = await api.get('/api/v1/work-queue/escalated-sheets', {
+        params,
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Get escalated sheets error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get escalated sheets',
+        data: { items: [], total: 0 },
+      };
+    }
+  }
+
+  // ─── RECHECK ROUTES ───────────────────────────────────────────
 
   // Get recheck users
   async getRecheckUsers(): Promise<{
@@ -230,6 +371,23 @@ class WorkQueueService {
     }
   }
 
+  // Get recheck request by ID
+  async getRecheckRequestById(id: number): Promise<any> {
+    try {
+      const response = await api.get(
+        `/api/v1/work-queue/recheck-requests/${id}`,
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Get recheck request error:', error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || 'Failed to get recheck request',
+      };
+    }
+  }
+
   // Update recheck request status
   async updateRecheckRequestStatus(
     id: number,
@@ -251,7 +409,9 @@ class WorkQueueService {
     }
   }
 
-  // Reassign single sheet
+  // ─── REASSIGN ROUTES ──────────────────────────────────────────
+
+  // Reassign single recheck sheet
   async reassignRecheck(
     sheetId: number,
     data: { assignTo: string },
@@ -294,7 +454,7 @@ class WorkQueueService {
     }
   }
 
-  // Get available recheckers using query parameter
+  // Get available recheckers
   async getAvailableRecheckers(excludeId?: string): Promise<{
     success: boolean;
     data: RecheckUser[];
