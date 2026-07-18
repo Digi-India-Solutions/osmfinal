@@ -4,6 +4,10 @@ import pool from '../pool.js';
 
 // ─── GET ALL SHEETS ─────────────────────────────────────────────
 
+// src/work-queue/workController.js
+
+// src/work-queue/workController.js
+
 export const getSheets = async (req, res) => {
   try {
     const { examId, status, search, page = 1, limit = 50 } = req.query;
@@ -13,12 +17,7 @@ export const getSheets = async (req, res) => {
     const params = [];
     let paramCount = 1;
 
-    if (examId) {
-      conditions.push(`s.exam_id = $${paramCount}`);
-      params.push(examId);
-      paramCount++;
-    }
-
+    // ─── STATUS CONDITIONS (for main items list only) ──────────
     if (status && status.trim() !== '') {
       const statuses = status.split(',');
       const placeholders = statuses
@@ -29,6 +28,12 @@ export const getSheets = async (req, res) => {
       paramCount += statuses.length;
     } else {
       conditions.push(`s.status NOT IN ('unlinked')`);
+    }
+
+    if (examId) {
+      conditions.push(`s.exam_id = $${paramCount}`);
+      params.push(examId);
+      paramCount++;
     }
 
     if (search) {
@@ -42,6 +47,7 @@ export const getSheets = async (req, res) => {
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // ─── MAIN QUERY ────────────────────────────────────────────
     let query = `
       SELECT 
         s.id,
@@ -97,6 +103,7 @@ export const getSheets = async (req, res) => {
 
     const { rows } = await pool.query(query, dataParams);
 
+    // ─── TOTAL COUNT (for pagination — respects status filter) ──
     let countQuery = `SELECT COUNT(*)::int AS total FROM sheets s`;
     if (whereClause) {
       countQuery += ` ${whereClause}`;
@@ -104,7 +111,29 @@ export const getSheets = async (req, res) => {
     const countResult = await pool.query(countQuery, params);
     const total = countResult.rows[0]?.total || 0;
 
-    let statsQuery = `
+    // ─── STATS QUERY (tab-independent — only examId + search) ──
+    const statsConditions = [];
+    const statsParams = [];
+    let statsParamCount = 1;
+
+    if (examId) {
+      statsConditions.push(`s.exam_id = $${statsParamCount}`);
+      statsParams.push(examId);
+      statsParamCount++;
+    }
+
+    if (search) {
+      statsConditions.push(
+        `(s.student_name ILIKE $${statsParamCount} OR s.roll_no ILIKE $${statsParamCount})`,
+      );
+      statsParams.push(`%${search}%`);
+      statsParamCount++;
+    }
+
+    statsConditions.push(`s.status NOT IN ('unlinked')`);
+    const statsWhereClause = `WHERE ${statsConditions.join(' AND ')}`;
+
+    const statsQuery = `
       SELECT 
         COUNT(*) AS all_count,
         COUNT(*) FILTER (WHERE s.status IN ('linked', 'uploaded', 'assigned', 'recheck')) AS pending_count,
@@ -113,12 +142,10 @@ export const getSheets = async (req, res) => {
         COUNT(*) FILTER (WHERE s.status IN ('checked', 'rechecked')) AS completed_count,
         COUNT(*) FILTER (WHERE s.status = 'escalated') AS escalated_count
       FROM sheets s
+      ${statsWhereClause}
     `;
-    if (whereClause) {
-      statsQuery += ` ${whereClause}`;
-    }
 
-    const statsResult = await pool.query(statsQuery, params);
+    const statsResult = await pool.query(statsQuery, statsParams);
     const stats = statsResult.rows[0] || {};
 
     return res.status(200).json({
@@ -149,7 +176,6 @@ export const getSheets = async (req, res) => {
     });
   }
 };
-
 // ─── GET SINGLE SHEET ──────────────────────────────────────────
 
 export const getSheetById = async (req, res) => {

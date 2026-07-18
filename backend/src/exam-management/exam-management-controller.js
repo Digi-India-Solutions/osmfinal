@@ -222,7 +222,7 @@ export const deleteExam = async (req, res) => {
 
     await client.query('BEGIN');
 
-    // 1️⃣ Check if exam exists
+    // 1️⃣ Check if exam exists (UUID support)
     const examResult = await client.query(
       `SELECT id, name, subject FROM exams WHERE id = $1`,
       [id],
@@ -252,7 +252,10 @@ export const deleteExam = async (req, res) => {
       await client.query(`DELETE FROM sheets WHERE exam_id = $1`, [id]);
     }
 
-    // 4️⃣ Delete the exam
+    // 4️⃣ Delete mark schemes for this exam
+    await client.query(`DELETE FROM mark_schemes WHERE "examId" = $1`, [id]);
+
+    // 5️⃣ Delete the exam
     await client.query(`DELETE FROM exams WHERE id = $1`, [id]);
 
     await client.query('COMMIT');
@@ -330,7 +333,13 @@ export const bulkDeleteExams = async (req, res) => {
       ]);
     }
 
-    // 4️⃣ Delete all exams
+    // 4️⃣ Delete mark schemes
+    await client.query(
+      `DELETE FROM mark_schemes WHERE "examId" = ANY($1::uuid[])`,
+      [existingExamIds],
+    );
+
+    // 5️⃣ Delete all exams
     await client.query(`DELETE FROM exams WHERE id = ANY($1::uuid[])`, [
       existingExamIds,
     ]);
@@ -433,6 +442,12 @@ export const deleteExamsByFilter = async (req, res) => {
       ]);
     }
 
+    // Delete mark schemes
+    await client.query(
+      `DELETE FROM mark_schemes WHERE "examId" = ANY($1::uuid[])`,
+      [examIds],
+    );
+
     // Delete exams
     await client.query(`DELETE FROM exams WHERE id = ANY($1::uuid[])`, [
       examIds,
@@ -506,6 +521,15 @@ export const getExamDeletionPreview = async (req, res) => {
       [idArray],
     );
 
+    // Get mark scheme count for each exam
+    const markSchemeResult = await pool.query(
+      `SELECT "examId", COUNT(*) AS mark_scheme_count
+       FROM mark_schemes 
+       WHERE "examId" = ANY($1::uuid[])
+       GROUP BY "examId"`,
+      [idArray],
+    );
+
     const sheetCountMap = {};
     sheetsResult.rows.forEach((row) => {
       sheetCountMap[row.exam_id] = {
@@ -516,16 +540,27 @@ export const getExamDeletionPreview = async (req, res) => {
       };
     });
 
-    const examsWithSheets = examsResult.rows.map((exam) => ({
+    const markSchemeCountMap = {};
+    markSchemeResult.rows.forEach((row) => {
+      markSchemeCountMap[row.examId] = parseInt(row.mark_scheme_count);
+    });
+
+    const examsWithDetails = examsResult.rows.map((exam) => ({
       ...exam,
       sheet_count: sheetCountMap[exam.id]?.total || 0,
       checked_count: sheetCountMap[exam.id]?.checked || 0,
       checking_count: sheetCountMap[exam.id]?.checking || 0,
       pending_count: sheetCountMap[exam.id]?.pending || 0,
+      mark_scheme_count: markSchemeCountMap[exam.id] || 0,
     }));
 
-    const totalSheets = examsWithSheets.reduce(
+    const totalSheets = examsWithDetails.reduce(
       (sum, e) => sum + e.sheet_count,
+      0,
+    );
+
+    const totalMarkSchemes = examsWithDetails.reduce(
+      (sum, e) => sum + e.mark_scheme_count,
       0,
     );
 
@@ -533,12 +568,14 @@ export const getExamDeletionPreview = async (req, res) => {
       success: true,
       message: 'Deletion preview retrieved successfully',
       data: {
-        exams: examsWithSheets,
-        totalExams: examsWithSheets.length,
+        exams: examsWithDetails,
+        totalExams: examsWithDetails.length,
         totalSheets: totalSheets,
+        totalMarkSchemes: totalMarkSchemes,
         willDelete: {
-          exams: examsWithSheets.length,
+          exams: examsWithDetails.length,
           sheets: totalSheets,
+          markSchemes: totalMarkSchemes,
         },
       },
     });
