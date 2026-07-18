@@ -16,7 +16,7 @@ export const createExam = async (req, res) => {
       status,
       createdBy,
     } = req.body;
-
+console.log('DATA===>',req.body)
     if (!name || !subject || !date || !createdBy) {
       return res.status(400).json({
         success: false,
@@ -152,7 +152,7 @@ export const updateExam = async (req, res) => {
       status,
       createdBy,
     } = req.body;
-
+console.log('DATA===>',req.body)
     const fieldMap = {
       name,
       subject,
@@ -163,6 +163,7 @@ export const updateExam = async (req, res) => {
       status,
       createdBy,
     };
+    
     const fields = [];
     const values = [];
     let i = 1;
