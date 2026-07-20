@@ -8,6 +8,65 @@ const isSubjectMatch = (subject1, subject2) => {
   return subject1.trim().toLowerCase() === subject2.trim().toLowerCase();
 };
 
+// ─── HELPER: Convert duration to seconds ──────────────────────
+
+const convertDurationToSeconds = (duration) => {
+  if (!duration) return 0;
+
+  // If duration is a number, assume it's already in seconds
+  if (typeof duration === 'number') {
+    return duration;
+  }
+
+  // If duration is a string
+  if (typeof duration === 'string') {
+    // Remove any spaces
+    duration = duration.trim();
+
+    // Check if it's in HH:MM:SS or MM:SS format
+    if (duration.includes(':')) {
+      const parts = duration.split(':').map(Number);
+
+      if (parts.length === 3) {
+        // HH:MM:SS format
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        // MM:SS format
+        return parts[0] * 60 + parts[1];
+      } else if (parts.length === 1) {
+        // Just minutes
+        return parseInt(parts[0], 10) * 60;
+      }
+    }
+
+    // Try to parse as number (assume seconds)
+    const num = parseInt(duration, 10);
+    if (!isNaN(num)) {
+      return num;
+    }
+  }
+
+  return 0;
+};
+
+// ─── HELPER: Format duration for display ──────────────────────
+
+const formatDuration = (seconds) => {
+  if (!seconds || seconds === 0) return '0s';
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${secs}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${secs}s`;
+  } else {
+    return `${secs}s`;
+  }
+};
+
 // ─── GET UNASSIGNED SHEETS ──────────────────────────────────────
 
 export const getUnassignedSheets = async (req, res) => {
@@ -425,22 +484,30 @@ export const getAssignmentsByExam = async (req, res) => {
     const result = await pool.query(
       `SELECT 
         a.id, a.sheet_id, a.checker_id, a.assigned_by, a.assigned_at,
-        s.roll_no, s.student_name, s.barcode,
+        s.roll_no, s.student_name, s.barcode, s.status as sheet_status,
         c.name AS checker_name, c.email AS checker_email,
-        assigned_by_user.name AS assigned_by_name
+        assigned_by_user.name AS assigned_by_name,
+        e."spentTime" AS exam_spent_time
       FROM assignments a
       JOIN sheets s ON a.sheet_id = s.id
       JOIN users c ON a.checker_id = c.id
       JOIN users assigned_by_user ON a.assigned_by = assigned_by_user.id
+      JOIN exams e ON a.exam_id = e.id
       WHERE a.exam_id = $1 AND a.status = 'assigned'
       ORDER BY a.assigned_at DESC`,
       [examId],
     );
 
+    // ✅ Convert spentTime from seconds to minutes for display
+    const data = result.rows.map((row) => ({
+      ...row,
+      exam_spent_time: Math.ceil((row.exam_spent_time || 0) / 60),
+    }));
+
     return res.status(200).json({
       success: true,
       message: 'Assignments retrieved successfully',
-      data: result.rows,
+      data: data,
     });
   } catch (error) {
     console.error('getAssignmentsByExam error:', error);
@@ -532,11 +599,6 @@ export const getMyAssignedSheets = async (req, res) => {
     const userId = req.user.id;
     const { status } = req.query;
 
-    // ✅ IMPORTANT: do NOT restrict the join to a.status = 'assigned' only.
-    // When a checker submits marks (submitMarks in checkerMarkingCont.js),
-    // the assignment row's status is updated to 'completed'. If this join
-    // only allowed 'assigned', every checked sheet would silently vanish
-    // from this checker's queue and from the stats counts below.
     let conditions = ['a.checker_id = $1'];
     const params = [userId];
     let paramCount = 2;
@@ -549,9 +611,6 @@ export const getMyAssignedSheets = async (req, res) => {
 
     const whereClause = conditions.join(' AND ');
 
-    // ✅ DISTINCT ON (s.id) so a sheet with more than one assignment row
-    // for this checker (e.g. it went 'assigned' -> 'completed', or was
-    // reassigned) only appears once, using the most recently updated row.
     const { rows } = await pool.query(
       `SELECT DISTINCT ON (s.id)
         s.id,
@@ -606,11 +665,17 @@ export const getMyAssignedSheets = async (req, res) => {
 
     const counts = countResult.rows[0] || {};
 
+    // ✅ Convert spentTime from seconds to minutes for each sheet
+    const items = rows.map((item) => ({
+      ...item,
+      exam_spent_time: Math.ceil((item.exam_spent_time || 0) / 60),
+    }));
+
     return res.status(200).json({
       success: true,
       message: 'Assigned sheets retrieved successfully',
       data: {
-        items: rows,
+        items: items,
         stats: {
           pending: parseInt(counts.pending_count || 0),
           checking: parseInt(counts.checking_count || 0),
@@ -631,14 +696,11 @@ export const getMyAssignedSheets = async (req, res) => {
 
 // ─── GET SHEET FOR MARKING ─────────────────────────────────────
 
-// ─── GET SHEET FOR MARKING ─────────────────────────────────────
-
 export const getSheetForMarking = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
 
-    // ✅ FIX: Include both 'assigned' AND 'completed' assignments
     const { rows } = await pool.query(
       `SELECT 
         s.id,
@@ -695,6 +757,10 @@ export const getSheetForMarking = async (req, res) => {
 
     const sheet = rows[0];
 
+    // ✅ Convert spentTime from seconds to minutes for frontend
+    const spentTimeSeconds = sheet.exam_spent_time || 0;
+    const spentTimeMinutes = Math.ceil(spentTimeSeconds / 60);
+
     return res.status(200).json({
       success: true,
       message: 'Sheet retrieved successfully',
@@ -720,7 +786,7 @@ export const getSheetForMarking = async (req, res) => {
           subject: sheet.exam_subject,
           totalQuestions: sheet.totalQuestions || 0,
           maxMarks: sheet.maxMarks || 0,
-          spentTime: sheet.exam_spent_time || 0,
+          spentTime: spentTimeMinutes, // ✅ Return in minutes
         },
         markScheme: markScheme,
         pdfs: {
@@ -820,15 +886,12 @@ export const updateCheckerSheetStatus = async (req, res) => {
 
 // ─── SAVE DRAFT MARKS ──────────────────────────────────────────
 
-// ─── SAVE DRAFT MARKS ──────────────────────────────────────────
-
 export const saveDraftMarks = async (req, res) => {
   try {
     const { id } = req.params;
     const { marks } = req.body;
     const userId = req.user.id;
 
-    // ✅ FIX: Include both 'assigned' AND 'completed' assignments
     const checkResult = await pool.query(
       `SELECT a.sheet_id 
        FROM assignments a

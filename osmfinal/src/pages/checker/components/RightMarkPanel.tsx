@@ -79,6 +79,11 @@ export default function RightMarkPanel({
     }
   }, [activeMarkId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Add these after your other hooks/calculations
+  const hasAnyMarks = marks.some((m) => m.awarded > 0);
+  const allMarksComplete =
+    marks.length > 0 && marks.every((m) => m.awarded > 0);
+
   // Derived from real data, not hardcoded — was previously locked to 23
   const totalQuestions = marks.length;
   const totalQuestionPages = Math.max(
@@ -475,7 +480,6 @@ export default function RightMarkPanel({
             </div>
           </div>
         )}
-
         {/* ─── ✅ QUESTION PAPER TAB — CLICKABLE PDF PREVIEW ─── */}
         {rightTab === 'questions' && (
           <div className="flex-1 flex flex-col min-h-0">
@@ -535,7 +539,6 @@ export default function RightMarkPanel({
             )}
           </div>
         )}
-
         {/* ─── ✅ ANSWER SHEET TAB — CLICKABLE PDF PREVIEW ─── */}
         {rightTab === 'answerSheet' && (
           <div className="flex-1 flex flex-col min-h-0">
@@ -614,7 +617,6 @@ export default function RightMarkPanel({
             )}
           </div>
         )}
-
         {/* ─── TOTAL BAR ─── */}
         <div className="border-t border-slate-700 px-3 py-2 flex items-center justify-between shrink-0">
           <span className="text-xs font-semibold text-slate-300">
@@ -628,30 +630,52 @@ export default function RightMarkPanel({
             </span>
           </span>
         </div>
-
         {/* ─── ACTION BUTTONS ─── */}
+       
         {!readOnly && rightTab === 'marks' && (
           <div className="px-2.5 pb-3 space-y-1.5 pt-1 shrink-0">
+            {/* Escalate Button - Always clickable */}
             <button
-              onClick={onSubmitContinue}
+              onClick={onEscalate}
               disabled={submitDisabled}
               title={
                 !isTimeRequirementMet
                   ? `Minimum ${minTimeRequired} minute(s) required`
                   : undefined
               }
+              className="w-full py-2 text-xs font-semibold rounded bg-amber-600 text-white hover:bg-amber-500 cursor-pointer transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <i className="ri-flag-line mr-1.5"></i>
+              Escalate
+            </button>
+
+            {/* Submit Continue - clickable when any mark is given */}
+            <button
+              onClick={onSubmitContinue}
+              disabled={submitDisabled || !hasAnyMarks}
+              title={
+                !isTimeRequirementMet
+                  ? `Minimum ${minTimeRequired} minute(s) required`
+                  : !hasAnyMarks
+                    ? 'Add at least one mark to continue'
+                    : undefined
+              }
               className="w-full py-2 text-xs font-semibold rounded bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <i className="ri-check-double-line mr-1.5"></i>
               Submit and Continue
             </button>
+
+            {/* Submit Exit - clickable only when all marks are given */}
             <button
               onClick={onSubmitExit}
-              disabled={submitDisabled}
+              disabled={submitDisabled || !allMarksComplete}
               title={
                 !isTimeRequirementMet
                   ? `Minimum ${minTimeRequired} minute(s) required`
-                  : undefined
+                  : !allMarksComplete
+                    ? 'Complete all questions to exit'
+                    : undefined
               }
               className="w-full py-2 text-xs font-semibold rounded bg-rose-600 text-white hover:bg-rose-500 cursor-pointer transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
             >
