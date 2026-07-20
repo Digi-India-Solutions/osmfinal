@@ -284,8 +284,9 @@ export default function UserManagement() {
   const openDeleteModal = (user: User) => {
     if (!canDeleteUser(user)) {
       if (user.role === 'super_admin') showToast('Cannot delete Super Admin user', 'error');
-      else if (user.role === 'admin') showToast('Cannot delete Admin user', 'error');
+      // else if (user.role === 'admin') showToast('Cannot delete Admin user', 'error');
       else showToast('Cannot delete your own account', 'error');
+
       return;
     }
     setUserToDelete(user);
