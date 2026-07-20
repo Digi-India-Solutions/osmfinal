@@ -197,7 +197,9 @@ export default function MarkingView() {
             question_paper: toFullUrl(questionPaperPath),
           });
 
+          // ✅ FIX: spentTime already comes in minutes from backend
           const spentTime = data.exam?.spentTime || 0;
+          console.log(`⏱️ Minimum time required: ${spentTime} minutes`);
           setMinTimeRequired(spentTime);
           setIsTimeRequirementMet(spentTime === 0);
         }
@@ -404,7 +406,9 @@ export default function MarkingView() {
   // ─── CHECK MINIMUM-TIME REQUIREMENT ──────────────────────────
   useEffect(() => {
     if (minTimeRequired > 0) {
-      setIsTimeRequirementMet(elapsedSeconds >= minTimeRequired * 60);
+      // minTimeRequired is in minutes, elapsedSeconds is in seconds
+      const requiredSeconds = minTimeRequired * 60;
+      setIsTimeRequirementMet(elapsedSeconds >= requiredSeconds);
     }
   }, [elapsedSeconds, minTimeRequired]);
 
@@ -1991,12 +1995,6 @@ export default function MarkingView() {
                 >
                   Go back and complete
                 </button>
-                {/* <button
-                  onClick={handleIncompleteSubmitAnyway}
-                  className="px-5 py-2 rounded-lg text-sm font-semibold border-2 border-rose-500 text-rose-400 hover:bg-rose-500/10 cursor-pointer transition-colors whitespace-nowrap"
-                >
-                  Submit anyway
-                </button> */}
               </div>
             </div>
           </div>
@@ -2019,6 +2017,9 @@ export default function MarkingView() {
         <EscalateModal
           totalAwarded={totalAwarded}
           totalMax={totalMax}
+          studentName={sheetData?.student_name || '—'}
+          rollNo={sheetData?.roll_no || '—'}
+          sheetId={sheetIdNum}
           onEscalate={handleEscalateConfirm}
           onCancel={() => setModalType(null)}
         />

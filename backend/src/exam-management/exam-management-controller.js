@@ -2,6 +2,46 @@
 
 import pool from '../pool.js';
 
+// ─── HELPER: Convert duration to seconds ──────────────────────
+
+const convertDurationToSeconds = (duration) => {
+  if (!duration) return 0;
+
+  // If it's already a number, assume seconds
+  if (typeof duration === 'number') {
+    return duration;
+  }
+
+  // If it's a string
+  if (typeof duration === 'string') {
+    duration = duration.trim();
+
+    // Check if it's in HH:MM:SS or MM:SS format
+    if (duration.includes(':')) {
+      const parts = duration.split(':').map(Number);
+
+      if (parts.length === 3) {
+        // HH:MM:SS format
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        // MM:SS format (e.g., "1:12" = 1 minute 12 seconds)
+        return parts[0] * 60 + parts[1];
+      } else if (parts.length === 1) {
+        // Just minutes
+        return parseInt(parts[0], 10) * 60;
+      }
+    }
+
+    // Try to parse as number (assume seconds)
+    const num = parseInt(duration, 10);
+    if (!isNaN(num)) {
+      return num;
+    }
+  }
+
+  return 0;
+};
+
 // ─── CREATE EXAM ──────────────────────────────────────────────
 
 export const createExam = async (req, res) => {
@@ -12,11 +52,14 @@ export const createExam = async (req, res) => {
       date,
       totalQuestions,
       maxMarks,
-      spentTime,
+      spentTime, // "1:12" or 72 (seconds)
       status,
       createdBy,
     } = req.body;
-console.log('DATA===>',req.body)
+
+    console.log('📝 Create Exam Data:', req.body);
+
+    // ✅ Validate required fields
     if (!name || !subject || !date || !createdBy) {
       return res.status(400).json({
         success: false,
@@ -24,30 +67,48 @@ console.log('DATA===>',req.body)
       });
     }
 
+    // ✅ Convert spentTime to seconds
+    const spentTimeInSeconds = convertDurationToSeconds(spentTime);
+    console.log(`⏱️ Spent time: ${spentTime} → ${spentTimeInSeconds} seconds`);
+
+    // ✅ Use correct column name with quotes (PostgreSQL case-sensitive)
     const query = `
-      INSERT INTO exams (name, subject, date, "totalQuestions", "maxMarks", "spentTime", status, "createdBy")
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO exams (
+        name, subject, date, "totalQuestions", "maxMarks", 
+        "spentTime", status, "createdBy"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *;
     `;
+
     const values = [
       name,
       subject,
       date,
       totalQuestions || 0,
       maxMarks || 0,
-      spentTime || 0,
+      spentTimeInSeconds, // ✅ Store in seconds
       status || 'active',
       createdBy,
     ];
 
     const { rows } = await pool.query(query, values);
 
-    return res.status(201).json({ success: true, data: rows[0] });
+    // ✅ Return both seconds and formatted display
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...rows[0],
+        spentTime: spentTimeInSeconds, // Return in seconds
+        spentTimeDisplay: formatDuration(spentTimeInSeconds),
+      },
+    });
   } catch (error) {
     console.error('createExam error:', error);
-    return res
-      .status(500)
-      .json({ success: false, message: 'Failed to create exam' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create exam',
+      error: error.message,
+    });
   }
 };
 
@@ -90,18 +151,25 @@ export const getAllExams = async (req, res) => {
     const countResult = await pool.query(countQuery, queryParams.slice(0, -2));
     const total = parseInt(countResult.rows[0].count, 10);
 
+    // ✅ Add formatted display for spentTime
+    const formattedRows = rows.map((row) => ({
+      ...row,
+      spentTimeDisplay: formatDuration(row.spentTime || 0),
+    }));
+
     return res.status(200).json({
       success: true,
-      data: rows,
+      data: formattedRows,
       total,
       totalPages: Math.ceil(total / limit),
       currentPage: page,
     });
   } catch (error) {
     console.error('getAllExams error:', error);
-    return res
-      .status(500)
-      .json({ success: false, message: 'Failed to fetch exams' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch exams',
+    });
   }
 };
 
@@ -123,17 +191,25 @@ export const getSingleExam = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'Exam not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found',
+      });
     }
 
-    return res.status(200).json({ success: true, data: rows[0] });
+    // ✅ Add formatted display for spentTime
+    const exam = {
+      ...rows[0],
+      spentTimeDisplay: formatDuration(rows[0].spentTime || 0),
+    };
+
+    return res.status(200).json({ success: true, data: exam });
   } catch (error) {
     console.error('getSingleExam error:', error);
-    return res
-      .status(500)
-      .json({ success: false, message: 'Failed to fetch exam' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch exam',
+    });
   }
 };
 
@@ -148,22 +224,33 @@ export const updateExam = async (req, res) => {
       date,
       totalQuestions,
       maxMarks,
-      spentTime,
+      spentTime, // "1:12" or 72 (seconds)
       status,
       createdBy,
     } = req.body;
-console.log('DATA===>',req.body)
+
+    console.log('📝 Update Exam Data:', req.body);
+
+    // ✅ Convert spentTime to seconds if provided
+    let spentTimeInSeconds = spentTime;
+    if (spentTime !== undefined) {
+      spentTimeInSeconds = convertDurationToSeconds(spentTime);
+      console.log(
+        `⏱️ Spent time: ${spentTime} → ${spentTimeInSeconds} seconds`,
+      );
+    }
+
     const fieldMap = {
       name,
       subject,
       date,
       totalQuestions,
       maxMarks,
-      spentTime,
+      spentTime: spentTimeInSeconds, // ✅ Use converted value
       status,
       createdBy,
     };
-    
+
     const fields = [];
     const values = [];
     let i = 1;
@@ -177,9 +264,10 @@ console.log('DATA===>',req.body)
     }
 
     if (fields.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: 'No fields provided to update' });
+      return res.status(400).json({
+        success: false,
+        message: 'No fields provided to update',
+      });
     }
 
     fields.push(`updated_at = NOW()`);
@@ -195,22 +283,49 @@ console.log('DATA===>',req.body)
     const { rows } = await pool.query(query, values);
 
     if (rows.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'Exam not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found',
+      });
     }
 
-    return res.status(200).json({ success: true, data: rows[0] });
+    // ✅ Return with formatted display
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...rows[0],
+        spentTimeDisplay: formatDuration(rows[0].spentTime || 0),
+      },
+    });
   } catch (error) {
     console.error('updateExam error:', error);
-    return res
-      .status(500)
-      .json({ success: false, message: 'Failed to update exam' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update exam',
+    });
+  }
+};
+
+// ─── HELPER: Format duration for display ──────────────────────
+
+const formatDuration = (seconds) => {
+  if (!seconds || seconds === 0) return '0s';
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${secs}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${secs}s`;
+  } else {
+    return `${secs}s`;
   }
 };
 
 // ════════════════════════════════════════════════════════════════
-// ✅ DELETE FUNCTIONS WITH UUID SUPPORT
+// ✅ DELETE FUNCTIONS (unchanged - already working)
 // ════════════════════════════════════════════════════════════════
 
 // ─── DELETE SINGLE EXAM (WITH CASCADE) ──────────────────────
@@ -301,7 +416,6 @@ export const bulkDeleteExams = async (req, res) => {
 
     await client.query('BEGIN');
 
-    // ✅ UUID array ke liye $1::uuid[] use karo
     const examsResult = await client.query(
       `SELECT id, name, subject FROM exams WHERE id = ANY($1::uuid[])`,
       [ids],
@@ -492,7 +606,6 @@ export const getExamDeletionPreview = async (req, res) => {
       });
     }
 
-    // ✅ UUID array banayein (string split se)
     const idArray = ids.split(',').map((id) => id.trim());
 
     if (idArray.length === 0) {
