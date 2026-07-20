@@ -146,7 +146,7 @@ class RecheckQueueService {
   // Get recheck request by ID
   async getRequestById(id: number): Promise<any> {
     try {
-      const response = await api.get(`/api/v1/recheck-queue/requests/${id}`);
+      const response = await api.get(`/api/v1/recheck-queue/my-requests/${id}`);
       return response.data;
     } catch (error: any) {
       console.error('Get recheck request error:', error);
@@ -162,7 +162,7 @@ class RecheckQueueService {
   async startMarking(id: number): Promise<any> {
     try {
       const response = await api.get(
-        `/api/v1/recheck-queue/requests/${id}/marking`,
+        `/api/v1/recheck-queue/my-requests/${id}/mark`,
       );
       return response.data;
     } catch (error: any) {
@@ -182,7 +182,7 @@ class RecheckQueueService {
   ): Promise<any> {
     try {
       const response = await api.post(
-        `/api/v1/recheck-queue/requests/${id}/marks`,
+        `/api/v1/recheck-queue/my-requests/${id}/marks`,
         data,
       );
       return response.data;
@@ -202,7 +202,7 @@ class RecheckQueueService {
   ): Promise<any> {
     try {
       const response = await api.post(
-        `/api/v1/recheck-queue/requests/${id}/draft`,
+        `/api/v1/recheck-queue/my-requests/${id}/draft`,
         data,
       );
       return response.data;
@@ -219,7 +219,7 @@ class RecheckQueueService {
   async getDraft(id: number): Promise<any> {
     try {
       const response = await api.get(
-        `/api/v1/recheck-queue/requests/${id}/draft`,
+        `/api/v1/recheck-queue/my-requests/${id}/draft`,
       );
       return response.data;
     } catch (error: any) {
@@ -239,7 +239,7 @@ class RecheckQueueService {
   ): Promise<any> {
     try {
       const response = await api.post(
-        `/api/v1/recheck-queue/requests/${id}/complete`,
+        `/api/v1/recheck-queue/my-requests/${id}/complete`,
         data,
       );
       return response.data;
@@ -261,7 +261,7 @@ class RecheckQueueService {
   ): Promise<any> {
     try {
       const response = await api.patch(
-        `/api/v1/recheck-queue/requests/${id}/status`,
+        `/api/v1/recheck-queue/my-requests/${id}/status`,
         {
           status,
           remarks,
@@ -286,7 +286,7 @@ class RecheckQueueService {
   ): Promise<any> {
     try {
       const response = await api.patch(
-        `/api/v1/recheck-queue/requests/${id}/escalate`,
+        `/api/v1/recheck-queue/my-requests/${id}/escalate`,
         data,
       );
       return response.data;

@@ -56,7 +56,7 @@ export default function CheckerWorkQueue() {
     try {
       const response = await assignmentService.getMyAssignedSheets();
       if (response.success) {
-        setSheets(response.data.items || []);
+        setSheets(response.data.items.filter((sheet) => sheet?.status !== 'checked') || []);
         setStats(
           response.data.stats || {
             pending: 0,
@@ -114,11 +114,10 @@ export default function CheckerWorkQueue() {
     <div>
       {toast && (
         <div
-          className={`fixed top-20 right-6 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 ${
-            toast.type === 'error'
+          className={`fixed top-20 right-6 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 ${toast.type === 'error'
               ? 'bg-red-600 text-white'
               : 'bg-gray-900 text-white'
-          }`}
+            }`}
         >
           <i
             className={
