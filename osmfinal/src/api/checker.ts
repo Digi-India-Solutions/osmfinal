@@ -2,10 +2,12 @@
 
 import api from './axios';
 
+// ✅ Add notesData to interface
 export interface ICheckerMarkingData {
   marksData: Record<string, number>; // { "Qn1_i": 3, "Qn1_ii": 2, ... }
   annotationsData: any[];
   stampsData: any[];
+  notesData: any[]; // ✅ ADD THIS
   totalMarks: number;
   remarks?: string;
   timeSpent?: number; // ✅ Add timeSpent (in seconds)
@@ -22,6 +24,7 @@ export interface ICheckerDraftResponse {
     marks_data: Record<string, number>;
     annotations_data: any[];
     stamps_data: any[];
+    notes_data: any[]; // ✅ ADD THIS
     total_marks: number;
     remarks: string | null;
     time_spent: number; // ✅ Add time_spent in response
@@ -110,7 +113,7 @@ export const checkerApi = {
   // Escalate sheet
   escalateSheet: async (
     sheetId: number,
-    data: { reason: string; remarks?: string; timeSpent?: number }, // ✅ Add timeSpent
+    data: { reason: string; remarks?: string; timeSpent?: number },
   ): Promise<any> => {
     try {
       const response = await api.post(

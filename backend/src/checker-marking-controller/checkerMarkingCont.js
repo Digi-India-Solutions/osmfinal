@@ -31,6 +31,7 @@ export const saveDraft = async (req, res) => {
       marksData,
       annotationsData,
       stampsData,
+      notesData,
       totalMarks,
       remarks,
       timeSpent,
@@ -74,17 +75,19 @@ export const saveDraft = async (req, res) => {
          SET marks_data = $1,
              annotations_data = $2,
              stamps_data = $3,
-             total_marks = $4,
-             remarks = $5,
-             time_spent = $6,
+             notes_data = $4,
+             total_marks = $5,
+             remarks = $6,
+             time_spent = $7,
              is_draft = true,
              updated_at = CURRENT_TIMESTAMP
-         WHERE sheet_id = $7 AND checker_id = $8
+         WHERE sheet_id = $8 AND checker_id = $9
          RETURNING *`,
         [
           JSON.stringify(marksData || {}),
           JSON.stringify(annotationsData || []),
           JSON.stringify(stampsData || []),
+          JSON.stringify(notesData || []),
           totalMarks || 0,
           remarks || null,
           timeSpent || 0,
@@ -96,9 +99,9 @@ export const saveDraft = async (req, res) => {
       result = await pool.query(
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
-          marks_data, annotations_data, stamps_data,
+          marks_data, annotations_data, stamps_data, notes_data,
           total_marks, remarks, time_spent, is_draft
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
         RETURNING *`,
         [
           sheetId,
@@ -107,6 +110,7 @@ export const saveDraft = async (req, res) => {
           JSON.stringify(marksData || {}),
           JSON.stringify(annotationsData || []),
           JSON.stringify(stampsData || []),
+          JSON.stringify(notesData || []),
           totalMarks || 0,
           remarks || null,
           timeSpent || 0,
@@ -140,7 +144,6 @@ export const saveDraft = async (req, res) => {
 };
 
 // ─── SUBMIT MARKS ──────────────────────────────────────────────
-// ─── SUBMIT MARKS ──────────────────────────────────────────────
 export const submitMarks = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -149,6 +152,7 @@ export const submitMarks = async (req, res) => {
       marksData,
       annotationsData,
       stampsData,
+      notesData,
       totalMarks,
       remarks,
       timeSpent,
@@ -160,7 +164,7 @@ export const submitMarks = async (req, res) => {
        FROM assignments a
        JOIN sheets s ON a.sheet_id = s.id
        WHERE a.sheet_id = $1 AND a.checker_id = $2 
-       AND a.status IN ('assigned', 'completed')`,  // ✅ Add 'completed'
+       AND a.status IN ('assigned', 'completed')`,
       [sheetId, userId],
     );
 
@@ -198,19 +202,21 @@ export const submitMarks = async (req, res) => {
          SET marks_data = $1,
              annotations_data = $2,
              stamps_data = $3,
-             total_marks = $4,
-             remarks = $5,
-             time_spent = $6,
+             notes_data = $4,
+             total_marks = $5,
+             remarks = $6,
+             time_spent = $7,
              is_draft = false,
              is_submitted = true,
              submitted_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
-         WHERE sheet_id = $7 AND checker_id = $8
+         WHERE sheet_id = $8 AND checker_id = $9
          RETURNING *`,
         [
           JSON.stringify(marksData || {}),
           JSON.stringify(annotationsData || []),
           JSON.stringify(stampsData || []),
+          JSON.stringify(notesData || []),
           totalMarks || 0,
           remarks || null,
           finalTimeSpent,
@@ -222,10 +228,10 @@ export const submitMarks = async (req, res) => {
       result = await pool.query(
         `INSERT INTO checker_markings (
           sheet_id, checker_id, exam_id,
-          marks_data, annotations_data, stamps_data,
+          marks_data, annotations_data, stamps_data, notes_data,
           total_marks, remarks, time_spent,
           is_draft, is_submitted, submitted_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, true, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, true, CURRENT_TIMESTAMP)
         RETURNING *`,
         [
           sheetId,
@@ -234,6 +240,7 @@ export const submitMarks = async (req, res) => {
           JSON.stringify(marksData || {}),
           JSON.stringify(annotationsData || []),
           JSON.stringify(stampsData || []),
+          JSON.stringify(notesData || []),
           totalMarks || 0,
           remarks || null,
           finalTimeSpent,
@@ -251,8 +258,11 @@ export const submitMarks = async (req, res) => {
 
     try {
       // ✅ DIRECT FILE NAME: barcode use karo, agar nahi hai toh sheetId
-      const fileNameBase = sanitizeForFolderName(sheetData.barcode) || `sheet-${sheetId}`;
-      const fileExtension = sheetData.file_name ? path.extname(sheetData.file_name) : '.pdf';
+      const fileNameBase =
+        sanitizeForFolderName(sheetData.barcode) || `sheet-${sheetId}`;
+      const fileExtension = sheetData.file_name
+        ? path.extname(sheetData.file_name)
+        : '.pdf';
       const fileName = `${fileNameBase}${fileExtension}`;
 
       // ✅ DIRECT FOLDER: checked-sheets/ (no subfolders)
@@ -265,7 +275,12 @@ export const submitMarks = async (req, res) => {
       const possiblePaths = [
         path.join(UPLOADS_DIR, 'sheets', sheetData.file_name || fileName),
         path.join(UPLOADS_DIR, sheetData.file_name || fileName),
-        path.join(UPLOADS_DIR, 'uploads', 'sheets', sheetData.file_name || fileName),
+        path.join(
+          UPLOADS_DIR,
+          'uploads',
+          'sheets',
+          sheetData.file_name || fileName,
+        ),
       ];
 
       console.log(`🔍 Looking for file: ${sheetData.file_name || fileName}`);
@@ -332,7 +347,7 @@ export const submitMarks = async (req, res) => {
        SET status = 'completed',
            updated_at = CURRENT_TIMESTAMP
        WHERE sheet_id = $1 AND checker_id = $2
-       AND status = 'assigned'`,  // ✅ Only update if status is 'assigned'
+       AND status = 'assigned'`,
       [sheetId, userId],
     );
 
@@ -400,6 +415,7 @@ export const getDraft = async (req, res) => {
         marks_data: row.marks_data || {},
         annotations_data: row.annotations_data || [],
         stamps_data: row.stamps_data || [],
+        notes_data: row.notes_data || [],
         total_marks: row.total_marks,
         remarks: row.remarks,
         time_spent: row.time_spent || 0,
@@ -458,10 +474,38 @@ export const getSubmittedMarks = async (req, res) => {
       });
     }
 
+    const row = result.rows[0];
+
     return res.status(200).json({
       success: true,
       message: 'Submitted marks retrieved successfully',
-      data: result.rows[0],
+      data: {
+        id: row.id,
+        sheet_id: row.sheet_id,
+        checker_id: row.checker_id,
+        exam_id: row.exam_id,
+        marks_data: row.marks_data || {},
+        annotations_data: row.annotations_data || [],
+        stamps_data: row.stamps_data || [],
+        notes_data: row.notes_data || [],
+        total_marks: row.total_marks,
+        remarks: row.remarks,
+        time_spent: row.time_spent || 0,
+        is_draft: row.is_draft,
+        is_submitted: row.is_submitted,
+        submitted_at: row.submitted_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        sheet_status: row.sheet_status,
+        student_name: row.student_name,
+        roll_no: row.roll_no,
+        checking_time_spent: row.checking_time_spent,
+        archived_folder: row.archived_folder,
+        is_checked: row.is_checked,
+        exam_name: row.exam_name,
+        exam_subject: row.exam_subject,
+        checker_name: row.checker_name,
+      },
     });
   } catch (error) {
     console.error('getSubmittedMarks error:', error);
@@ -689,6 +733,7 @@ export const getCheckedSheetById = async (req, res) => {
         u.name AS checker_name,
         cm.marks_data,
         cm.annotations_data,
+        cm.notes_data,
         cm.remarks,
         cm.submitted_at
       FROM sheets s

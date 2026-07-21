@@ -50,6 +50,16 @@ interface RecheckedSheetData {
     page: number;
     value: number | null;
   }>;
+  recheckNotes?: Array<{
+    id: number;
+    page: number;
+    x: number;
+    y: number;
+    text: string;
+    fontSize: number;
+    width: number;
+    height: number;
+  }>;
   originalMarks?: Record<string, number>;
   originalAnnotations?: Array<{
     id: number;
@@ -68,6 +78,16 @@ interface RecheckedSheetData {
     page: number;
     value: number | null;
   }>;
+  originalNotes?: Array<{
+    id: number;
+    page: number;
+    x: number;
+    y: number;
+    text: string;
+    fontSize: number;
+    width: number;
+    height: number;
+  }>;
   summary?: {
     student: string;
     roll_no: string;
@@ -80,11 +100,8 @@ interface RecheckedSheetData {
   };
 }
 
-// ⚠️ IMPORTANT: Checker/Rechecker side pe jab tick/stamp lagaya gaya tha,
-// PDF page jis width:height ratio pe render hua tha, wahi ratio yaha daalo.
-// A4 default rakha hai (210mm x 297mm). Agar Letter size use hota hai to
-// 8.5/11 kar dena.
-const PAGE_ASPECT_RATIO = 210 / 297; // width / height
+// A4 aspect ratio
+const PAGE_ASPECT_RATIO = 210 / 297;
 
 export default function RecheckedSheetView() {
   const { requestId } = useParams<{ requestId: string }>();
@@ -94,6 +111,7 @@ export default function RecheckedSheetView() {
   const [sheetData, setSheetData] = useState<RecheckedSheetData | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -145,9 +163,11 @@ export default function RecheckedSheetView() {
             recheckMarks: data.recheckMarks || {},
             recheckAnnotations: data.recheckAnnotations || [],
             recheckStamps: data.recheckStamps || [],
+            recheckNotes: data.recheckNotes || [], // ✅ Added
             originalMarks: data.originalMarks || {},
             originalAnnotations: data.originalAnnotations || [],
             originalStamps: data.originalStamps || [],
+            originalNotes: data.originalNotes || [], // ✅ Added
             finalMarksRule: data.request?.finalMarksRule || 'higher',
             summary: data.summary || {},
           });
@@ -175,6 +195,10 @@ export default function RecheckedSheetView() {
           console.log('📄 Full PDF URL:', fullUrl);
           setPdfUrl(fullUrl);
 
+          // ✅ Try to get total pages from PDF if possible
+          // For now, we'll use a reasonable estimate based on content
+          // Later we can add PDF metadata extraction
+
           if (!fullUrl) {
             setError('PDF URL not found');
           }
@@ -192,6 +216,53 @@ export default function RecheckedSheetView() {
     fetchData();
   }, [requestId]);
 
+  // ─── GET ALL PAGES WITH CONTENT ───
+  const getAllPages = (): number[] => {
+    if (!sheetData) return [1];
+
+    const pages = new Set<number>();
+
+    // Add all pages from stamps
+    const allStamps = [
+      ...(sheetData.originalStamps || []),
+      ...(sheetData.recheckStamps || []),
+    ];
+    allStamps.filter((s) => s.placed).forEach((s) => pages.add(s.page));
+
+    // Add all pages from annotations
+    const allAnnotations = [
+      ...(sheetData.originalAnnotations || []),
+      ...(sheetData.recheckAnnotations || []),
+    ];
+    allAnnotations.forEach((a) => pages.add(a.page));
+
+    // ✅ Add all pages from notes
+    const allNotes = [
+      ...(sheetData.originalNotes || []),
+      ...(sheetData.recheckNotes || []),
+    ];
+    allNotes.forEach((n) => pages.add(n.page));
+
+    // ✅ If no content found, at least show page 1
+    if (pages.size === 0) {
+      pages.add(1);
+    }
+
+    // ✅ Also check if we can determine total pages from PDF
+    // For now, we'll just use the max page found or 1
+    const maxPage = Math.max(...Array.from(pages), 1);
+
+    // ✅ Generate all pages from 1 to maxPage (show all pages, even empty ones)
+    const allPages: number[] = [];
+    for (let i = 1; i <= maxPage; i++) {
+      allPages.push(i);
+    }
+
+    return allPages;
+  };
+
+  const allPages = getAllPages();
+
   // ─── Get stamps for current page ───
   const getStampsForPage = (page: number) => {
     if (!sheetData) return [];
@@ -208,6 +279,15 @@ export default function RecheckedSheetView() {
     const recheckAnnotations = sheetData.recheckAnnotations || [];
     const allAnnotations = [...originalAnnotations, ...recheckAnnotations];
     return allAnnotations.filter((a) => a.page === page);
+  };
+
+  // ─── Get notes for current page ───
+  const getNotesForPage = (page: number) => {
+    if (!sheetData) return [];
+    const originalNotes = sheetData.originalNotes || [];
+    const recheckNotes = sheetData.recheckNotes || [];
+    const allNotes = [...originalNotes, ...recheckNotes];
+    return allNotes.filter((n) => n.page === page);
   };
 
   // ─── Render stamps ───
@@ -317,25 +397,83 @@ export default function RecheckedSheetView() {
     });
   };
 
-  // ─── Get pages with content ───
-  const getPagesWithContent = (): number[] => {
-    const pages = new Set<number>();
-    const allStamps = [
-      ...(sheetData?.originalStamps || []),
-      ...(sheetData?.recheckStamps || []),
-    ];
-    const allAnnotations = [
-      ...(sheetData?.originalAnnotations || []),
-      ...(sheetData?.recheckAnnotations || []),
-    ];
+  // ─── Render notes ───
+  // ─── Render notes ───
+  const renderNotes = () => {
+    const notes = getNotesForPage(currentPage);
+    if (notes.length === 0) return null;
 
-    allStamps.filter((s) => s.placed).forEach((s) => pages.add(s.page));
-    allAnnotations.forEach((a) => pages.add(a.page));
+    return notes.map((note, idx) => {
+      const isRecheck = sheetData?.recheckNotes?.some((n) => n.id === note.id);
+      const hasText = note.text && note.text.trim().length > 0;
+      const accentColor = isRecheck ? '#F97316' : '#F59E0B'; // orange-500 / amber-500
+      const borderColor = isRecheck ? '#FDBA74' : '#FCD34D'; // orange-300 / amber-300
 
-    return Array.from(pages).sort((a, b) => a - b);
+      return (
+        <div
+          key={`${note.id}-${isRecheck ? 'recheck' : 'original'}-${idx}`}
+          className="absolute group"
+          style={{
+            left: `${note.x}%`,
+            top: `${note.y}%`,
+            transform: 'translate(-50%, -50%)',
+            zIndex: 40,
+            pointerEvents: 'auto',
+          }}
+        >
+          {/* ─── PIN (always visible, small) ─── */}
+          <div
+            className="w-6 h-6 rounded-full flex items-center justify-center shadow-md cursor-default transition-transform duration-150 group-hover:scale-125"
+            style={{
+              backgroundColor: accentColor,
+              border: '2px solid white',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
+            }}
+            title={hasText ? note.text : 'Empty note'}
+          >
+            <i className="ri-sticky-note-fill text-white text-[10px]" />
+          </div>
+
+          {/* ─── POPOVER (shows on hover) ─── */}
+          <div
+            className="absolute hidden group-hover:block left-1/2 bottom-full mb-2 -translate-x-1/2 w-60"
+            style={{ zIndex: 50 }}
+          >
+            <div
+              className="rounded-lg overflow-hidden shadow-2xl"
+              style={{ border: `1px solid ${borderColor}` }}
+            >
+              {/* Header */}
+              <div
+                className="px-2.5 py-1.5 flex items-center gap-1.5"
+                style={{ backgroundColor: accentColor }}
+              >
+                <i className="ri-sticky-note-line text-white text-[11px]" />
+                <span className="text-white text-[10px] font-semibold uppercase tracking-wide">
+                  {isRecheck ? 'Recheck Note' : 'Original Note'}
+                </span>
+              </div>
+              {/* Body */}
+              <div className="bg-white px-2.5 py-2 max-h-32 overflow-y-auto">
+                {hasText ? (
+                  <p className="text-slate-700 text-xs leading-relaxed break-words whitespace-pre-wrap">
+                    {note.text}
+                  </p>
+                ) : (
+                  <p className="text-slate-400 text-xs italic">Empty note</p>
+                )}
+              </div>
+            </div>
+            {/* Arrow pointing down to pin */}
+            <div
+              className="w-2.5 h-2.5 rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2"
+              style={{ backgroundColor: accentColor }}
+            />
+          </div>
+        </div>
+      );
+    });
   };
-
-  const pagesWithContent = getPagesWithContent();
 
   // ─── Helper: Format Time ──────────────────────────────────────
   function formatTime(seconds: number | null | undefined): string {
@@ -348,6 +486,17 @@ export default function RecheckedSheetView() {
     }
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
+
+  // ─── Get page content indicator ───
+  const hasContentOnPage = (page: number): boolean => {
+    if (!sheetData) return false;
+
+    const stamps = getStampsForPage(page);
+    const annotations = getAnnotationsForPage(page);
+    const notes = getNotesForPage(page);
+
+    return stamps.length > 0 || annotations.length > 0 || notes.length > 0;
+  };
 
   if (loading) {
     return (
@@ -407,7 +556,7 @@ export default function RecheckedSheetView() {
           <div className="flex items-center gap-2 bg-slate-700/50 px-3 py-1 rounded-full">
             <i className="ri-file-pdf-line text-slate-400 text-xs"></i>
             <span className="text-xs text-slate-300">
-              Page {currentPage} of {pagesWithContent.length || 1}
+              Page {currentPage} of {allPages.length}
             </span>
           </div>
 
@@ -463,12 +612,6 @@ export default function RecheckedSheetView() {
         <div className="flex-1 bg-slate-800 flex items-center justify-center overflow-hidden p-4">
           {pdfUrl ? (
             <div className="relative flex flex-col items-center gap-3 h-full">
-              {/*
-                ─── FIXED-RATIO PAGE WRAPPER ───
-                Page hamesha ek fixed aspect ratio (A4 ya jo bhi actual size hai) maintain karta hai.
-                Isse iframe aur overlay dono hamesha same shape mein sync rahenge —
-                window resize ho, kuch bhi ho, % coordinates kabhi galat nahi honge.
-              */}
               <div
                 className="relative bg-white shadow-2xl"
                 style={{
@@ -477,57 +620,74 @@ export default function RecheckedSheetView() {
                   aspectRatio: `${PAGE_ASPECT_RATIO}`,
                 }}
               >
-                {/*
-                  toolbar/navpanes/scrollbar = 0 -> koi bhi extra UI/scroll nahi
-                  view=FitH -> hamesha same fixed zoom pe render hoga (43% jaisa random zoom nahi aayega)
-                  pointer-events: none -> user khud is iframe ko scroll/zoom/drag nahi kar payega,
-                  warna overlay turant misalign ho jayega
-                */}
                 <iframe
-                  key={currentPage} // page change hote hi fresh reload, purani scroll state carry nahi hogi
+                  key={currentPage}
                   src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH&page=${currentPage}`}
                   className="absolute inset-0 w-full h-full border-0 pointer-events-none"
                   title="Rechecked Sheet"
                 />
 
-                {/* ─── OVERLAY — same fixed-ratio box ke andar, same size ─── */}
+                {/* ─── OVERLAY ─── */}
                 <div className="absolute inset-0 pointer-events-none">
                   {renderStamps()}
                   {renderAnnotations()}
+                  {renderNotes()}
                 </div>
               </div>
 
-              {/* Page Navigation — box ke bahar, alag se */}
-              {pagesWithContent.length > 1 && (
+              {/* Page Navigation */}
+              {allPages.length > 1 && (
                 <div className="flex items-center gap-2 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full">
                   <button
                     onClick={() => {
-                      const currentIndex =
-                        pagesWithContent.indexOf(currentPage);
+                      const currentIndex = allPages.indexOf(currentPage);
                       if (currentIndex > 0) {
-                        setCurrentPage(pagesWithContent[currentIndex - 1]);
+                        setCurrentPage(allPages[currentIndex - 1]);
                       }
                     }}
-                    disabled={pagesWithContent.indexOf(currentPage) <= 0}
+                    disabled={allPages.indexOf(currentPage) <= 0}
                     className="px-2 py-1 text-white hover:bg-white/20 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
                   >
                     <i className="ri-arrow-left-s-line"></i>
                   </button>
-                  <span className="text-xs text-white">
-                    {pagesWithContent.indexOf(currentPage) + 1} /{' '}
-                    {pagesWithContent.length}
-                  </span>
+
+                  {/* Page buttons with content indicators */}
+                  <div className="flex items-center gap-1 max-w-[400px] overflow-x-auto px-1">
+                    {allPages.map((page) => {
+                      const hasContent = hasContentOnPage(page);
+                      const isActive = page === currentPage;
+
+                      return (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`relative w-7 h-7 rounded text-xs font-medium transition-colors cursor-pointer flex-shrink-0 ${
+                            isActive
+                              ? 'bg-violet-500 text-white'
+                              : hasContent
+                                ? 'bg-slate-600 text-slate-300 hover:bg-slate-500'
+                                : 'bg-slate-700/50 text-slate-500 hover:bg-slate-600/50'
+                          }`}
+                          title={hasContent ? 'Has content' : 'Empty page'}
+                        >
+                          {page}
+                          {hasContent && (
+                            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full shadow-sm"></span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <button
                     onClick={() => {
-                      const currentIndex =
-                        pagesWithContent.indexOf(currentPage);
-                      if (currentIndex < pagesWithContent.length - 1) {
-                        setCurrentPage(pagesWithContent[currentIndex + 1]);
+                      const currentIndex = allPages.indexOf(currentPage);
+                      if (currentIndex < allPages.length - 1) {
+                        setCurrentPage(allPages[currentIndex + 1]);
                       }
                     }}
                     disabled={
-                      pagesWithContent.indexOf(currentPage) >=
-                      pagesWithContent.length - 1
+                      allPages.indexOf(currentPage) >= allPages.length - 1
                     }
                     className="px-2 py-1 text-white hover:bg-white/20 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
                   >
@@ -546,7 +706,7 @@ export default function RecheckedSheetView() {
           )}
         </div>
 
-        {/* ─── RIGHT SIDEBAR ─── (unchanged) */}
+        {/* ─── RIGHT SIDEBAR ─── */}
         <div className="w-72 shrink-0 bg-[#1e293b] border-l border-slate-700 overflow-y-auto">
           <div className="p-3 border-b border-slate-700 sticky top-0 bg-[#1e293b] z-10">
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
@@ -664,6 +824,15 @@ export default function RecheckedSheetView() {
                   [
                     ...(sheetData.originalAnnotations || []),
                     ...(sheetData.recheckAnnotations || []),
+                  ].length
+                }
+              </p>
+              <p className="text-[10px] text-slate-500">
+                Notes:{' '}
+                {
+                  [
+                    ...(sheetData.originalNotes || []),
+                    ...(sheetData.recheckNotes || []),
                   ].length
                 }
               </p>

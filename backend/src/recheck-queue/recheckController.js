@@ -321,7 +321,7 @@ export const startRecheckMarking = async (req, res) => {
       );
     }
 
-    // ✅ If status is 'pending', change to 'assigned'
+    // If status is 'pending', change to 'assigned'
     if (reqData.status === 'pending') {
       await pool.query(
         `UPDATE recheck_requests SET status = 'assigned', updated_at = NOW() WHERE id = $1`,
@@ -329,7 +329,7 @@ export const startRecheckMarking = async (req, res) => {
       );
     }
 
-    // ✅ Check if request is completed or rejected (readonly)
+    // Check if request is completed or rejected (readonly)
     const isReadOnly =
       reqData.status === 'completed' || reqData.status === 'rejected';
 
@@ -395,14 +395,15 @@ export const startRecheckMarking = async (req, res) => {
 
     const request = rows[0];
 
-    // Get ORIGINAL checker markings
+    // ✅ Get ORIGINAL checker markings (including notes)
     let originalMarks = {};
     let originalAnnotations = [];
     let originalStamps = [];
+    let originalNotes = [];
 
     if (request.sheet_id) {
       const originalMarksResult = await pool.query(
-        `SELECT marks_data, annotations_data, stamps_data, total_marks 
+        `SELECT marks_data, annotations_data, stamps_data, notes_data, total_marks 
          FROM checker_markings 
          WHERE sheet_id = $1 AND is_submitted = true
          ORDER BY submitted_at DESC LIMIT 1`,
@@ -414,6 +415,7 @@ export const startRecheckMarking = async (req, res) => {
         originalAnnotations =
           originalMarksResult.rows[0].annotations_data || [];
         originalStamps = originalMarksResult.rows[0].stamps_data || [];
+        originalNotes = originalMarksResult.rows[0].notes_data || [];
       }
     }
 
@@ -421,9 +423,10 @@ export const startRecheckMarking = async (req, res) => {
     let recheckMarks = {};
     let recheckAnnotations = [];
     let recheckStamps = [];
+    let recheckNotes = [];
 
     const recheckResult = await pool.query(
-      `SELECT marks_data, annotations_data, stamps_data, total_marks 
+      `SELECT marks_data, annotations_data, stamps_data, notes_data, total_marks 
        FROM recheck_markings 
        WHERE recheck_request_id = $1
        ORDER BY created_at DESC LIMIT 1`,
@@ -434,6 +437,7 @@ export const startRecheckMarking = async (req, res) => {
       recheckMarks = recheckResult.rows[0].marks_data || {};
       recheckAnnotations = recheckResult.rows[0].annotations_data || [];
       recheckStamps = recheckResult.rows[0].stamps_data || [];
+      recheckNotes = recheckResult.rows[0].notes_data || [];
     }
 
     // Build full file URL
@@ -483,10 +487,12 @@ export const startRecheckMarking = async (req, res) => {
         originalMarks: originalMarks,
         originalAnnotations: originalAnnotations,
         originalStamps: originalStamps,
+        originalNotes: originalNotes,
         previousMarks: originalMarks,
         recheckMarks: recheckMarks,
         recheckAnnotations: recheckAnnotations,
         recheckStamps: recheckStamps,
+        recheckNotes: recheckNotes,
         pdfs: {
           model_answer: buildFullUrl(request.model_answer_pdf),
           question_paper: buildFullUrl(request.question_paper_pdf),
@@ -521,7 +527,7 @@ export const saveRecheckMarks = async (req, res) => {
     const checkResult = await pool.query(
       `SELECT sheet_id FROM recheck_requests 
        WHERE id = $1 AND assign_to = $2 
-       AND status IN ('assigned')`, // ✅ Sirf 'assigned' allow karo
+       AND status IN ('assigned')`,
       [id, userId],
     );
 
@@ -572,6 +578,7 @@ export const completeRecheck = async (req, res) => {
       marksData,
       annotationsData,
       stampsData,
+      notesData,
       finalMarksRule,
       timeSpent,
     } = req.body;
@@ -581,7 +588,7 @@ export const completeRecheck = async (req, res) => {
     const checkResult = await pool.query(
       `SELECT sheet_id, exam_id, status FROM recheck_requests 
        WHERE id = $1 AND assign_to = $2 
-       AND status = 'assigned'`, // ✅ Sirf 'assigned'
+       AND status = 'assigned'`,
       [id, userId],
     );
 
@@ -659,7 +666,7 @@ export const completeRecheck = async (req, res) => {
 
       const recheckResult = await client.query(updateQuery, queryParams);
 
-      // Save recheck markings
+      // ✅ Save recheck markings with notes
       const existing = await client.query(
         `SELECT id FROM recheck_markings WHERE recheck_request_id = $1 AND checker_id = $2`,
         [id, userId],
@@ -670,14 +677,16 @@ export const completeRecheck = async (req, res) => {
         markingResult = await client.query(
           `UPDATE recheck_markings 
            SET marks_data = $1, annotations_data = $2, stamps_data = $3,
-               total_marks = $4, is_draft = false, is_submitted = true,
+               notes_data = $4, total_marks = $5,
+               is_draft = false, is_submitted = true,
                submitted_at = NOW(), updated_at = NOW()
-           WHERE recheck_request_id = $5 AND checker_id = $6
+           WHERE recheck_request_id = $6 AND checker_id = $7
            RETURNING *`,
           [
             JSON.stringify(marksData || {}),
             JSON.stringify(annotationsData || []),
             JSON.stringify(stampsData || []),
+            JSON.stringify(notesData || []),
             marks || 0,
             id,
             userId,
@@ -687,9 +696,9 @@ export const completeRecheck = async (req, res) => {
         markingResult = await client.query(
           `INSERT INTO recheck_markings (
             recheck_request_id, sheet_id, checker_id, exam_id,
-            marks_data, annotations_data, stamps_data, total_marks,
+            marks_data, annotations_data, stamps_data, notes_data, total_marks,
             is_draft, is_submitted, submitted_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, true, NOW())
           RETURNING *`,
           [
             id,
@@ -699,6 +708,7 @@ export const completeRecheck = async (req, res) => {
             JSON.stringify(marksData || {}),
             JSON.stringify(annotationsData || []),
             JSON.stringify(stampsData || []),
+            JSON.stringify(notesData || []),
             marks || 0,
           ],
         );
@@ -836,6 +846,7 @@ export const completeRecheck = async (req, res) => {
             marks_data: markingResult.rows[0].marks_data || {},
             annotations_data: markingResult.rows[0].annotations_data || [],
             stamps_data: markingResult.rows[0].stamps_data || [],
+            notes_data: markingResult.rows[0].notes_data || [],
             total_marks: markingResult.rows[0].total_marks,
             submitted_at: markingResult.rows[0].submitted_at,
           },
@@ -881,6 +892,7 @@ export const saveRecheckDraft = async (req, res) => {
       marksData,
       annotationsData,
       stampsData,
+      notesData,
       totalMarks,
       remarks,
       timeSpent,
@@ -890,7 +902,7 @@ export const saveRecheckDraft = async (req, res) => {
     const checkResult = await pool.query(
       `SELECT sheet_id, exam_id FROM recheck_requests 
        WHERE id = $1 AND assign_to = $2 
-       AND status = 'assigned'`, // ✅ Sirf 'assigned'
+       AND status = 'assigned'`,
       [id, userId],
     );
 
@@ -914,13 +926,15 @@ export const saveRecheckDraft = async (req, res) => {
       result = await pool.query(
         `UPDATE recheck_markings 
          SET marks_data = $1, annotations_data = $2, stamps_data = $3,
-             total_marks = $4, remarks = $5, is_draft = true, updated_at = CURRENT_TIMESTAMP
-         WHERE recheck_request_id = $6 AND checker_id = $7
+             notes_data = $4, total_marks = $5, remarks = $6,
+             is_draft = true, updated_at = CURRENT_TIMESTAMP
+         WHERE recheck_request_id = $7 AND checker_id = $8
          RETURNING *`,
         [
           JSON.stringify(marksData || {}),
           JSON.stringify(annotationsData || []),
           JSON.stringify(stampsData || []),
+          JSON.stringify(notesData || []),
           totalMarks || 0,
           remarks || null,
           id,
@@ -949,8 +963,9 @@ export const saveRecheckDraft = async (req, res) => {
       result = await pool.query(
         `INSERT INTO recheck_markings (
           recheck_request_id, sheet_id, checker_id, exam_id,
-          marks_data, annotations_data, stamps_data, total_marks, remarks, is_draft
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+          marks_data, annotations_data, stamps_data, notes_data,
+          total_marks, remarks, is_draft
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
         RETURNING *`,
         [
           id,
@@ -960,6 +975,7 @@ export const saveRecheckDraft = async (req, res) => {
           JSON.stringify(marksData || {}),
           JSON.stringify(annotationsData || []),
           JSON.stringify(stampsData || []),
+          JSON.stringify(notesData || []),
           totalMarks || 0,
           remarks || null,
         ],
@@ -1033,6 +1049,7 @@ export const getRecheckDraft = async (req, res) => {
         marks_data: row.marks_data || {},
         annotations_data: row.annotations_data || [],
         stamps_data: row.stamps_data || [],
+        notes_data: row.notes_data || [],
         total_marks: row.total_marks,
         remarks: row.remarks,
         is_draft: row.is_draft,
@@ -1069,7 +1086,7 @@ export const escalateRecheckRequest = async (req, res) => {
       `SELECT rr.id, rr.sheet_id, rr.status
        FROM recheck_requests rr
        WHERE rr.id = $1 AND rr.assign_to = $2 
-       AND rr.status IN ('assigned')`, // ✅ Sirf 'assigned'
+       AND rr.status IN ('assigned')`,
       [id, userId],
     );
 
@@ -1184,6 +1201,7 @@ export const getRecheckedSheetById = async (req, res) => {
         rm.marks_data AS recheck_marks_data,
         rm.annotations_data AS recheck_annotations,
         rm.stamps_data AS recheck_stamps,
+        rm.notes_data AS recheck_notes_data,
         rm.total_marks AS recheck_total_marks,
         rm.submitted_at AS recheck_submitted_at
       FROM recheck_requests rr
@@ -1232,6 +1250,7 @@ export const getRecheckedSheetById = async (req, res) => {
           rm.marks_data AS recheck_marks_data,
           rm.annotations_data AS recheck_annotations,
           rm.stamps_data AS recheck_stamps,
+          rm.notes_data AS recheck_notes_data,
           rm.total_marks AS recheck_total_marks,
           rm.submitted_at AS recheck_submitted_at
         FROM recheck_requests rr
@@ -1352,6 +1371,7 @@ export const getRecheckedSheetById = async (req, res) => {
         recheckMarks: request.recheck_marks_data || {},
         recheckAnnotations: request.recheck_annotations || [],
         recheckStamps: request.recheck_stamps || [],
+        recheckNotes: request.recheck_notes_data || [],
         recheckTotalMarks: request.recheck_total_marks || 0,
         recheckSubmittedAt: request.recheck_submitted_at,
         pdfs: {
