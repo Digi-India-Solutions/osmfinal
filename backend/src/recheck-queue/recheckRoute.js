@@ -11,30 +11,53 @@ import {
   saveRecheckDraft,
   getRecheckDraft,
   escalateRecheckRequest,
-  getRecheckedSheetById, // ✅ IMPORT ADD KARO
+  getRecheckedSheetById,
 } from './recheckController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
 const router = Router();
 
-// ─── RECHECKER ROUTES (with assign_to check) ──────────────────
+console.log('✅ Recheck routes initializing...');
 
+// ─── ✅ ADMIN ROUTES ────────────────────────────────────────────
+router.get('/admin/rechecked/:id', verifyToken, getRecheckedSheetById);
+console.log('   ✅ GET /admin/rechecked/:id');
+
+// ─── ✅ SPECIFIC ROUTES - PEHLE RAKHO (wildcard routes se pehle) ────
 router.get('/my-requests', verifyToken, getMyRecheckRequests);
+console.log('   ✅ GET /my-requests');
+
+// ✅ SPECIFIC ROUTES - ye pehle aayenge
+router.get('/my-requests/:id/mark', verifyToken, startRecheckMarking);
+console.log('   ✅ GET /my-requests/:id/mark');
+
+router.post('/my-requests/:id/marks', verifyToken, saveRecheckMarks);
+console.log('   ✅ POST /my-requests/:id/marks');
+
+router.post('/my-requests/:id/save-draft', verifyToken, saveRecheckDraft);
+console.log('   ✅ POST /my-requests/:id/save-draft');
+
+router.get('/my-requests/:id/draft', verifyToken, getRecheckDraft);
+console.log('   ✅ GET /my-requests/:id/draft');
+
+router.post('/my-requests/:id/complete', verifyToken, completeRecheck);
+console.log('   ✅ POST /my-requests/:id/complete');
+
+router.post('/my-requests/:id/escalate', verifyToken, escalateRecheckRequest);
+console.log('   ✅ POST /my-requests/:id/escalate');
+
+// ⚠️ WILDCARD ROUTE - SABSE BAAD MEIN (last mein)
 router.get('/my-requests/:id', verifyToken, getRecheckRequestById);
+console.log('   ✅ GET /my-requests/:id (wildcard - last)');
+
+// ─── STATUS PATCH ROUTE ──────────────────────────────────────────
 router.patch(
   '/my-requests/:id/status',
   verifyToken,
   updateRecheckRequestStatus,
 );
-router.get('/my-requests/:id/mark', verifyToken, startRecheckMarking);
-router.post('/my-requests/:id/save-draft', verifyToken, saveRecheckDraft);
-router.get('/my-requests/:id/draft', verifyToken, getRecheckDraft);
-router.post('/my-requests/:id/complete', verifyToken, completeRecheck);
-router.post('/my-requests/:id/escalate', verifyToken, escalateRecheckRequest);
+console.log('   ✅ PATCH /my-requests/:id/status');
 
-// ─── ADMIN ROUTES (without assign_to check) ────────────────────
-
-// ✅ Admin view rechecked sheet by ID - IMPORTANT: Ye route pehle hona chahiye
-router.get('/admin/rechecked/:id', verifyToken, getRecheckedSheetById);
+console.log('✅ All recheck routes registered successfully');
 
 export default router;

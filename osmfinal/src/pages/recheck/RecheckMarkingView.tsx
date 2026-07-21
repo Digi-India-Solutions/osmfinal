@@ -21,6 +21,18 @@ import recheckQueueService from '@/api/recheckQueue';
 import { API_URL } from '@/api/axios';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
+// ─── Sheet Note Interface ────────────────────────────────────────────────────
+export interface SheetNote {
+  id: number;
+  page: number;
+  x: number;
+  y: number;
+  text: string;
+  fontSize: number;
+  width: number;
+  height: number;
+}
+
 type RecheckModalType = 'escalate' | 'submit' | null;
 
 const TOTAL_PAGES = 18;
@@ -114,7 +126,7 @@ export default function RecheckMarkingView() {
     [],
   );
 
-  // ✅ NEW: Original checker markings
+  // Original checker markings
   const [originalAnnotationsData, setOriginalAnnotationsData] = useState<
     Annotation[]
   >([]);
@@ -125,12 +137,16 @@ export default function RecheckMarkingView() {
     Record<string, number>
   >({});
 
+  // ─── NOTES STATE ──────────────────────────────────────────────
+  const [notes, setNotes] = useState<SheetNote[]>([]);
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  const noteIdCounterRef = useRef(1);
+
   // ─── MINIMUM TIME STATE ──────────────────────────────────────
 
   const [minTimeRequired, setMinTimeRequired] = useState(0);
   const [isTimeRequirementMet, setIsTimeRequirementMet] = useState(true);
 
-  // ✅ Use ref for timer - never resets on re-render
   const timerSecondsRef = useRef(0);
   const [timerDisplay, setTimerDisplay] = useState('00:00:00');
 
@@ -140,6 +156,8 @@ export default function RecheckMarkingView() {
     {},
   );
   const [pdfPageCount, setPdfPageCount] = useState(0);
+
+  // ─── FETCH DATA ──────────────────────────────────────────────
 
   // ─── FETCH DATA ──────────────────────────────────────────────
 
@@ -180,23 +198,24 @@ export default function RecheckMarkingView() {
             question_paper: toFullUrl(data.pdfs?.question_paper),
           });
 
-          // ✅ STORE ORIGINAL MARKINGS (checker ke)
           setOriginalAnnotationsData(data.originalAnnotations || []);
           setOriginalStampsData(data.originalStamps || []);
           setOriginalMarksData(data.originalMarks || {});
 
-          const spentTime = data.exam?.spentTime || 0;
-          setMinTimeRequired(spentTime);
-          setIsTimeRequirementMet(spentTime === 0);
+          // ✅ FIX: Convert seconds to minutes
+          const spentTimeInSeconds = data.exam?.spentTime || 0;
+          const spentTimeInMinutes = Math.ceil(spentTimeInSeconds / 60);
+          console.log(
+            `⏱️ Minimum time required: ${spentTimeInSeconds}s (${spentTimeInMinutes}m)`,
+          );
+          setMinTimeRequired(spentTimeInMinutes);
+          setIsTimeRequirementMet(spentTimeInSeconds === 0);
 
-          // ✅ Agar recheck already completed hai toh recheck markings show karo
-          // Warna original markings show karo (pending recheck ke liye)
           if (data.request?.isReadOnly && data.recheckMarks) {
             setRecheckMarksData(data.recheckMarks || {});
             setRecheckAnnotationsData(data.recheckAnnotations || []);
             setRecheckStampsData(data.recheckStamps || []);
           } else {
-            // ✅ PENDING RECHECK: Original markings show karo
             setRecheckMarksData(data.originalMarks || {});
             setRecheckAnnotationsData(data.originalAnnotations || []);
             setRecheckStampsData(data.originalStamps || []);
@@ -215,11 +234,10 @@ export default function RecheckMarkingView() {
     fetchData();
   }, [requestIdNum]);
 
-  // ─── ✅ FIXED TIMER WITH useRef ──────────────────────────────
+  // ─── TIMER ──────────────────────────────────────────────────
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Load saved timer from localStorage on mount
   useEffect(() => {
     const savedTimer = localStorage.getItem(
       `osm_recheck_timer_${requestIdNum}`,
@@ -233,22 +251,18 @@ export default function RecheckMarkingView() {
     }
   }, [requestIdNum]);
 
-  // Start/restart timer
   useEffect(() => {
     if (requestData?.isReadOnly) return;
 
-    // Clear existing timer
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
 
-    // Start timer
     timerRef.current = setInterval(() => {
       timerSecondsRef.current += 1;
       setTimerDisplay(formatTime(timerSecondsRef.current));
 
-      // ✅ Save to localStorage every 5 seconds
       if (timerSecondsRef.current % 5 === 0) {
         localStorage.setItem(
           `osm_recheck_timer_${requestIdNum}`,
@@ -262,7 +276,6 @@ export default function RecheckMarkingView() {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      // ✅ Save final timer value on unmount
       localStorage.setItem(
         `osm_recheck_timer_${requestIdNum}`,
         String(timerSecondsRef.current),
@@ -293,12 +306,11 @@ export default function RecheckMarkingView() {
         id: questionName,
         criterion: displayName,
         max: details.maxMarks || 0,
-        // ✅ Round1: Original marks se lo (checker ke marks)
         round1:
           originalMarksData[questionName] ??
           previousMarksData[questionName] ??
           0,
-        round2: null, // Recheck marks abhi null hain
+        round2: null,
         remark: '',
       };
     });
@@ -366,12 +378,10 @@ export default function RecheckMarkingView() {
       return recheckStampsData;
     }
 
-    // ✅ Agar original stamps exist karti hain toh unko use karo
     if (originalStampsData.length > 0) {
       return originalStampsData;
     }
 
-    // ✅ Nahi toh empty stamps create karo
     return initialMarks.map((m) => ({
       markId: m.id,
       placed: false,
@@ -400,7 +410,6 @@ export default function RecheckMarkingView() {
   // ─── LOAD ANNOTATIONS ────────────────────────────────────────
 
   useEffect(() => {
-    // ✅ Agar read only hai toh recheck annotations use karo
     if (requestData?.isReadOnly && recheckAnnotationsData.length > 0) {
       setAnnotations(recheckAnnotationsData);
       const maxId = Math.max(
@@ -411,7 +420,6 @@ export default function RecheckMarkingView() {
       return;
     }
 
-    // ✅ Agar original annotations exist karti hain toh unko show karo
     if (originalAnnotationsData.length > 0) {
       setAnnotations(originalAnnotationsData);
       const maxId = Math.max(
@@ -574,7 +582,7 @@ export default function RecheckMarkingView() {
     saveDraftRef.current = saveDraft;
   }, [saveDraft]);
 
-  // ─── ✅ SAVE RECHECK DRAFT TO API (with ref timer) ────────────
+  // ─── SAVE RECHECK DRAFT TO API ────────────────────────────────
 
   const handleSaveDraft = useCallback(async () => {
     if (!requestIdNum || requestData?.isReadOnly) return;
@@ -603,7 +611,6 @@ export default function RecheckMarkingView() {
       height: a.height,
     }));
 
-    // ✅ Use ref for accurate time
     const currentTime = timerSecondsRef.current;
 
     const payload = {
@@ -676,11 +683,9 @@ export default function RecheckMarkingView() {
         if (response.success && response.data) {
           const data = response.data;
 
-          // ✅ Draft marks ko original ke saath merge karo
           if (data.marks_data && Object.keys(data.marks_data).length > 0) {
             const restoredMarks = marks.map((m) => {
               const draftValue = data.marks_data[m.id];
-              // ✅ Agar draft mein value hai toh use karo, warna original marks show karo
               return {
                 ...m,
                 round2: draftValue !== undefined ? draftValue : m.round2,
@@ -698,15 +703,12 @@ export default function RecheckMarkingView() {
             });
           }
 
-          // ✅ Stamps: Draft stamps ko original ke saath merge karo
           if (data.stamps_data && data.stamps_data.length > 0) {
             setStamps(data.stamps_data);
           } else if (originalStampsData.length > 0) {
-            // Agar draft stamps nahi hain toh original stamps show karo
             setStamps(originalStampsData);
           }
 
-          // ✅ Annotations: Draft annotations ko original ke saath merge karo
           if (data.annotations_data && data.annotations_data.length > 0) {
             setAnnotations(data.annotations_data);
             const maxId = Math.max(
@@ -715,7 +717,6 @@ export default function RecheckMarkingView() {
             );
             annotationIdCounter = maxId + 1;
           } else if (originalAnnotationsData.length > 0) {
-            // Agar draft annotations nahi hain toh original annotations show karo
             setAnnotations(originalAnnotationsData);
             const maxId = Math.max(
               ...originalAnnotationsData.map((a: Annotation) => a.id),
@@ -724,7 +725,6 @@ export default function RecheckMarkingView() {
             annotationIdCounter = maxId + 1;
           }
 
-          // ✅ Restore timer from draft
           if (data.time_spent && data.time_spent > 0) {
             timerSecondsRef.current = data.time_spent;
             setTimerDisplay(formatTime(data.time_spent));
@@ -734,7 +734,6 @@ export default function RecheckMarkingView() {
             );
           }
         } else {
-          // ✅ Agar draft nahi hai toh original markings show karo
           if (originalAnnotationsData.length > 0) {
             setAnnotations(originalAnnotationsData);
           }
@@ -744,7 +743,6 @@ export default function RecheckMarkingView() {
         }
       } catch (error) {
         console.error('Load recheck draft error:', error);
-        // ✅ Error par bhi original markings show karo
         if (originalAnnotationsData.length > 0) {
           setAnnotations(originalAnnotationsData);
         }
@@ -827,7 +825,6 @@ export default function RecheckMarkingView() {
       });
       manuallySetMarksRef.current = manualSet;
 
-      // ✅ Restore timer from draft
       if (draft.timerSeconds) {
         timerSecondsRef.current = draft.timerSeconds;
         setTimerDisplay(formatTime(draft.timerSeconds));
@@ -863,6 +860,40 @@ export default function RecheckMarkingView() {
     timerSecondsRef.current = 0;
     setTimerDisplay('00:00:00');
   }, [requestIdNum]);
+
+  // ─── Note handlers ─────────────────────────────────────────────
+  const handleNoteAdd = useCallback((page: number, x: number, y: number) => {
+    noteIdCounterRef.current += 1;
+    const newNote: SheetNote = {
+      id: noteIdCounterRef.current,
+      page,
+      x,
+      y,
+      text: '',
+      fontSize: 12,
+      width: 200,
+      height: 100,
+    };
+    setNotes((prev) => [...prev, newNote]);
+    setEditingNoteId(newNote.id);
+  }, []);
+
+  const handleNoteUpdate = useCallback(
+    (id: number, updates: Partial<SheetNote>) => {
+      setNotes((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, ...updates } : n)),
+      );
+    },
+    [],
+  );
+
+  const handleNoteDelete = useCallback(
+    (id: number) => {
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+      if (editingNoteId === id) setEditingNoteId(null);
+    },
+    [editingNoteId],
+  );
 
   // ─── Toolbar handlers ───
 
@@ -1137,7 +1168,7 @@ export default function RecheckMarkingView() {
       .map((m) => m.criterion);
   }, [marks]);
 
-  // ─── ✅ SUBMIT RECHECK WITH TIME CHECK (using ref) ───
+  // ─── SUBMIT RECHECK WITH TIME CHECK ───
 
   const handleSubmitRecheck = useCallback(() => {
     if (requestData?.isReadOnly) return;
@@ -1163,7 +1194,7 @@ export default function RecheckMarkingView() {
     setModalType('submit');
   }, [checkIncomplete, requestData?.isReadOnly, minTimeRequired]);
 
-  // ─── ✅ ESCALATE FURTHER WITH TIME CHECK (using ref) ───
+  // ─── ESCALATE FURTHER WITH TIME CHECK ───
 
   const handleEscalateFurther = useCallback(() => {
     if (requestData?.isReadOnly) return;
@@ -1193,7 +1224,7 @@ export default function RecheckMarkingView() {
     setModalType('submit');
   }, []);
 
-  // ─── ✅ SUBMIT CONFIRM (with ref timer) ───
+  // ─── SUBMIT CONFIRM ───
 
   const handleSubmitConfirm = useCallback(async () => {
     setModalType(null);
@@ -1230,7 +1261,7 @@ export default function RecheckMarkingView() {
         marksData,
         annotationsData,
         stampsData,
-        timeSpent: currentTime, // ✅ Use ref
+        timeSpent: currentTime,
       });
 
       if (response.success) {
@@ -1251,7 +1282,7 @@ export default function RecheckMarkingView() {
     }
   }, [requestIdNum, finalMarks, marks, stamps, annotations, navigate]);
 
-  // ─── ✅ ESCALATE CONFIRM (with ref timer) ───
+  // ─── ESCALATE CONFIRM ───
 
   const handleEscalateConfirm = useCallback(async () => {
     setModalType(null);
@@ -1264,7 +1295,7 @@ export default function RecheckMarkingView() {
           reason: escalateData?.reason || 'Escalated for further review',
           escalateType: escalateData?.escalateType || 'other',
           remarks: escalateData?.remarks || '',
-          timeSpent: currentTime, // ✅ Use ref
+          timeSpent: currentTime,
         },
       );
 
@@ -1295,6 +1326,7 @@ export default function RecheckMarkingView() {
       { tool: 'pencil', icon: 'ri-pencil-line', label: 'Pencil' },
       { tool: 'highlight', icon: 'ri-mark-pen-line', label: 'Highlight' },
       { tool: 'eraser', icon: 'ri-eraser-line', label: 'Eraser' },
+      { tool: 'textNote', icon: 'ri-sticky-note-line', label: 'Note' },
     ];
 
   // ─── LOADING STATE ──────────────────────────────────────────
@@ -1364,7 +1396,6 @@ export default function RecheckMarkingView() {
             Page <span className="text-white font-medium">{currentPage}</span>{' '}
             of {TOTAL_PAGES}
           </span>
-          {/* ✅ Show minimum time requirement in top bar */}
           {minTimeRequired > 0 && (
             <span
               className={`text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
@@ -1517,6 +1548,12 @@ export default function RecheckMarkingView() {
           instructionBanner={instructionBanner}
           stampColor={STAMP_COLOR}
           pulseAnimationName={PULSE_ANIM}
+          notes={notes}
+          editingNoteId={editingNoteId}
+          onNoteAdd={handleNoteAdd}
+          onNoteUpdate={handleNoteUpdate}
+          onNoteDelete={handleNoteDelete}
+          onEditingNoteChange={setEditingNoteId}
           onAnnotationAdd={handleAnnotationAdd}
           onAnnotationDelete={handleAnnotationDelete}
           onEraserNoHit={handleEraserNoHit}

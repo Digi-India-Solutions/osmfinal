@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
-export type RecheckTab = 'recheckMarks' | 'questions' | 'answerSheet';
+export type RecheckTab = 'recheckMarks' | 'questions' | 'answerSheet' | 'notes';
 
 export interface RecheckMarkEntry {
   id: string;
@@ -37,8 +37,8 @@ interface RecheckRightPanelProps {
   questionPaperUrl: string | null;
   modelAnswerUrl: string | null;
   saveIndicatorText?: string;
-  minTimeRequired?: number; // ✅ Added
-  isTimeRequirementMet?: boolean; // ✅ Added
+  minTimeRequired?: number;
+  isTimeRequirementMet?: boolean;
   saveIndicatorFresh?: boolean;
   onActiveMarkChange: (id: string) => void;
   onQuestionPageChange: (page: number) => void;
@@ -77,8 +77,8 @@ export default function RecheckRightPanel({
   modelAnswerUrl,
   saveIndicatorText = 'Auto-saves every 30s',
   saveIndicatorFresh = false,
-  minTimeRequired = 0, // ✅ Default
-  isTimeRequirementMet = true, // ✅ Default
+  minTimeRequired = 0,
+  isTimeRequirementMet = true,
   onActiveMarkChange,
   onQuestionPageChange,
   onRound2Update,
@@ -178,6 +178,7 @@ export default function RecheckRightPanel({
     { key: 'recheckMarks', icon: 'ri-list-check', label: 'Recheck Marks' },
     { key: 'questions', icon: 'ri-file-list-3-line', label: 'Q. Paper' },
     { key: 'answerSheet', icon: 'ri-check-double-line', label: 'Ans. Sheet' },
+    { key: 'notes', icon: 'ri-sticky-note-line', label: 'Notes' },
   ];
 
   const canSubmit = totalRound2 > 0 && !readOnly;
@@ -218,7 +219,7 @@ export default function RecheckRightPanel({
         </span>
       </div>
 
-      {/* ─── ✅ MINIMUM TIME INDICATOR ─── */}
+      {/* ─── MINIMUM TIME INDICATOR ─── */}
       {minTimeRequired > 0 && (
         <div
           className={`shrink-0 px-3 py-1.5 text-center text-[10px] font-medium border-b ${
@@ -623,6 +624,19 @@ export default function RecheckRightPanel({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ─── NOTES TAB ─── */}
+        {rightTab === 'notes' && (
+          <div className="flex-1 flex flex-col min-h-0 p-4">
+            <div className="text-center text-slate-400 text-sm">
+              <i className="ri-sticky-note-line text-2xl mb-2 block"></i>
+              <p>Notes will appear here</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Use the Note tool on the sheet to add notes
+              </p>
+            </div>
           </div>
         )}
 
