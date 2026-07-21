@@ -72,6 +72,8 @@ export const getMarkSchemeByExam = async (req, res) => {
 // SAVE MARK SCHEME (WITH LOCAL PDF UPLOAD)
 // ════════════════════════════════════════════════════════════════
 
+// src/mark-scheme/mark-scheme-controller.js
+
 export const saveMarkScheme = async (req, res) => {
   const { examId } = req.params;
 
@@ -140,8 +142,9 @@ export const saveMarkScheme = async (req, res) => {
       examId,
     ]);
 
-    // Calculate total marks
+    // Calculate total marks and count unique questions
     let totalMarks = 0;
+    const uniqueQuestions = new Set();
 
     // Insert new mark schemes with local PDF URLs
     for (const item of schemes) {
@@ -150,6 +153,10 @@ export const saveMarkScheme = async (req, res) => {
 
       const marks = parseInt(maxMarks) || 0;
       totalMarks += marks;
+
+      // Extract question number from Qn1_i -> Qn1
+      const questionNumber = questionName.split('_')[0];
+      uniqueQuestions.add(questionNumber);
 
       await client.query(
         `INSERT INTO mark_schemes (
@@ -167,11 +174,15 @@ export const saveMarkScheme = async (req, res) => {
       );
     }
 
-    // Update exams table with total marks
-    await client.query(`UPDATE exams SET "maxMarks" = $1 WHERE id = $2`, [
-      totalMarks,
-      examId,
-    ]);
+    // ✅ Update exams table with total marks AND total questions
+    const totalQuestionsCount = uniqueQuestions.size;
+
+    await client.query(
+      `UPDATE exams 
+       SET "maxMarks" = $1, "totalQuestions" = $2
+       WHERE id = $3`,
+      [totalMarks, totalQuestionsCount, examId],
+    );
 
     await client.query('COMMIT');
 
@@ -195,6 +206,7 @@ export const saveMarkScheme = async (req, res) => {
       message: 'Mark scheme saved successfully',
       data: data,
       totalMarks: totalMarks,
+      totalQuestions: totalQuestionsCount, // ✅ Send back
       files: {
         modelAnswerPdf: toFullUrl(modelAnswerPdf),
         questionPaperPdf: toFullUrl(questionPaperPdf),
@@ -499,17 +511,23 @@ export const deleteQuestion = async (req, res) => {
       [examId, `${questionName}%`],
     );
 
-    // Update total marks
-    const totalResult = await client.query(
-      `SELECT SUM("maxMarks") as total FROM mark_schemes WHERE "examId" = $1`,
+    // Update total marks and total questions
+    const statsResult = await client.query(
+      `SELECT 
+        SUM("maxMarks") as total_marks,
+        COUNT(DISTINCT SUBSTRING("questionName" FROM '^Qn[0-9]+')) as total_questions
+       FROM mark_schemes 
+       WHERE "examId" = $1`,
       [examId],
     );
-    const totalMarks = parseInt(totalResult.rows[0]?.total) || 0;
 
-    await client.query(`UPDATE exams SET "maxMarks" = $1 WHERE id = $2`, [
-      totalMarks,
-      examId,
-    ]);
+    const totalMarks = parseInt(statsResult.rows[0]?.total_marks) || 0;
+    const totalQuestions = parseInt(statsResult.rows[0]?.total_questions) || 0;
+
+    await client.query(
+      `UPDATE exams SET "maxMarks" = $1, "totalQuestions" = $2 WHERE id = $3`,
+      [totalMarks, totalQuestions, examId],
+    );
 
     await client.query('COMMIT');
 
@@ -518,6 +536,7 @@ export const deleteQuestion = async (req, res) => {
       message: `Question ${questionNum} deleted successfully`,
       data: {
         totalMarks,
+        totalQuestions,
       },
     });
   } catch (error) {
@@ -532,6 +551,7 @@ export const deleteQuestion = async (req, res) => {
     client.release();
   }
 };
+
 
 // ════════════════════════════════════════════════════════════════
 // DELETE SPECIFIC SUB-PART
@@ -568,17 +588,23 @@ export const deleteSubPart = async (req, res) => {
       [examId, questionName],
     );
 
-    // Update total marks
-    const totalResult = await client.query(
-      `SELECT SUM("maxMarks") as total FROM mark_schemes WHERE "examId" = $1`,
+    // Update total marks and total questions
+    const statsResult = await client.query(
+      `SELECT 
+        SUM("maxMarks") as total_marks,
+        COUNT(DISTINCT SUBSTRING("questionName" FROM '^Qn[0-9]+')) as total_questions
+       FROM mark_schemes 
+       WHERE "examId" = $1`,
       [examId],
     );
-    const totalMarks = parseInt(totalResult.rows[0]?.total) || 0;
 
-    await client.query(`UPDATE exams SET "maxMarks" = $1 WHERE id = $2`, [
-      totalMarks,
-      examId,
-    ]);
+    const totalMarks = parseInt(statsResult.rows[0]?.total_marks) || 0;
+    const totalQuestions = parseInt(statsResult.rows[0]?.total_questions) || 0;
+
+    await client.query(
+      `UPDATE exams SET "maxMarks" = $1, "totalQuestions" = $2 WHERE id = $3`,
+      [totalMarks, totalQuestions, examId],
+    );
 
     await client.query('COMMIT');
 
@@ -587,6 +613,7 @@ export const deleteSubPart = async (req, res) => {
       message: `Sub-part ${subLabel} of Question ${questionNum} deleted successfully`,
       data: {
         totalMarks,
+        totalQuestions,
       },
     });
   } catch (error) {

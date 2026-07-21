@@ -262,12 +262,12 @@ export default function ExamManagement() {
   const [saving, setSaving] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingExam, setEditingExam] = useState<ExamResponse | null>(null);
+
+  // ✅ REMOVED: totalQuestions and maxMarks from form
   const [form, setForm] = useState({
     name: '',
     subject: '',
     date: '',
-    totalQuestions: '',
-    maxMarks: '',
     spentTime: '', // ✅ Store as MM:SS string
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -422,12 +422,11 @@ export default function ExamManagement() {
     return true;
   };
 
+  // ✅ FIXED: Only validate name, subject, date, spentTime
   const isFormValid =
     form.name.trim() &&
     form.subject.trim() &&
     form.date.trim() &&
-    form.totalQuestions.trim() &&
-    form.maxMarks.trim() &&
     form.spentTime.trim() &&
     !errors.spentTime;
 
@@ -439,8 +438,6 @@ export default function ExamManagement() {
       name: '',
       subject: '',
       date: '',
-      totalQuestions: '',
-      maxMarks: '',
       spentTime: '',
     });
     setErrors({});
@@ -453,9 +450,6 @@ export default function ExamManagement() {
       name: exam.name,
       subject: exam.subject,
       date: exam.date,
-      totalQuestions: String(exam.totalQuestions),
-      maxMarks: String(exam.maxMarks),
-      // ✅ Convert seconds to MM:SS format
       spentTime: formatSecondsToTime(exam.spentTime || 0),
     });
     setErrors({});
@@ -475,12 +469,13 @@ export default function ExamManagement() {
       // ✅ Convert MM:SS to seconds
       const spentTimeInSeconds = parseTimeToSeconds(form.spentTime);
 
+      // ✅ Default values for totalQuestions and maxMarks
       const examData = {
         name: form.name,
         subject: form.subject,
         date: form.date,
-        totalQuestions: Number(form.totalQuestions),
-        maxMarks: Number(form.maxMarks),
+        totalQuestions: 0, // ✅ Default value
+        maxMarks: 0, // ✅ Default value
         spentTime: spentTimeInSeconds,
       };
 
@@ -766,12 +761,7 @@ export default function ExamManagement() {
                 <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                   Date
                 </th>
-                <th className="text-center py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                  Questions
-                </th>
-                <th className="text-center py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                  Max Marks
-                </th>
+                {/* ✅ REMOVED: Questions and Max Marks columns */}
                 <th className="text-center py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                   Spent Time
                 </th>
@@ -787,7 +777,7 @@ export default function ExamManagement() {
               {examsLoading ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={7}
                     className="py-8 text-center text-sm text-gray-400"
                   >
                     Loading exams...
@@ -796,7 +786,7 @@ export default function ExamManagement() {
               ) : examList.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={7}
                     className="py-8 text-center text-sm text-gray-400"
                   >
                     No exams found
@@ -838,14 +828,8 @@ export default function ExamManagement() {
                       <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
                         {exam.date}
                       </td>
+                      {/* ✅ REMOVED: Questions and Max Marks columns */}
                       <td className="py-3 px-4 text-center text-gray-700 whitespace-nowrap">
-                        {exam.totalQuestions}
-                      </td>
-                      <td className="py-3 px-4 text-center text-gray-700 whitespace-nowrap">
-                        {exam.maxMarks}
-                      </td>
-                      <td className="py-3 px-4 text-center text-gray-700 whitespace-nowrap">
-                        {/* ✅ Display formatted time */}
                         {formatSecondsToTime(exam.spentTime || 0)}
                       </td>
                       <td className="py-3 px-4">
@@ -998,64 +982,7 @@ export default function ExamManagement() {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Total Questions
-                  </label>
-                  <input
-                    type="number"
-                    value={form.totalQuestions}
-                    onChange={(e) => {
-                      setForm({ ...form, totalQuestions: e.target.value });
-                      if (errors.totalQuestions)
-                        validateField('totalQuestions', e.target.value);
-                    }}
-                    onBlur={() =>
-                      validateField('totalQuestions', form.totalQuestions)
-                    }
-                    placeholder="10"
-                    min="1"
-                    className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${
-                      errors.totalQuestions
-                        ? 'border-rose-400'
-                        : 'border-gray-200'
-                    }`}
-                  />
-                  {errors.totalQuestions && (
-                    <p className="text-xs text-rose-500 mt-1">
-                      {errors.totalQuestions}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Max Marks
-                  </label>
-                  <input
-                    type="number"
-                    value={form.maxMarks}
-                    onChange={(e) => {
-                      setForm({ ...form, maxMarks: e.target.value });
-                      if (errors.maxMarks)
-                        validateField('maxMarks', e.target.value);
-                    }}
-                    onBlur={() => validateField('maxMarks', form.maxMarks)}
-                    placeholder="100"
-                    min="1"
-                    className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent placeholder:text-gray-400 ${
-                      errors.maxMarks ? 'border-rose-400' : 'border-gray-200'
-                    }`}
-                  />
-                  {errors.maxMarks && (
-                    <p className="text-xs text-rose-500 mt-1">
-                      {errors.maxMarks}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* ✅ UPDATED: Spent Time with MM:SS format */}
+              {/* ✅ Spent Time */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   Spent Time
@@ -1176,24 +1103,10 @@ export default function ExamManagement() {
                         {detailExam.date}
                       </p>
                     </div>
-                    <div className="bg-gray-50 rounded-xl p-4">
-                      <p className="text-xs text-gray-500 mb-1">
-                        Total Questions
-                      </p>
-                      <p className="text-sm font-medium text-gray-900">
-                        {detailExam.totalQuestions}
-                      </p>
-                    </div>
-                    <div className="bg-gray-50 rounded-xl p-4">
-                      <p className="text-xs text-gray-500 mb-1">Max Marks</p>
-                      <p className="text-sm font-medium text-gray-900">
-                        {detailExam.maxMarks}
-                      </p>
-                    </div>
+                    {/* ✅ REMOVED: Total Questions and Max Marks from details */}
                     <div className="bg-gray-50 rounded-xl p-4">
                       <p className="text-xs text-gray-500 mb-1">Spent Time</p>
                       <p className="text-sm font-medium text-gray-900">
-                        {/* ✅ Display formatted time */}
                         {formatSecondsToTime(detailExam.spentTime || 0)}
                       </p>
                     </div>
