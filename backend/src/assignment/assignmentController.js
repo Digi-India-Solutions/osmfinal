@@ -696,6 +696,8 @@ export const getMyAssignedSheets = async (req, res) => {
 
 // ─── GET SHEET FOR MARKING ─────────────────────────────────────
 
+// ─── GET SHEET FOR MARKING ─────────────────────────────────────
+
 export const getSheetForMarking = async (req, res) => {
   try {
     const { id } = req.params;
@@ -727,13 +729,22 @@ export const getSheetForMarking = async (req, res) => {
         ms."maxMarks" AS questionMaxMarks,
         ms.guidelines,
         ms.model_answer_pdf,
-        ms.question_paper_pdf
+        ms.question_paper_pdf,
+        cm.marks_data,
+        cm.annotations_data,
+        cm.stamps_data,
+        cm.notes_data,  -- ✅ ADD THIS
+        cm.total_marks AS marking_total_marks,
+        cm.submitted_at AS marking_submitted_at,
+        u.name AS checker_name
       FROM sheets s
       INNER JOIN assignments a ON s.id = a.sheet_id 
         AND a.checker_id = $2 
         AND a.status IN ('assigned', 'completed')
       LEFT JOIN exams e ON s.exam_id = e.id
       LEFT JOIN mark_schemes ms ON ms."examId" = e.id
+      LEFT JOIN checker_markings cm ON cm.sheet_id = s.id AND cm.is_submitted = true
+      LEFT JOIN users u ON cm.checker_id = u.id
       WHERE s.id = $1`,
       [id, userId],
     );
@@ -757,7 +768,37 @@ export const getSheetForMarking = async (req, res) => {
 
     const sheet = rows[0];
 
-    // ✅ Convert spentTime from seconds to minutes for frontend
+    // ✅ Parse marks data
+    let marksData = {};
+    let annotationsData = [];
+    let stampsData = [];
+    let notesData = [];
+
+    try {
+      if (sheet.marks_data) {
+        marksData = typeof sheet.marks_data === 'string' 
+          ? JSON.parse(sheet.marks_data) 
+          : sheet.marks_data;
+      }
+      if (sheet.annotations_data) {
+        annotationsData = typeof sheet.annotations_data === 'string'
+          ? JSON.parse(sheet.annotations_data)
+          : sheet.annotations_data;
+      }
+      if (sheet.stamps_data) {
+        stampsData = typeof sheet.stamps_data === 'string'
+          ? JSON.parse(sheet.stamps_data)
+          : sheet.stamps_data;
+      }
+      if (sheet.notes_data) {
+        notesData = typeof sheet.notes_data === 'string'
+          ? JSON.parse(sheet.notes_data)
+          : sheet.notes_data;
+      }
+    } catch (parseError) {
+      console.error('Error parsing marking data:', parseError);
+    }
+
     const spentTimeSeconds = sheet.exam_spent_time || 0;
     const spentTimeMinutes = Math.ceil(spentTimeSeconds / 60);
 
@@ -786,12 +827,22 @@ export const getSheetForMarking = async (req, res) => {
           subject: sheet.exam_subject,
           totalQuestions: sheet.totalQuestions || 0,
           maxMarks: sheet.maxMarks || 0,
-          spentTime: spentTimeMinutes, // ✅ Return in minutes
+          spentTime: spentTimeMinutes,
         },
         markScheme: markScheme,
         pdfs: {
           model_answer: sheet.model_answer_pdf,
           question_paper: sheet.question_paper_pdf,
+        },
+        // ✅ ADD THIS - marking data
+        markingData: {
+          marks_data: marksData,
+          annotations_data: annotationsData,
+          stamps_data: stampsData,
+          notes_data: notesData,
+          total_marks: sheet.marking_total_marks || 0,
+          submitted_at: sheet.marking_submitted_at,
+          checker_name: sheet.checker_name,
         },
       },
     });

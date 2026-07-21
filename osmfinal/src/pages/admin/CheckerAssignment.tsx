@@ -1,5 +1,4 @@
 // src/pages/admin/CheckerAssignment.tsx
-
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Breadcrumb from '@/components/ui/Breadcrumb';
@@ -45,22 +44,17 @@ export default function CheckerAssignment() {
 
   // ─── TOAST ──────────────────────────────────────────────────
 
-  const [toast, setToast] = useState<{
-    message: string;
-    type: 'success' | 'error' | 'info';
-  } | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
-  const showToast = (
-    message: string,
-    type: 'success' | 'error' | 'info' = 'success',
-  ) => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  };
+  // ─── FILTER EXAMS ──────────────────────────────────────────
+
+  // src/pages/admin/CheckerAssignment.tsx
 
   // ─── FILTER EXAMS ──────────────────────────────────────────
 
   const filteredExams = useMemo(() => {
+    // ✅ Super Admin, Admin, Teacher Checker - sab dikhao
     if (
       role === 'super_admin' ||
       role === 'admin' ||
@@ -73,10 +67,13 @@ export default function CheckerAssignment() {
 
   // ─── FETCH EXAMS ────────────────────────────────────────────
 
+  // ─── FETCH EXAMS ────────────────────────────────────────────
+
   useEffect(() => {
     const fetchExams = async () => {
       try {
         setExamsLoading(true);
+        // ✅ Super Admin ke liye bhi excludeArchived true
         const res = await examApi.getAllExams({
           limit: 1000,
           excludeArchived: true,
@@ -84,7 +81,6 @@ export default function CheckerAssignment() {
         setExams(res.data);
       } catch (error) {
         console.error('Failed to fetch exams:', error);
-        showToast('Failed to load exams', 'error');
       } finally {
         setExamsLoading(false);
       }
@@ -106,18 +102,12 @@ export default function CheckerAssignment() {
       if (sheetsRes.success) {
         setUnassignedSheets(sheetsRes.data || []);
         setSelectedSheets(new Set());
-      } else {
-        showToast(sheetsRes.message || 'Failed to load sheets', 'error');
       }
-
       if (checkersRes.success) {
         setAvailableCheckers(checkersRes.data || []);
-      } else {
-        showToast(checkersRes.message || 'Failed to load checkers', 'error');
       }
     } catch (error) {
       console.error('Failed to fetch data:', error);
-      showToast('Failed to load assignment data', 'error');
     }
   }, []);
 
@@ -156,28 +146,19 @@ export default function CheckerAssignment() {
   };
 
   const assignToChecker = async (checker: IAvailableChecker) => {
-    if (selectedSheets.size === 0 || !selectedExam) {
-      showToast('Please select at least one sheet to assign', 'info');
-      return;
-    }
-    if (checker.hasConflict) {
-      showToast(
-        `${checker.name} has a conflict and cannot be assigned`,
-        'error',
-      );
-      return;
-    }
+    if (selectedSheets.size === 0 || !selectedExam) return;
+    if (checker.hasConflict) return;
 
     setIsAssigning(true);
     try {
-      const sheetIds = Array.from(selectedSheets);
       const response = await assignmentService.assignSheets(
         selectedExam,
         checker.id,
-        sheetIds,
+        Array.from(selectedSheets),
       );
 
       if (response.success) {
+        const sheetIds = Array.from(selectedSheets);
         setLogs((prev) => [
           {
             id: Date.now(),
@@ -189,76 +170,62 @@ export default function CheckerAssignment() {
           ...prev,
         ]);
         setSelectedSheets(new Set());
-        showToast(
-          `✅ Assigned ${sheetIds.length} sheet(s) to ${checker.name}`,
-          'success',
+        setSuccessMessage(
+          `Assigned ${sheetIds.length} sheet(s) to ${checker.name}`,
         );
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
         await fetchData(selectedExam);
       } else {
-        showToast(response.message || 'Failed to assign', 'error');
+        setSuccessMessage(response.message || 'Failed to assign');
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
       }
     } catch (error) {
       console.error('Assign error:', error);
-      showToast('Failed to assign sheets', 'error');
+      setSuccessMessage('Failed to assign sheets');
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
     } finally {
       setIsAssigning(false);
     }
   };
 
   const assignRandomly = async () => {
-    if (!selectedExam) {
-      showToast('Please select an exam first', 'info');
-      return;
-    }
-
-    if (unassignedSheets.length === 0) {
-      showToast('No unassigned sheets to assign', 'info');
-      return;
-    }
-
-    const eligibleCheckers = availableCheckers.filter((c) => c.canAssign);
-    if (eligibleCheckers.length === 0) {
-      showToast(
-        'No eligible checkers available for random assignment',
-        'error',
-      );
-      return;
-    }
+    if (!selectedExam) return;
 
     setIsAssigning(true);
     try {
       const response = await assignmentService.randomAssignment(selectedExam);
 
       if (response.success) {
+        const eligible = availableCheckers.filter((c) => c.canAssign);
         const logEntry: AssignmentLog = {
           id: Date.now(),
           sheetIds: [],
-          checkerName: `Random (${eligibleCheckers.length} checkers)`,
+          checkerName: `Random (${eligible.length} checkers)`,
           time: new Date().toLocaleTimeString(),
           count: unassignedSheets.length,
         };
 
         setLogs((prev) => [logEntry, ...prev]);
-        showToast(response.message || 'Random assignment completed', 'success');
+        setSuccessMessage(response.message);
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
         await fetchData(selectedExam);
       } else {
-        showToast(response.message || 'Failed to assign randomly', 'error');
+        setSuccessMessage(response.message || 'Failed to assign randomly');
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
       }
     } catch (error) {
       console.error('Random assignment error:', error);
-      showToast('Failed to assign randomly', 'error');
+      setSuccessMessage('Failed to assign randomly');
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
     } finally {
       setIsAssigning(false);
     }
-  };
-
-  // ─── GET SELECTED SHEET DETAILS ────────────────────────────
-
-  const getSelectedSheetDetails = () => {
-    return unassignedSheets
-      .filter((s) => selectedSheets.has(s.id))
-      .map((s) => `${s.roll_no} (${s.student_name})`)
-      .join(', ');
   };
 
   // ─── LOADING ──────────────────────────────────────────────────
@@ -274,29 +241,16 @@ export default function CheckerAssignment() {
         ]}
       />
 
-      {/* ─── TOAST NOTIFICATION ─── */}
-      {toast && (
-        <div
-          className={`fixed top-20 right-6 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 animate-slide-in-right ${
-            toast.type === 'error'
-              ? 'bg-rose-600 text-white'
-              : toast.type === 'info'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-900 text-white'
-          }`}
-        >
+      {showSuccess && (
+        <div className="fixed top-20 right-6 z-50 bg-gray-900 text-white text-sm px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 animate-pulse">
           <span className="w-4 h-4 flex items-center justify-center">
-            {toast.type === 'error' && (
-              <i className="ri-error-warning-line"></i>
-            )}
-            {toast.type === 'info' && <i className="ri-information-line"></i>}
-            {toast.type === 'success' && <i className="ri-check-line"></i>}
+            <i className="ri-check-line"></i>
           </span>
-          {toast.message}
+          {successMessage}
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">
             Checker Assignment
@@ -308,10 +262,7 @@ export default function CheckerAssignment() {
         <button
           onClick={assignRandomly}
           disabled={
-            selectedExam === '' ||
-            unassignedSheets.length === 0 ||
-            isAssigning ||
-            availableCheckers.filter((c) => c.canAssign).length === 0
+            selectedExam === '' || unassignedSheets.length === 0 || isAssigning
           }
           className="flex items-center gap-2 bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
         >
@@ -331,8 +282,7 @@ export default function CheckerAssignment() {
         </button>
       </div>
 
-      {/* ─── EXAM SELECTOR ─── */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+      <div className="bg-white rounded-2xl p-6">
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Select Exam
         </label>
@@ -346,7 +296,7 @@ export default function CheckerAssignment() {
             .filter((e) => e.status === 'active')
             .map((exam) => (
               <option key={exam.id} value={exam.id}>
-                {exam.name} ({exam.subject}) - {exam.semester || 'N/A'}
+                {exam.name} ({exam.subject})
               </option>
             ))}
         </select>
@@ -355,8 +305,8 @@ export default function CheckerAssignment() {
       {selectedExam && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* ─── UNASSIGNED SHEETS ────────────────────────────── */}
-          <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+          <div className="bg-white rounded-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h4 className="text-sm font-semibold text-gray-900">
                 Unassigned Sheets
                 <span className="text-gray-400 font-normal ml-2">
@@ -377,10 +327,10 @@ export default function CheckerAssignment() {
             <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/50 sticky top-0 z-10">
+                  <tr className="border-b border-gray-100 bg-gray-50/50 sticky top-0">
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap w-10"></th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                      ID
+                      Sheet ID
                     </th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                       Roll No
@@ -397,10 +347,7 @@ export default function CheckerAssignment() {
                         colSpan={4}
                         className="py-10 text-center text-gray-400 text-sm"
                       >
-                        <div className="flex flex-col items-center gap-2">
-                          <i className="ri-check-double-line text-2xl text-gray-300"></i>
-                          <span>All sheets have been assigned</span>
-                        </div>
+                        All sheets have been assigned
                       </td>
                     </tr>
                   ) : (
@@ -442,44 +389,22 @@ export default function CheckerAssignment() {
                 </tbody>
               </table>
             </div>
-            {selectedSheets.size > 0 && (
-              <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/30">
-                <p className="text-xs text-gray-500">
-                  Selected:{' '}
-                  <span className="font-medium text-gray-700">
-                    {selectedSheets.size}
-                  </span>{' '}
-                  sheets
-                  {selectedSheets.size <= 3 && (
-                    <span className="ml-2 text-gray-400">
-                      ({getSelectedSheetDetails()})
-                    </span>
-                  )}
-                </p>
-              </div>
-            )}
           </div>
 
           {/* ─── AVAILABLE CHECKERS ───────────────────────────── */}
-          <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
-            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+          <div className="bg-white rounded-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100">
               <h4 className="text-sm font-semibold text-gray-900">
                 Available Checkers
                 <span className="text-gray-400 font-normal ml-2">
                   ({availableCheckers.length})
                 </span>
               </h4>
-              {availableCheckers.length > 0 && (
-                <p className="text-[10px] text-gray-400 mt-0.5">
-                  {availableCheckers.filter((c) => c.canAssign).length} eligible
-                  for assignment
-                </p>
-              )}
             </div>
             <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/50 sticky top-0 z-10">
+                  <tr className="border-b border-gray-100 bg-gray-50/50 sticky top-0">
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                       Name
                     </th>
@@ -495,71 +420,42 @@ export default function CheckerAssignment() {
                   </tr>
                 </thead>
                 <tbody>
-                  {availableCheckers.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className="py-10 text-center text-gray-400 text-sm"
-                      >
-                        <div className="flex flex-col items-center gap-2">
-                          <i className="ri-user-search-line text-2xl text-gray-300"></i>
-                          <span>No checkers available</span>
-                        </div>
+                  {availableCheckers.map((checker) => (
+                    <tr
+                      key={checker.id}
+                      className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
+                    >
+                      <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
+                        {checker.name}
+                      </td>
+                      <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                        {checker.role === 'teacher_checker'
+                          ? 'Teacher + Checker'
+                          : 'Checker'}
+                      </td>
+                      <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
+                        {checker.subject || '—'}
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        {checker.hasConflict ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 bg-rose-50 px-2 py-1 rounded-full whitespace-nowrap">
+                            <span className="w-3 h-3 flex items-center justify-center">
+                              <i className="ri-error-warning-line text-[10px]"></i>
+                            </span>
+                            Conflict — cannot assign
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => assignToChecker(checker)}
+                            disabled={selectedSheets.size === 0 || isAssigning}
+                            className="text-xs font-medium text-gray-900 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+                          >
+                            Assign ({selectedSheets.size})
+                          </button>
+                        )}
                       </td>
                     </tr>
-                  ) : (
-                    availableCheckers.map((checker) => (
-                      <tr
-                        key={checker.id}
-                        className={`border-b border-gray-50 transition-colors ${
-                          checker.hasConflict
-                            ? 'opacity-60'
-                            : 'hover:bg-gray-50/30'
-                        }`}
-                      >
-                        <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
-                          {checker.name}
-                          {checker.currentLoad > 0 && (
-                            <span className="ml-2 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                              {checker.currentLoad} assigned
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
-                          {checker.role === 'teacher_checker'
-                            ? 'Teacher + Checker'
-                            : 'Checker'}
-                        </td>
-                        <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
-                          {checker.subject || '—'}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          {checker.hasConflict ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 bg-rose-50 px-2 py-1 rounded-full whitespace-nowrap">
-                              <span className="w-3 h-3 flex items-center justify-center">
-                                <i className="ri-error-warning-line text-[10px]"></i>
-                              </span>
-                              Conflict
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => assignToChecker(checker)}
-                              disabled={
-                                selectedSheets.size === 0 || isAssigning
-                              }
-                              className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
-                                selectedSheets.size === 0 || isAssigning
-                                  ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
-                                  : 'text-white bg-gray-900 hover:bg-gray-800 cursor-pointer'
-                              }`}
-                            >
-                              Assign ({selectedSheets.size})
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -567,21 +463,17 @@ export default function CheckerAssignment() {
         </div>
       )}
 
-      {/* ─── ASSIGNMENT LOG ─── */}
       {logs.length > 0 && (
-        <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
-          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+        <div className="bg-white rounded-2xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100">
             <h4 className="text-sm font-semibold text-gray-900">
               Assignment Log
-              <span className="text-gray-400 font-normal ml-2">
-                ({logs.length} entries)
-              </span>
             </h4>
           </div>
-          <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-100 bg-gray-50/50 sticky top-0 z-10">
+                <tr className="border-b border-gray-100 bg-gray-50/50">
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Time
                   </th>
@@ -591,38 +483,19 @@ export default function CheckerAssignment() {
                   <th className="text-center py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     Sheets Assigned
                   </th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    Sheet IDs
-                  </th>
                 </tr>
               </thead>
               <tbody>
                 {logs.map((log) => (
-                  <tr
-                    key={log.id}
-                    className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors"
-                  >
+                  <tr key={log.id} className="border-b border-gray-50">
                     <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
                       {log.time}
                     </td>
                     <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">
                       {log.checkerName}
                     </td>
-                    <td className="py-3 px-4 text-center">
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-700 font-semibold text-xs">
-                        {log.count}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-gray-500 text-xs">
-                      {log.sheetIds.length > 0 ? (
-                        <span className="font-mono">
-                          {log.sheetIds.slice(0, 5).join(', ')}
-                          {log.sheetIds.length > 5 &&
-                            ` +${log.sheetIds.length - 5} more`}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
+                    <td className="py-3 px-4 text-center text-gray-700 whitespace-nowrap">
+                      {log.count}
                     </td>
                   </tr>
                 ))}
