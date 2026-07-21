@@ -884,60 +884,181 @@ export const getAvailableRecheckers = async (req, res) => {
 
 // ─── GET CHECKED SHEET BY ID ──────────────────────────────────
 
+// src/recheck-queue/recheckController.js ya workQueueController.js mein
+// src/controllers/workQueueController.js
+
 export const getCheckedSheetById = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
+    const role = req.user.role;
 
-    const result = await pool.query(
-      `SELECT 
-        s.id,
-        s.student_name,
-        s.roll_no,
-        s.barcode,
-        s.marks,
-        s.checking_time_spent,
-        s.archived_folder,
-        s.file_url,
-        s.checked_at,
-        s.status,
-        e.name AS exam_name,
-        e.subject AS exam_subject,
-        e."maxMarks" AS total_marks,
-        u.name AS checker_name,
-        cm.marks_data,
-        cm.annotations_data,
-        cm.stamps_data,
-        cm.remarks,
-        cm.submitted_at
-      FROM sheets s
-      LEFT JOIN exams e ON s.exam_id = e.id
-      LEFT JOIN assignments a ON s.id = a.sheet_id AND a.status = 'completed'
-      LEFT JOIN users u ON a.checker_id = u.id
-      LEFT JOIN checker_markings cm ON s.id = cm.sheet_id AND cm.is_submitted = true
-      WHERE s.id = $1 AND s.is_checked = true
-      ORDER BY a.updated_at DESC
-      LIMIT 1`,
-      [id],
+    const isAdmin = role === 'admin' || role === 'super_admin';
+
+    // ✅ Pehle check karo ki sheet exist karti hai ya nahi
+    const sheetCheck = await pool.query(
+      `SELECT s.id, s.exam_id, s.status, s.marks, s.checking_time_spent, 
+              s.archived_folder, s.file_url, s.checked_at, s.student_name, 
+              s.roll_no, s.barcode
+       FROM sheets s
+       WHERE s.id = $1`,
+      [id]
     );
+
+    if (sheetCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sheet not found',
+      });
+    }
+
+    const sheet = sheetCheck.rows[0];
+
+    // ✅ Agar admin nahi hai toh assignment check karo
+    if (!isAdmin) {
+      const assignmentCheck = await pool.query(
+        `SELECT a.id, a.checker_id, a.status 
+         FROM assignments a
+         WHERE a.sheet_id = $1 
+         AND a.checker_id = $2 
+         AND a.status IN ('assigned', 'completed')
+         LIMIT 1`,
+        [id, userId]
+      );
+
+      if (assignmentCheck.rows.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have access to this sheet',
+        });
+      }
+    }
+
+    // ✅ ADMIN: Simple query without assignments join
+    // ✅ CHECKER: Query with assignments join
+    let fullQuery;
+    let queryParams = [id];
+
+    if (isAdmin) {
+      // ✅ Admin ke liye - assignments join nahi karna
+      fullQuery = `
+        SELECT 
+          s.id,
+          s.student_name,
+          s.roll_no,
+          s.barcode,
+          s.marks,
+          s.checking_time_spent,
+          s.archived_folder,
+          s.file_url,
+          s.checked_at,
+          s.status AS sheet_status,
+          e.name AS exam_name,
+          e.subject AS exam_subject,
+          e."maxMarks" AS total_marks,
+          u.name AS checker_name,
+          cm.marks_data,
+          cm.annotations_data,
+          cm.stamps_data,
+          cm.notes_data,
+          cm.remarks,
+          cm.submitted_at
+        FROM sheets s
+        LEFT JOIN exams e ON s.exam_id = e.id
+        LEFT JOIN users u ON s.checked_by = u.id
+        LEFT JOIN checker_markings cm ON cm.sheet_id = s.id AND cm.is_submitted = true
+        WHERE s.id = $1
+      `;
+    } else {
+      // ✅ Checker ke liye - assignments join ke saath
+      fullQuery = `
+        SELECT 
+          s.id,
+          s.student_name,
+          s.roll_no,
+          s.barcode,
+          s.marks,
+          s.checking_time_spent,
+          s.archived_folder,
+          s.file_url,
+          s.checked_at,
+          s.status AS sheet_status,
+          e.name AS exam_name,
+          e.subject AS exam_subject,
+          e."maxMarks" AS total_marks,
+          u.name AS checker_name,
+          cm.marks_data,
+          cm.annotations_data,
+          cm.stamps_data,
+          cm.notes_data,
+          cm.remarks,
+          cm.submitted_at
+        FROM sheets s
+        LEFT JOIN exams e ON s.exam_id = e.id
+        LEFT JOIN assignments a ON a.sheet_id = s.id AND a.status IN ('assigned', 'completed')
+        LEFT JOIN users u ON a.checker_id = u.id
+        LEFT JOIN checker_markings cm ON cm.sheet_id = s.id AND cm.is_submitted = true
+        WHERE s.id = $1
+      `;
+    }
+
+    const result = await pool.query(fullQuery, queryParams);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Checked sheet not found',
+        message: 'Sheet data not found',
       });
     }
 
-    // ✅ Build full URL for file
-    const baseUrl = process.env.API_URL || 'http://localhost:7000';
-    const fileUrl = result.rows[0].file_url;
-    const fullFileUrl = fileUrl ? `${baseUrl}${fileUrl}` : null;
+    const row = result.rows[0];
+
+    // Parse JSON data
+    let marksData = {};
+    let annotationsData = [];
+    let stampsData = [];
+    let notesData = [];
+
+    try {
+      if (row.marks_data) {
+        marksData = typeof row.marks_data === 'string' ? JSON.parse(row.marks_data) : row.marks_data;
+      }
+      if (row.annotations_data) {
+        annotationsData = typeof row.annotations_data === 'string' ? JSON.parse(row.annotations_data) : row.annotations_data;
+      }
+      if (row.stamps_data) {
+        stampsData = typeof row.stamps_data === 'string' ? JSON.parse(row.stamps_data) : row.stamps_data;
+      }
+      if (row.notes_data) {
+        notesData = typeof row.notes_data === 'string' ? JSON.parse(row.notes_data) : row.notes_data;
+      }
+    } catch (e) {
+      console.error('Parse error:', e);
+    }
 
     return res.status(200).json({
       success: true,
-      message: 'Checked sheet retrieved successfully',
+      message: 'Sheet retrieved successfully',
       data: {
-        ...result.rows[0],
-        file_url: fullFileUrl,
+        id: row.id,
+        student_name: row.student_name || sheet.student_name,
+        roll_no: row.roll_no || sheet.roll_no,
+        barcode: row.barcode || sheet.barcode,
+        marks: row.marks || sheet.marks || '0',
+        checking_time_spent: row.checking_time_spent || sheet.checking_time_spent || 0,
+        archived_folder: row.archived_folder || sheet.archived_folder || '',
+        file_url: row.file_url || sheet.file_url || '',
+        checked_at: row.checked_at || sheet.checked_at || '',
+        exam_name: row.exam_name || 'Unknown',
+        exam_subject: row.exam_subject || '—',
+        total_marks: row.total_marks || 0,
+        checker_name: row.checker_name || '—',
+        marks_data: marksData,
+        annotations_data: annotationsData,
+        stamps_data: stampsData,
+        notes_data: notesData,
+        remarks: row.remarks || '',
+        submitted_at: row.submitted_at || '',
       },
     });
   } catch (error) {

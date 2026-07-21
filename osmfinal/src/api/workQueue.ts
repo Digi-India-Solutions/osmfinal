@@ -42,7 +42,6 @@ export interface Sheet {
   escalated_by_name?: string;
   time_spent?: number;
   checking_time_spent?: number;
-  // recheck_request_id?: number;
   recheck_status?: string;
   is_checked?: boolean;
   checked_at?: string;
@@ -95,9 +94,34 @@ export interface CheckedSheet {
   exam_subject: string;
   total_marks: number;
   checker_name: string;
-  marks_data?: any;
-  annotations_data?: any;
-  stamps_data?: any;
+  marks_data?: Record<string, number>;
+  annotations_data?: Array<{
+    id: number;
+    tool: string;
+    x: number;
+    y: number;
+    page: number;
+    width?: number;
+    height?: number;
+  }>;
+  stamps_data?: Array<{
+    markId: string;
+    placed: boolean;
+    x: number;
+    y: number;
+    page: number;
+    value: number | null;
+  }>;
+  notes_data?: Array<{
+    id: number;
+    page: number;
+    x: number;
+    y: number;
+    text: string;
+    fontSize: number;
+    width: number;
+    height: number;
+  }>;
   remarks?: string;
   submitted_at?: string;
 }
@@ -256,7 +280,7 @@ class WorkQueueService {
 
   // ─── CHECKED SHEETS ROUTES ────────────────────────────────────
 
-  // ✅ Get checked sheet by ID for viewing (with full details)
+  // ✅ Get checked sheet by ID for viewing (with full details including notes)
   async getCheckedSheetById(sheetId: number): Promise<{
     success: boolean;
     message: string;
@@ -266,7 +290,29 @@ class WorkQueueService {
       const response = await api.get(
         `/api/v1/work-queue/checked-sheets/${sheetId}`,
       );
-      return response.data;
+
+      // ✅ Ensure the response data includes notes_data
+      const data = response.data;
+      if (data.success && data.data) {
+        // Make sure notes_data is always an array
+        if (!data.data.notes_data) {
+          data.data.notes_data = [];
+        }
+        // Make sure annotations_data is always an array
+        if (!data.data.annotations_data) {
+          data.data.annotations_data = [];
+        }
+        // Make sure stamps_data is always an array
+        if (!data.data.stamps_data) {
+          data.data.stamps_data = [];
+        }
+        // Make sure marks_data is always an object
+        if (!data.data.marks_data) {
+          data.data.marks_data = {};
+        }
+      }
+
+      return data;
     } catch (error: any) {
       console.error('Get checked sheet error:', error);
       return {

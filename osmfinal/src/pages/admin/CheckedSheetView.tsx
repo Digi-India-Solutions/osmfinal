@@ -70,6 +70,7 @@ export default function CheckedSheetView() {
       setLoading(true);
       setError(null);
       try {
+        // ✅ Use workQueueService for admin access
         const response = await workQueueService.getCheckedSheetById(
           parseInt(sheetId),
         );
@@ -77,24 +78,47 @@ export default function CheckedSheetView() {
 
         if (response.success && response.data) {
           const data = response.data;
-          setSheetData(data);
 
+          setSheetData({
+            id: data.id || 0,
+            student_name: data.student_name || 'Unknown',
+            roll_no: data.roll_no || '—',
+            barcode: data.barcode || '—',
+            marks: data.marks || '0',
+            checking_time_spent: data.checking_time_spent || 0,
+            archived_folder: data.archived_folder || '',
+            file_url: data.file_url || '',
+            checked_at: data.checked_at || '',
+            exam_name: data.exam_name || 'Unknown',
+            exam_subject: data.exam_subject || '—',
+            total_marks: data.total_marks || 0,
+            checker_name: data.checker_name || '—',
+            marks_data: data.marks_data || {},
+            annotations_data: data.annotations_data || [],
+            stamps_data: data.stamps_data || [],
+            notes_data: data.notes_data || [], // ✅ Notes will come from backend
+            remarks: data.remarks || '',
+            submitted_at: data.submitted_at || '',
+          });
+
+          // ─── BUILD PDF URL ───
           let fullUrl: string | null = null;
           if (data.file_url) {
+            const fileUrl = data.file_url;
             if (
-              data.file_url.startsWith('http://') ||
-              data.file_url.startsWith('https://')
+              fileUrl.startsWith('http://') ||
+              fileUrl.startsWith('https://')
             ) {
-              fullUrl = data.file_url;
+              fullUrl = fileUrl;
             } else if (
-              data.file_url.startsWith('/uploads') ||
-              data.file_url.startsWith('/checked-sheets')
+              fileUrl.startsWith('/uploads') ||
+              fileUrl.startsWith('/checked-sheets')
             ) {
-              fullUrl = `${API_URL}${data.file_url}`;
-            } else if (data.file_url.startsWith('checked-sheets')) {
-              fullUrl = `${API_URL}/${data.file_url}`;
+              fullUrl = `${API_URL}${fileUrl}`;
+            } else if (fileUrl.startsWith('checked-sheets')) {
+              fullUrl = `${API_URL}/${fileUrl}`;
             } else {
-              fullUrl = `${API_URL}/uploads/${data.file_url}`;
+              fullUrl = `${API_URL}/uploads/${fileUrl}`;
             }
           }
           setPdfUrl(fullUrl);
@@ -113,7 +137,6 @@ export default function CheckedSheetView() {
   }, [sheetId]);
 
   // ─── GET ALL PAGES ───
-  // ✅ FIX: Sab pages show karo 1 se lekar maxPage tak
   const getAllPages = (): number[] => {
     if (!sheetData) return [1];
 
@@ -131,15 +154,15 @@ export default function CheckedSheetView() {
     const allNotes = sheetData.notes_data || [];
     allNotes.forEach((n) => pages.add(n.page));
 
-    // ✅ Agar koi content nahi hai toh at least page 1 show karo
+    // If no content found, at least show page 1
     if (pages.size === 0) {
       pages.add(1);
     }
 
-    // ✅ Max page nikaalo
+    // Get max page
     const maxPage = Math.max(...Array.from(pages), 1);
 
-    // ✅ Generate all pages from 1 to maxPage
+    // Generate all pages from 1 to maxPage
     const allPages: number[] = [];
     for (let i = 1; i <= maxPage; i++) {
       allPages.push(i);
