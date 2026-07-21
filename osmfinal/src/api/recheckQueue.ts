@@ -28,7 +28,7 @@ export interface RecheckRequest {
   marks_data?: Record<string, number>;
   finalMarksRule?: string;
   completed_at?: string;
-  time_spent?: number; // ✅ ADD THIS
+  time_spent?: number;
   escalate_reason?: string;
   escalate_type?: string;
   escalate_remarks?: string;
@@ -46,7 +46,7 @@ export interface RecheckMarkingData {
     finalMarksRule: 'higher' | 'recheck_marks' | 'average';
     isReadOnly?: boolean;
     created_at: string;
-    time_spent?: number; // ✅ ADD THIS
+    time_spent?: number;
   };
   sheet: {
     id: number;
@@ -81,7 +81,7 @@ export interface SaveDraftData {
   stampsData: any[];
   totalMarks: number;
   remarks?: string;
-  timeSpent?: number; // ✅ ADD THIS
+  timeSpent?: number;
 }
 
 export interface CompleteRecheckData {
@@ -91,14 +91,14 @@ export interface CompleteRecheckData {
   annotationsData?: any[];
   stampsData?: any[];
   finalMarksRule?: string;
-  timeSpent?: number; // ✅ ADD THIS
+  timeSpent?: number;
 }
 
 export interface EscalateRecheckData {
   reason: string;
   escalateType: string;
   remarks?: string;
-  timeSpent?: number; // ✅ ADD THIS
+  timeSpent?: number;
 }
 
 class RecheckQueueService {
@@ -119,14 +119,8 @@ class RecheckQueueService {
       };
     }
   }
-  // src/api/recheckQueue.ts
 
-  // ─── GET RECHECKED SHEET FOR VIEWING ───────────────────────────
-
-  // src/api/recheckQueue.ts
-
-  // ─── GET RECHECKED SHEET FOR ADMIN VIEW ─────────────────────────
-
+  // Get rechecked sheet for admin view
   async getRecheckedSheetForAdmin(requestId: number): Promise<any> {
     try {
       const response = await api.get(
@@ -146,7 +140,8 @@ class RecheckQueueService {
   // Get recheck request by ID
   async getRequestById(id: number): Promise<any> {
     try {
-      const response = await api.get(`/api/v1/recheck-queue/requests/${id}`);
+      // ✅ FIX: Use correct route
+      const response = await api.get(`/api/v1/recheck-queue/my-requests/${id}`);
       return response.data;
     } catch (error: any) {
       console.error('Get recheck request error:', error);
@@ -161,8 +156,9 @@ class RecheckQueueService {
   // Start recheck marking (get all data)
   async startMarking(id: number): Promise<any> {
     try {
+      // ✅ FIX: Use correct route - /my-requests/:id/mark
       const response = await api.get(
-        `/api/v1/recheck-queue/requests/${id}/marking`,
+        `/api/v1/recheck-queue/my-requests/${id}/mark`,
       );
       return response.data;
     } catch (error: any) {
@@ -178,11 +174,12 @@ class RecheckQueueService {
   // Save recheck marks (draft)
   async saveMarks(
     id: number,
-    data: { marks: number; remarks?: string; timeSpent?: number }, // ✅ ADD timeSpent
+    data: { marks: number; remarks?: string; timeSpent?: number },
   ): Promise<any> {
     try {
+      // ✅ FIX: Use correct route
       const response = await api.post(
-        `/api/v1/recheck-queue/requests/${id}/marks`,
+        `/api/v1/recheck-queue/my-requests/${id}/marks`,
         data,
       );
       return response.data;
@@ -196,13 +193,11 @@ class RecheckQueueService {
   }
 
   // Save recheck draft
-  async saveDraft(
-    id: number,
-    data: SaveDraftData, // ✅ Using interface with timeSpent
-  ): Promise<any> {
+  async saveDraft(id: number, data: SaveDraftData): Promise<any> {
     try {
+      // ✅ FIX: Use correct route
       const response = await api.post(
-        `/api/v1/recheck-queue/requests/${id}/draft`,
+        `/api/v1/recheck-queue/my-requests/${id}/save-draft`,
         data,
       );
       return response.data;
@@ -218,8 +213,9 @@ class RecheckQueueService {
   // Get recheck draft
   async getDraft(id: number): Promise<any> {
     try {
+      // ✅ FIX: Use correct route
       const response = await api.get(
-        `/api/v1/recheck-queue/requests/${id}/draft`,
+        `/api/v1/recheck-queue/my-requests/${id}/draft`,
       );
       return response.data;
     } catch (error: any) {
@@ -233,13 +229,11 @@ class RecheckQueueService {
   }
 
   // Complete recheck
-  async completeRecheck(
-    id: number,
-    data: CompleteRecheckData, // ✅ Using interface with timeSpent
-  ): Promise<any> {
+  async completeRecheck(id: number, data: CompleteRecheckData): Promise<any> {
     try {
+      // ✅ FIX: Use correct route
       const response = await api.post(
-        `/api/v1/recheck-queue/requests/${id}/complete`,
+        `/api/v1/recheck-queue/my-requests/${id}/complete`,
         data,
       );
       return response.data;
@@ -257,15 +251,16 @@ class RecheckQueueService {
     id: number,
     status: string,
     remarks?: string,
-    timeSpent?: number, // ✅ ADD timeSpent
+    timeSpent?: number,
   ): Promise<any> {
     try {
+      // ✅ FIX: Use correct route
       const response = await api.patch(
-        `/api/v1/recheck-queue/requests/${id}/status`,
+        `/api/v1/recheck-queue/my-requests/${id}/status`,
         {
           status,
           remarks,
-          timeSpent, // ✅ Send timeSpent
+          timeSpent,
         },
       );
       return response.data;
@@ -282,11 +277,12 @@ class RecheckQueueService {
   // Escalate recheck request
   async escalateRecheckRequest(
     id: number,
-    data: EscalateRecheckData, // ✅ Using interface with timeSpent
+    data: EscalateRecheckData,
   ): Promise<any> {
     try {
+      // ✅ FIX: Use correct route
       const response = await api.patch(
-        `/api/v1/recheck-queue/requests/${id}/escalate`,
+        `/api/v1/recheck-queue/my-requests/${id}/escalate`,
         data,
       );
       return response.data;

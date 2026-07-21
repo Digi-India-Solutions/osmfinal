@@ -1,6 +1,23 @@
 // src/recheck-queue/recheckController.js
 
 import pool from '../pool.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const PROJECT_ROOT = path.join(__dirname, '..', '..');
+const UPLOADS_DIR = path.join(PROJECT_ROOT, 'uploads');
+
+// ─── HELPER ──────────────────────────────────────────────────────
+const sanitizeForFolderName = (value) => {
+  if (!value) return null;
+  return String(value)
+    .trim()
+    .replace(/[^a-zA-Z0-9-_]/g, '_');
+};
 
 // ─── GET MY RECHECK REQUESTS ──────────────────────────────────
 
@@ -41,7 +58,7 @@ export const getMyRecheckRequests = async (req, res) => {
         rr.escalate_remarks,
         rr.escalated_by,
         rr.escalated_at,
-        rr.time_spent,  -- ✅ ADD THIS
+        rr.time_spent,
         s.student_name,
         s.roll_no,
         s.barcode,
@@ -73,7 +90,6 @@ export const getMyRecheckRequests = async (req, res) => {
       params,
     );
 
-    // Get counts
     const countResult = await pool.query(
       `SELECT 
         COUNT(*) FILTER (WHERE status = 'pending') AS pending_count,
@@ -129,7 +145,7 @@ export const getRecheckRequestById = async (req, res) => {
         rr.remarks,
         rr.created_at,
         rr.updated_at,
-        rr.time_spent,  -- ✅ ADD THIS
+        rr.time_spent,
         s.student_name,
         s.roll_no,
         s.barcode,
@@ -198,7 +214,8 @@ export const updateRecheckRequestStatus = async (req, res) => {
 
     const checkResult = await pool.query(
       `SELECT id, sheet_id FROM recheck_requests 
-       WHERE id = $1 AND assign_to = $2`,
+       WHERE id = $1 AND assign_to = $2 
+       AND status IN ('pending', 'assigned')`,
       [id, userId],
     );
 
@@ -211,10 +228,7 @@ export const updateRecheckRequestStatus = async (req, res) => {
 
     const sheetId = checkResult.rows[0].sheet_id;
 
-    let query = `
-      UPDATE recheck_requests 
-      SET status = $1, updated_at = NOW()
-    `;
+    let query = `UPDATE recheck_requests SET status = $1, updated_at = NOW()`;
     const values = [status];
     let paramCount = 2;
 
@@ -272,30 +286,55 @@ export const updateRecheckRequestStatus = async (req, res) => {
 
 // ─── START RECHECK MARKING ──────────────────────────────────────
 
-// src/recheck-queue/recheckController.js
-
 export const startRecheckMarking = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
+    const userId = req.user?.id;
 
-    const accessCheck = await pool.query(
-      `SELECT id, status FROM recheck_requests 
-       WHERE id = $1 AND assign_to = $2`,
-      [id, userId],
-    );
-
-    if (accessCheck.rows.length === 0) {
-      return res.status(404).json({
+    if (!userId) {
+      return res.status(401).json({
         success: false,
-        message: 'Recheck request not found or not assigned to you',
+        message: 'Unauthorized - User not found',
       });
     }
 
-    const requestStatus = accessCheck.rows[0].status;
-    const isCompleted = requestStatus === 'completed' || requestStatus === 'rejected';
+    // Check if request exists
+    const checkExists = await pool.query(
+      `SELECT id, status, assign_to, sheet_id FROM recheck_requests WHERE id = $1`,
+      [id],
+    );
 
-    let query = `
+    if (checkExists.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recheck request not found',
+      });
+    }
+
+    const reqData = checkExists.rows[0];
+
+    // If assign_to is null, assign to current user
+    if (!reqData.assign_to) {
+      await pool.query(
+        `UPDATE recheck_requests SET assign_to = $1, updated_at = NOW() WHERE id = $2`,
+        [userId, id],
+      );
+    }
+
+    // ✅ If status is 'pending', change to 'assigned'
+    if (reqData.status === 'pending') {
+      await pool.query(
+        `UPDATE recheck_requests SET status = 'assigned', updated_at = NOW() WHERE id = $1`,
+        [id],
+      );
+    }
+
+    // ✅ Check if request is completed or rejected (readonly)
+    const isReadOnly =
+      reqData.status === 'completed' || reqData.status === 'rejected';
+
+    // Get full data with mark scheme
+    const query = `
       SELECT 
         rr.id,
         rr.sheet_id,
@@ -356,11 +395,11 @@ export const startRecheckMarking = async (req, res) => {
 
     const request = rows[0];
 
-    // ✅ FIX: Get ORIGINAL checker markings (jab sheet check hui thi)
+    // Get ORIGINAL checker markings
     let originalMarks = {};
     let originalAnnotations = [];
     let originalStamps = [];
-    
+
     if (request.sheet_id) {
       const originalMarksResult = await pool.query(
         `SELECT marks_data, annotations_data, stamps_data, total_marks 
@@ -372,7 +411,8 @@ export const startRecheckMarking = async (req, res) => {
 
       if (originalMarksResult.rows.length > 0) {
         originalMarks = originalMarksResult.rows[0].marks_data || {};
-        originalAnnotations = originalMarksResult.rows[0].annotations_data || [];
+        originalAnnotations =
+          originalMarksResult.rows[0].annotations_data || [];
         originalStamps = originalMarksResult.rows[0].stamps_data || [];
       }
     }
@@ -382,27 +422,26 @@ export const startRecheckMarking = async (req, res) => {
     let recheckAnnotations = [];
     let recheckStamps = [];
 
-    if (isCompleted) {
-      const recheckResult = await pool.query(
-        `SELECT marks_data, annotations_data, stamps_data, total_marks 
-         FROM recheck_markings 
-         WHERE recheck_request_id = $1 AND is_submitted = true
-         ORDER BY submitted_at DESC LIMIT 1`,
-        [id],
-      );
+    const recheckResult = await pool.query(
+      `SELECT marks_data, annotations_data, stamps_data, total_marks 
+       FROM recheck_markings 
+       WHERE recheck_request_id = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [id],
+    );
 
-      if (recheckResult.rows.length > 0) {
-        recheckMarks = recheckResult.rows[0].marks_data || {};
-        recheckAnnotations = recheckResult.rows[0].annotations_data || [];
-        recheckStamps = recheckResult.rows[0].stamps_data || [];
-      }
+    if (recheckResult.rows.length > 0) {
+      recheckMarks = recheckResult.rows[0].marks_data || {};
+      recheckAnnotations = recheckResult.rows[0].annotations_data || [];
+      recheckStamps = recheckResult.rows[0].stamps_data || [];
     }
 
     // Build full file URL
     const baseUrl = process.env.API_URL || 'http://localhost:7000';
     const buildFullUrl = (path) => {
       if (!path) return null;
-      if (path.startsWith('http://') || path.startsWith('https://')) return path;
+      if (path.startsWith('http://') || path.startsWith('https://'))
+        return path;
       if (path.startsWith('/uploads')) return `${baseUrl}${path}`;
       return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
     };
@@ -411,7 +450,7 @@ export const startRecheckMarking = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: isCompleted ? 'Recheck data retrieved successfully (readonly)' : 'Recheck marking data retrieved successfully',
+      message: 'Recheck marking data retrieved successfully',
       data: {
         request: {
           id: request.id,
@@ -421,7 +460,7 @@ export const startRecheckMarking = async (req, res) => {
           status: request.status,
           finalMarksRule: finalMarksRule,
           created_at: request.created_at,
-          isReadOnly: isCompleted,
+          isReadOnly: isReadOnly,
           time_spent: request.time_spent || 0,
         },
         sheet: {
@@ -441,13 +480,10 @@ export const startRecheckMarking = async (req, res) => {
           spentTime: request.exam_spent_time || 0,
         },
         markScheme: markScheme,
-        // ✅ FIX: Original markings ko bhi bhejo
         originalMarks: originalMarks,
         originalAnnotations: originalAnnotations,
         originalStamps: originalStamps,
-        // Previous marks (yeh original marks hi hain)
         previousMarks: originalMarks,
-        // Recheck marks (agar koi save kiya ho toh)
         recheckMarks: recheckMarks,
         recheckAnnotations: recheckAnnotations,
         recheckStamps: recheckStamps,
@@ -484,7 +520,8 @@ export const saveRecheckMarks = async (req, res) => {
 
     const checkResult = await pool.query(
       `SELECT sheet_id FROM recheck_requests 
-       WHERE id = $1 AND assign_to = $2 AND status = 'pending'`,
+       WHERE id = $1 AND assign_to = $2 
+       AND status IN ('assigned')`, // ✅ Sirf 'assigned' allow karo
       [id, userId],
     );
 
@@ -526,12 +563,6 @@ export const saveRecheckMarks = async (req, res) => {
 
 // ─── COMPLETE RECHECK ───────────────────────────────────────────
 
-// src/recheck-queue/recheckController.js
-
-// src/recheck-queue/recheckController.js
-
-// ─── COMPLETE RECHECK ───────────────────────────────────────────
-
 export const completeRecheck = async (req, res) => {
   try {
     const { id } = req.params;
@@ -546,9 +577,11 @@ export const completeRecheck = async (req, res) => {
     } = req.body;
     const userId = req.user.id;
 
+    // ✅ FIX: Sirf 'assigned' status allow karo (pending nahi)
     const checkResult = await pool.query(
-      `SELECT sheet_id, exam_id FROM recheck_requests 
-       WHERE id = $1 AND assign_to = $2 AND status = 'pending'`,
+      `SELECT sheet_id, exam_id, status FROM recheck_requests 
+       WHERE id = $1 AND assign_to = $2 
+       AND status = 'assigned'`, // ✅ Sirf 'assigned'
       [id, userId],
     );
 
@@ -560,13 +593,31 @@ export const completeRecheck = async (req, res) => {
       });
     }
 
+    // ✅ Agar already completed hai toh prevent karo
+    if (checkResult.rows[0].status === 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'This recheck has already been completed',
+      });
+    }
+
     const { sheet_id: sheetId, exam_id: examId } = checkResult.rows[0];
+
+    // Get sheet data for file moving
+    const sheetDataResult = await pool.query(
+      `SELECT s.file_url, s.file_name, s.student_name, s.roll_no, s.barcode
+       FROM sheets s
+       WHERE s.id = $1`,
+      [sheetId],
+    );
+
+    const sheetData = sheetDataResult.rows[0] || {};
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // ✅ Update marks in sheets
+      // Update marks in sheets
       if (marks !== undefined && marks !== null) {
         await client.query(
           `UPDATE sheets SET marks = $1, updated_at = NOW() WHERE id = $2`,
@@ -574,7 +625,7 @@ export const completeRecheck = async (req, res) => {
         );
       }
 
-      // ✅ Update sheets status with rechecker's time
+      // Update sheets status with rechecker's time
       await client.query(
         `UPDATE sheets 
          SET status = 'rechecked', 
@@ -584,7 +635,7 @@ export const completeRecheck = async (req, res) => {
         [timeSpent || 0, sheetId],
       );
 
-      // ✅ Update recheck request with time_spent
+      // ✅ Update recheck request status to 'completed'
       let updateQuery = `
         UPDATE recheck_requests 
         SET status = 'completed', 
@@ -653,8 +704,68 @@ export const completeRecheck = async (req, res) => {
         );
       }
 
-      // ✅ Get sheet data for response
-      const sheetData = await client.query(
+      // CHECKED SHEETS FOLDER MEIN FILE SAVE KARO
+      let fileMoved = false;
+      let newFilePath = null;
+      let checkedFolder = null;
+
+      try {
+        const fileNameBase =
+          sanitizeForFolderName(sheetData.barcode) || `sheet-${sheetId}`;
+        const fileExtension = sheetData.file_name
+          ? path.extname(sheetData.file_name)
+          : '.pdf';
+        const fileName = `${fileNameBase}${fileExtension}`;
+
+        checkedFolder = `checked-sheets`;
+
+        let sourcePath = null;
+        const possiblePaths = [
+          path.join(UPLOADS_DIR, 'sheets', sheetData.file_name || fileName),
+          path.join(UPLOADS_DIR, sheetData.file_name || fileName),
+          path.join(
+            UPLOADS_DIR,
+            'uploads',
+            'sheets',
+            sheetData.file_name || fileName,
+          ),
+          path.join(UPLOADS_DIR, 'checked-sheets', fileName),
+        ];
+
+        for (const p of possiblePaths) {
+          if (fs.existsSync(p)) {
+            sourcePath = p;
+            break;
+          }
+        }
+
+        if (sourcePath) {
+          const destPath = path.join(UPLOADS_DIR, checkedFolder, fileName);
+          const dir = path.dirname(destPath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          fs.copyFileSync(sourcePath, destPath);
+          fileMoved = true;
+          newFilePath = `/${checkedFolder}/${fileName}`;
+        }
+      } catch (err) {
+        console.error(`❌ File copy error:`, err.message);
+      }
+
+      // Update sheet file_url if moved
+      const finalFileUrl = fileMoved ? newFilePath : sheetData.file_url;
+
+      await client.query(
+        `UPDATE sheets 
+         SET file_url = COALESCE($1, file_url),
+             archived_folder = COALESCE($2, archived_folder)
+         WHERE id = $3`,
+        [finalFileUrl, checkedFolder, sheetId],
+      );
+
+      // Get sheet data for response
+      const sheetInfo = await client.query(
         `SELECT 
           s.id,
           s.student_name,
@@ -674,15 +785,13 @@ export const completeRecheck = async (req, res) => {
         [sheetId],
       );
 
-      // ✅ Get checker info
+      // Get checker info
       const checkerInfo = await client.query(
-        `SELECT u.name, u.email 
-         FROM users u
-         WHERE u.id = $1`,
+        `SELECT u.name, u.email FROM users u WHERE u.id = $1`,
         [userId],
       );
 
-      // ✅ Get original checker markings for comparison
+      // Get original checker markings
       const originalMarkings = await client.query(
         `SELECT marks_data, total_marks 
          FROM checker_markings 
@@ -691,7 +800,6 @@ export const completeRecheck = async (req, res) => {
         [sheetId],
       );
 
-      // ✅ Calculate original total
       let originalTotal = 0;
       if (originalMarkings.rows.length > 0) {
         const origData = originalMarkings.rows[0].marks_data || {};
@@ -700,12 +808,10 @@ export const completeRecheck = async (req, res) => {
 
       await client.query('COMMIT');
 
-      // ✅ Build response with all details
-      const responseData = {
+      return res.status(200).json({
         success: true,
         message: 'Recheck completed successfully',
         data: {
-          // Recheck request details
           recheck: {
             id: recheckResult.rows[0].id,
             sheet_id: recheckResult.rows[0].sheet_id,
@@ -717,22 +823,14 @@ export const completeRecheck = async (req, res) => {
             resolved_at: recheckResult.rows[0].resolved_at,
             final_marks_rule: recheckResult.rows[0].final_marks_rule,
           },
-          
-          // Sheet details
-          sheet: sheetData.rows[0] || null,
-          
-          // Checker who completed recheck
+          sheet: sheetInfo.rows[0] || null,
           completed_by: checkerInfo.rows[0] || null,
-          
-          // Marks comparison
           marks_comparison: {
             original_total: originalTotal,
             recheck_total: marks || 0,
             final_marks: marks || 0,
             final_marks_rule: finalMarksRule || 'higher',
           },
-          
-          // Recheck markings saved
           recheck_markings: {
             id: markingResult.rows[0].id,
             marks_data: markingResult.rows[0].marks_data || {},
@@ -741,35 +839,22 @@ export const completeRecheck = async (req, res) => {
             total_marks: markingResult.rows[0].total_marks,
             submitted_at: markingResult.rows[0].submitted_at,
           },
-          
-          // File info
           file: {
-            file_url: sheetData.rows[0]?.file_url || null,
-            archived_folder: sheetData.rows[0]?.archived_folder || null,
+            file_url: finalFileUrl,
+            archived_folder: checkedFolder,
+            file_moved: fileMoved,
+            new_file_path: newFilePath,
           },
-          
-          // Summary
           summary: {
-            student: sheetData.rows[0]?.student_name || 'Unknown',
-            roll_no: sheetData.rows[0]?.roll_no || '—',
-            exam: sheetData.rows[0]?.exam_name || 'Unknown',
-            subject: sheetData.rows[0]?.exam_subject || '—',
+            student: sheetInfo.rows[0]?.student_name || 'Unknown',
+            roll_no: sheetInfo.rows[0]?.roll_no || '—',
+            exam: sheetInfo.rows[0]?.exam_name || 'Unknown',
+            subject: sheetInfo.rows[0]?.exam_subject || '—',
             status: 'rechecked',
-            total_marks: sheetData.rows[0]?.total_marks || 0,
+            total_marks: sheetInfo.rows[0]?.total_marks || 0,
           },
         },
-      };
-
-      console.log('✅ Recheck completed successfully:', {
-        recheckId: id,
-        sheetId: sheetId,
-        student: sheetData.rows[0]?.student_name,
-        timeSpent: timeSpent,
-        finalMarks: marks,
       });
-
-      return res.status(200).json(responseData);
-
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -788,8 +873,6 @@ export const completeRecheck = async (req, res) => {
 
 // ─── SAVE RECHECK DRAFT ─────────────────────────────────────────
 
-// src/recheck-queue/recheckController.js
-
 export const saveRecheckDraft = async (req, res) => {
   try {
     const { id } = req.params;
@@ -803,9 +886,11 @@ export const saveRecheckDraft = async (req, res) => {
       timeSpent,
     } = req.body;
 
+    // ✅ FIX: Sirf 'assigned' status allow karo
     const checkResult = await pool.query(
       `SELECT sheet_id, exam_id FROM recheck_requests 
-       WHERE id = $1 AND assign_to = $2 AND status = 'pending'`,
+       WHERE id = $1 AND assign_to = $2 
+       AND status = 'assigned'`, // ✅ Sirf 'assigned'
       [id, userId],
     );
 
@@ -843,7 +928,6 @@ export const saveRecheckDraft = async (req, res) => {
         ],
       );
 
-      // ✅ Update recheck_requests with time_spent
       if (timeSpent !== undefined) {
         await pool.query(
           `UPDATE recheck_requests 
@@ -853,7 +937,6 @@ export const saveRecheckDraft = async (req, res) => {
         );
       }
 
-      // ✅ Update sheets with time_spent during draft save
       if (timeSpent !== undefined && sheetId) {
         await pool.query(
           `UPDATE sheets 
@@ -882,7 +965,6 @@ export const saveRecheckDraft = async (req, res) => {
         ],
       );
 
-      // ✅ Insert time_spent in recheck_requests
       if (timeSpent !== undefined) {
         await pool.query(
           `UPDATE recheck_requests 
@@ -892,7 +974,6 @@ export const saveRecheckDraft = async (req, res) => {
         );
       }
 
-      // ✅ Update sheets with time_spent during draft save
       if (timeSpent !== undefined && sheetId) {
         await pool.query(
           `UPDATE sheets 
@@ -917,6 +998,7 @@ export const saveRecheckDraft = async (req, res) => {
     });
   }
 };
+
 // ─── GET RECHECK DRAFT ───────────────────────────────────────────
 
 export const getRecheckDraft = async (req, res) => {
@@ -927,7 +1009,7 @@ export const getRecheckDraft = async (req, res) => {
     const result = await pool.query(
       `SELECT 
         rm.*,
-        rr.time_spent  -- ✅ ADD THIS
+        rr.time_spent
        FROM recheck_markings rm
        JOIN recheck_requests rr ON rm.recheck_request_id = rr.id
        WHERE rm.recheck_request_id = $1 AND rm.checker_id = $2`,
@@ -955,7 +1037,7 @@ export const getRecheckDraft = async (req, res) => {
         remarks: row.remarks,
         is_draft: row.is_draft,
         is_submitted: row.is_submitted,
-        time_spent: row.time_spent || 0, // ✅ ADD THIS
+        time_spent: row.time_spent || 0,
       },
     });
   } catch (error) {
@@ -969,8 +1051,6 @@ export const getRecheckDraft = async (req, res) => {
 };
 
 // ─── ESCALATE RECHECK REQUEST ──────────────────────────────────────
-
-// src/recheck-queue/recheckController.js
 
 export const escalateRecheckRequest = async (req, res) => {
   try {
@@ -988,7 +1068,8 @@ export const escalateRecheckRequest = async (req, res) => {
     const checkResult = await pool.query(
       `SELECT rr.id, rr.sheet_id, rr.status
        FROM recheck_requests rr
-       WHERE rr.id = $1 AND rr.assign_to = $2`,
+       WHERE rr.id = $1 AND rr.assign_to = $2 
+       AND rr.status IN ('assigned')`, // ✅ Sirf 'assigned'
       [id, userId],
     );
 
@@ -1001,7 +1082,6 @@ export const escalateRecheckRequest = async (req, res) => {
 
     const sheetId = checkResult.rows[0].sheet_id;
 
-    // ✅ Update recheck request status to 'escalated' with time_spent
     await pool.query(
       `UPDATE recheck_requests 
        SET status = 'escalated',
@@ -1023,7 +1103,6 @@ export const escalateRecheckRequest = async (req, res) => {
       ],
     );
 
-    // ✅ Update sheet status to 'escalated' with time_spent
     if (sheetId) {
       await pool.query(
         `UPDATE sheets 
@@ -1064,19 +1143,12 @@ export const escalateRecheckRequest = async (req, res) => {
   }
 };
 
-
-
-// src/recheck-queue/recheckController.js
-
-// ─── GET RECHECKED SHEET BY ID (FOR ADMIN VIEW) ──────────────
-
-// src/recheck-queue/recheckController.js
+// ─── GET RECHECKED SHEET BY ID ──────────────────────────────────
 
 export const getRecheckedSheetById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // ✅ FIX: Pehle recheck_requests.id se try karo
     let result = await pool.query(
       `SELECT 
         rr.id,
@@ -1124,8 +1196,6 @@ export const getRecheckedSheetById = async (req, res) => {
       [id],
     );
 
-    // ✅ FIX: Agar recheck_requests.id se nahi mila, to sheet_id treat karke
-    // us sheet ka SABSE RECENT COMPLETED recheck request dhundo
     if (result.rows.length === 0) {
       result = await pool.query(
         `SELECT 
@@ -1186,8 +1256,6 @@ export const getRecheckedSheetById = async (req, res) => {
 
     const request = result.rows[0];
 
-    // ─── baaki poora function bilkul same rakho, kuch nahi badalna ───
-
     let originalMarks = {};
     let originalAnnotations = [];
     let originalStamps = [];
@@ -1203,7 +1271,8 @@ export const getRecheckedSheetById = async (req, res) => {
 
       if (originalMarksResult.rows.length > 0) {
         originalMarks = originalMarksResult.rows[0].marks_data || {};
-        originalAnnotations = originalMarksResult.rows[0].annotations_data || [];
+        originalAnnotations =
+          originalMarksResult.rows[0].annotations_data || [];
         originalStamps = originalMarksResult.rows[0].stamps_data || [];
       }
     }
@@ -1211,7 +1280,8 @@ export const getRecheckedSheetById = async (req, res) => {
     const baseUrl = process.env.API_URL || 'http://localhost:7000';
     const buildFullUrl = (path) => {
       if (!path) return null;
-      if (path.startsWith('http://') || path.startsWith('https://')) return path;
+      if (path.startsWith('http://') || path.startsWith('https://'))
+        return path;
       if (path.startsWith('/uploads')) return `${baseUrl}${path}`;
       return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
     };
@@ -1258,6 +1328,7 @@ export const getRecheckedSheetById = async (req, res) => {
           resolved_by_name: request.resolved_by_name,
           requested_by_name: request.requested_by_name,
           remarks: request.remarks,
+          assign_to: request.assign_to,
         },
         sheet: {
           id: request.sheet_id,
@@ -1293,7 +1364,10 @@ export const getRecheckedSheetById = async (req, res) => {
           exam: request.exam_name,
           subject: request.exam_subject,
           status: request.status,
-          original_total: Object.values(originalMarks).reduce((a, b) => a + b, 0),
+          original_total: Object.values(originalMarks).reduce(
+            (a, b) => a + b,
+            0,
+          ),
           recheck_total: request.recheck_total_marks || 0,
           final_marks: request.current_marks,
         },
