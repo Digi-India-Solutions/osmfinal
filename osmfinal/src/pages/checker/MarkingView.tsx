@@ -160,7 +160,7 @@ export default function MarkingView() {
   // ─── NOTES STATE ──────────────────────────────────────────────
   const [notes, setNotes] = useState<SheetNote[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
-const noteIdCounterRef = useRef(1);
+  const noteIdCounterRef = useRef(1);
 
   // ─── BUILD MARKS FROM MARK SCHEME ───────────────────────────
   const initialMarks = useMemo(
@@ -544,6 +544,7 @@ const noteIdCounterRef = useRef(1);
   }, [handleSaveDraft]);
 
   // ─── SUBMIT MARKS TO API ─────────────────────────────────────
+  // ─── SUBMIT MARKS TO API ─────────────────────────────────────
   const handleSubmitMarks = useCallback(
     async (type: 'continue' | 'exit') => {
       if (!sheetIdNum || isReadOnly) return;
@@ -572,12 +573,25 @@ const noteIdCounterRef = useRef(1);
         height: a.height,
       }));
 
+      // ✅ NOTES DATA
+      const notesData = notes.map((n) => ({
+        id: n.id,
+        page: n.page,
+        x: n.x,
+        y: n.y,
+        text: n.text,
+        fontSize: n.fontSize,
+        width: n.width,
+        height: n.height,
+      }));
+
       const timeSpent = timerSecondsRef.current;
 
       const payload = {
         marksData,
         annotationsData,
         stampsData,
+        notesData, // ✅ ADD THIS
         totalMarks: totalAwarded,
         remarks: '',
         timeSpent,
@@ -611,6 +625,7 @@ const noteIdCounterRef = useRef(1);
       marks,
       stamps,
       annotations,
+      notes,
       totalAwarded,
       navigate,
     ],
@@ -642,6 +657,8 @@ const noteIdCounterRef = useRef(1);
     };
   }, [isReadOnly, sheetData]);
 
+  // ─── LOAD SERVER DRAFT / SUBMITTED MARKS ─────────────────────
+  // ─── LOAD SERVER DRAFT / SUBMITTED MARKS ─────────────────────
   // ─── LOAD SERVER DRAFT / SUBMITTED MARKS ─────────────────────
   useEffect(() => {
     const loadServerData = async () => {
@@ -686,6 +703,27 @@ const noteIdCounterRef = useRef(1);
               0,
             );
             annotationIdCounter = maxId + 1;
+          }
+
+          // ✅ RESTORE NOTES FROM SERVER
+          if (data.notes_data && data.notes_data.length > 0) {
+            const restoredNotes = data.notes_data.map((n: any) => ({
+              id: n.id || noteIdCounterRef.current++,
+              page: n.page,
+              x: n.x,
+              y: n.y,
+              text: n.text || '',
+              fontSize: n.fontSize || 12,
+              width: n.width || 200,
+              height: n.height || 100,
+            }));
+            setNotes(restoredNotes);
+
+            const maxId = Math.max(
+              ...restoredNotes.map((n: SheetNote) => n.id),
+              0,
+            );
+            noteIdCounterRef.current = maxId + 1;
           }
         }
       } catch (error) {
@@ -939,43 +977,43 @@ const noteIdCounterRef = useRef(1);
     [scrollToPage],
   );
 
- const handleNoteAdd = useCallback((page: number, x: number, y: number) => {
-   noteIdCounterRef.current += 1;
-   const newNote: SheetNote = {
-     id: noteIdCounterRef.current,
-     page,
-     x,
-     y,
-     text: '',
-     fontSize: 12,
-     width: 200,
-     height: 100,
-   };
-   setNotes((prev) => [...prev, newNote]);
-   setEditingNoteId(newNote.id);
- }, []);
+  const handleNoteAdd = useCallback((page: number, x: number, y: number) => {
+    noteIdCounterRef.current += 1;
+    const newNote: SheetNote = {
+      id: noteIdCounterRef.current,
+      page,
+      x,
+      y,
+      text: '',
+      fontSize: 12,
+      width: 200,
+      height: 100,
+    };
+    setNotes((prev) => [...prev, newNote]);
+    setEditingNoteId(newNote.id);
+  }, []);
 
-const handleNoteUpdate = useCallback(
-  (id: number, updates: Partial<SheetNote>) => {
-    setNotes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, ...updates } : n)),
-    );
-  },
-  [],
-);
- const handleNoteDelete = useCallback(
-   (id: number) => {
-     setNotes((prev) => {
-       const updated = prev.filter((n) => n.id !== id);
-       // If we're editing the deleted note, clear editing state
-       if (editingNoteId === id) {
-         setEditingNoteId(null);
-       }
-       return updated;
-     });
-   },
-   [editingNoteId],
- );
+  const handleNoteUpdate = useCallback(
+    (id: number, updates: Partial<SheetNote>) => {
+      setNotes((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, ...updates } : n)),
+      );
+    },
+    [],
+  );
+  const handleNoteDelete = useCallback(
+    (id: number) => {
+      setNotes((prev) => {
+        const updated = prev.filter((n) => n.id !== id);
+        // If we're editing the deleted note, clear editing state
+        if (editingNoteId === id) {
+          setEditingNoteId(null);
+        }
+        return updated;
+      });
+    },
+    [editingNoteId],
+  );
 
   // ─── Keyboard handler ───
   useEffect(() => {
@@ -1222,16 +1260,16 @@ const handleNoteUpdate = useCallback(
     [],
   );
 
-const handleClearStampValue = useCallback((markId: string) => {
-  setStamps((prev) =>
-    prev.map((s) => (s.markId === markId ? { ...s, value: null } : s)),
-  );
-  setMarks((prev) =>
-    prev.map((m) => (m.id === markId ? { ...m, awarded: 0 } : m)),
-  );
-  // ✅ Don't delete from manuallySetMarksRef - keep it as "touched"
-  // manuallySetMarksRef.current.delete(markId); // ❌ Remove this line
-}, []);
+  const handleClearStampValue = useCallback((markId: string) => {
+    setStamps((prev) =>
+      prev.map((s) => (s.markId === markId ? { ...s, value: null } : s)),
+    );
+    setMarks((prev) =>
+      prev.map((m) => (m.id === markId ? { ...m, awarded: 0 } : m)),
+    );
+    // ✅ Don't delete from manuallySetMarksRef - keep it as "touched"
+    // manuallySetMarksRef.current.delete(markId); // ❌ Remove this line
+  }, []);
 
   const handleRequestAddMark = useCallback(
     (markId: string, value: number) => {

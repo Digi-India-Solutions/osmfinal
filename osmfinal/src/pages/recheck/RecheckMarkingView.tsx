@@ -35,8 +35,8 @@ export interface SheetNote {
 
 type RecheckModalType = 'escalate' | 'submit' | null;
 
-const TOTAL_PAGES = 18;
 let annotationIdCounter = 1;
+let noteIdCounter = 1; // ✅ Added global counter
 const QUESTIONS_PER_PAGE = 4;
 const STAMP_COLOR = '#7C3AED';
 const PULSE_ANIM = 'recheckStampPulse';
@@ -74,7 +74,7 @@ function toFullUrl(path: string | null | undefined): string | null {
   return `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-type ActionType = 'pencil' | 'annotation';
+type ActionType = 'pencil' | 'annotation' | 'note'; // ✅ Added 'note'
 
 interface RecheckDraftStorageData {
   requestId: number;
@@ -87,6 +87,7 @@ interface RecheckDraftStorageData {
     stampPage: number | null;
     isComplete: boolean;
   }[];
+  notes: SheetNote[]; // ✅ Added notes to draft
   savedAt: string;
   timerSeconds?: number;
 }
@@ -125,6 +126,7 @@ export default function RecheckMarkingView() {
   const [recheckStampsData, setRecheckStampsData] = useState<RecheckStamp[]>(
     [],
   );
+  const [recheckNotesData, setRecheckNotesData] = useState<SheetNote[]>([]); // ✅ Added
 
   // Original checker markings
   const [originalAnnotationsData, setOriginalAnnotationsData] = useState<
@@ -136,6 +138,7 @@ export default function RecheckMarkingView() {
   const [originalMarksData, setOriginalMarksData] = useState<
     Record<string, number>
   >({});
+  const [originalNotesData, setOriginalNotesData] = useState<SheetNote[]>([]); // ✅ Added
 
   // ─── NOTES STATE ──────────────────────────────────────────────
   const [notes, setNotes] = useState<SheetNote[]>([]);
@@ -157,7 +160,7 @@ export default function RecheckMarkingView() {
   );
   const [pdfPageCount, setPdfPageCount] = useState(0);
 
-  // ─── FETCH DATA ──────────────────────────────────────────────
+  const totalPages = pdfPageCount || 1;
 
   // ─── FETCH DATA ──────────────────────────────────────────────
 
@@ -201,8 +204,8 @@ export default function RecheckMarkingView() {
           setOriginalAnnotationsData(data.originalAnnotations || []);
           setOriginalStampsData(data.originalStamps || []);
           setOriginalMarksData(data.originalMarks || {});
+          setOriginalNotesData(data.originalNotes || []); // ✅ Added
 
-          // ✅ FIX: Convert seconds to minutes
           const spentTimeInSeconds = data.exam?.spentTime || 0;
           const spentTimeInMinutes = Math.ceil(spentTimeInSeconds / 60);
           console.log(
@@ -215,10 +218,12 @@ export default function RecheckMarkingView() {
             setRecheckMarksData(data.recheckMarks || {});
             setRecheckAnnotationsData(data.recheckAnnotations || []);
             setRecheckStampsData(data.recheckStamps || []);
+            setRecheckNotesData(data.recheckNotes || []); // ✅ Added
           } else {
             setRecheckMarksData(data.originalMarks || {});
             setRecheckAnnotationsData(data.originalAnnotations || []);
             setRecheckStampsData(data.originalStamps || []);
+            setRecheckNotesData(data.originalNotes || []); // ✅ Added
           }
         } else {
           setError(response.message || 'Failed to load recheck data');
@@ -362,11 +367,36 @@ export default function RecheckMarkingView() {
     recheckMarksData,
   ]);
 
+  // ─── Initialize notes from API data ──────────────────────────
+
+  useEffect(() => {
+    if (requestData?.isReadOnly && recheckNotesData.length > 0) {
+      setNotes(recheckNotesData);
+      // Set max note ID
+      const maxId = Math.max(...recheckNotesData.map((n) => n.id), 0);
+      noteIdCounterRef.current = maxId + 1;
+      noteIdCounter = maxId + 1;
+      return;
+    }
+
+    if (originalNotesData.length > 0) {
+      setNotes(originalNotesData);
+      const maxId = Math.max(...originalNotesData.map((n) => n.id), 0);
+      noteIdCounterRef.current = maxId + 1;
+      noteIdCounter = maxId + 1;
+    }
+  }, [requestData?.isReadOnly, recheckNotesData, originalNotesData]);
+
   // Refs for auto-save
   const marksRef = useRef(marks);
   useEffect(() => {
     marksRef.current = marks;
   }, [marks]);
+
+  const notesRef = useRef(notes); // ✅ Added
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
 
   // Track which marks have been explicitly entered
   const manuallySetMarksRef = useRef<Set<string>>(new Set());
@@ -526,6 +556,7 @@ export default function RecheckMarkingView() {
     (
       mks: RecheckMarkEntry[],
       stps: RecheckStamp[],
+      nts: SheetNote[], // ✅ Added notes parameter
       rid: number,
       sid: number,
       manualSet: Set<string>,
@@ -546,6 +577,7 @@ export default function RecheckMarkingView() {
             isComplete: manualSet.has(m.id),
           };
         }),
+        notes: nts, // ✅ Added notes to draft
         savedAt: now.toISOString(),
         timerSeconds: timerSecondsRef.current,
       };
@@ -571,6 +603,7 @@ export default function RecheckMarkingView() {
     persistDraft(
       marksRef.current,
       stampsRef.current,
+      notesRef.current, // ✅ Added notes
       requestIdNum,
       sheetData?.id || 0,
       manuallySetMarksRef.current,
@@ -611,12 +644,25 @@ export default function RecheckMarkingView() {
       height: a.height,
     }));
 
+    // ✅ Added notes data
+    const notesData = notes.map((n) => ({
+      id: n.id,
+      page: n.page,
+      x: n.x,
+      y: n.y,
+      text: n.text,
+      fontSize: n.fontSize,
+      width: n.width,
+      height: n.height,
+    }));
+
     const currentTime = timerSecondsRef.current;
 
     const payload = {
       marksData,
       annotationsData,
       stampsData,
+      notesData, // ✅ Added
       totalMarks: round2Total,
       remarks: '',
       timeSpent: currentTime,
@@ -637,6 +683,7 @@ export default function RecheckMarkingView() {
     marks,
     stamps,
     annotations,
+    notes, // ✅ Added
     round2Total,
   ]);
 
@@ -656,7 +703,8 @@ export default function RecheckMarkingView() {
     }, 30000);
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (manuallySetMarksRef.current.size > 0) {
+      if (manuallySetMarksRef.current.size > 0 || notes.length > 0) {
+        // ✅ Updated condition
         saveDraftRef.current();
         handleSaveDraftRef.current();
         e.preventDefault();
@@ -669,7 +717,7 @@ export default function RecheckMarkingView() {
       clearInterval(interval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [requestData?.isReadOnly]);
+  }, [requestData?.isReadOnly, notes.length]); // ✅ Added notes dependency
 
   // ─── LOAD RECHECK DRAFT FROM API ─────────────────────────────
 
@@ -725,6 +773,22 @@ export default function RecheckMarkingView() {
             annotationIdCounter = maxId + 1;
           }
 
+          // ✅ Load notes from draft
+          if (data.notes_data && data.notes_data.length > 0) {
+            setNotes(data.notes_data);
+            const maxId = Math.max(
+              ...data.notes_data.map((n: SheetNote) => n.id),
+              0,
+            );
+            noteIdCounterRef.current = maxId + 1;
+            noteIdCounter = maxId + 1;
+          } else if (originalNotesData.length > 0) {
+            setNotes(originalNotesData);
+            const maxId = Math.max(...originalNotesData.map((n) => n.id), 0);
+            noteIdCounterRef.current = maxId + 1;
+            noteIdCounter = maxId + 1;
+          }
+
           if (data.time_spent && data.time_spent > 0) {
             timerSecondsRef.current = data.time_spent;
             setTimerDisplay(formatTime(data.time_spent));
@@ -740,6 +804,9 @@ export default function RecheckMarkingView() {
           if (originalStampsData.length > 0) {
             setStamps(originalStampsData);
           }
+          if (originalNotesData.length > 0) {
+            setNotes(originalNotesData);
+          }
         }
       } catch (error) {
         console.error('Load recheck draft error:', error);
@@ -748,6 +815,9 @@ export default function RecheckMarkingView() {
         }
         if (originalStampsData.length > 0) {
           setStamps(originalStampsData);
+        }
+        if (originalNotesData.length > 0) {
+          setNotes(originalNotesData);
         }
       }
     };
@@ -759,6 +829,7 @@ export default function RecheckMarkingView() {
     requestData?.isReadOnly,
     originalAnnotationsData,
     originalStampsData,
+    originalNotesData, // ✅ Added
   ]);
 
   // ─── RESUME: check localStorage on mount ───
@@ -819,6 +890,9 @@ export default function RecheckMarkingView() {
         return s;
       });
 
+      // ✅ Restore notes from draft
+      const restoredNotes = draft.notes || [];
+
       const manualSet = new Set<string>();
       draft.marks.forEach((d) => {
         if (d.isComplete) manualSet.add(d.questionName);
@@ -836,6 +910,7 @@ export default function RecheckMarkingView() {
 
       setMarks(restoredMarks);
       setStamps(restoredStamps);
+      setNotes(restoredNotes); // ✅ Restore notes
       setResumeBanner(null);
 
       const savedTime = new Date(draft.savedAt);
@@ -859,6 +934,7 @@ export default function RecheckMarkingView() {
     manuallySetMarksRef.current = new Set();
     timerSecondsRef.current = 0;
     setTimerDisplay('00:00:00');
+    setNotes([]); // ✅ Clear notes
   }, [requestIdNum]);
 
   // ─── Note handlers ─────────────────────────────────────────────
@@ -876,6 +952,8 @@ export default function RecheckMarkingView() {
     };
     setNotes((prev) => [...prev, newNote]);
     setEditingNoteId(newNote.id);
+    actionHistoryRef.current.push('note'); // ✅ Track note action
+    setTotalActions((prev) => prev + 1);
   }, []);
 
   const handleNoteUpdate = useCallback(
@@ -891,6 +969,11 @@ export default function RecheckMarkingView() {
     (id: number) => {
       setNotes((prev) => prev.filter((n) => n.id !== id));
       if (editingNoteId === id) setEditingNoteId(null);
+      // ✅ Remove from history if it was the last note action
+      const noteIndex = actionHistoryRef.current.lastIndexOf('note');
+      if (noteIndex !== -1) {
+        actionHistoryRef.current.splice(noteIndex, 1);
+      }
     },
     [editingNoteId],
   );
@@ -950,6 +1033,7 @@ export default function RecheckMarkingView() {
     setTimeout(() => setToastMessage(null), 2500);
   }, []);
 
+  // ✅ Updated undo handler to handle notes
   const handleUndoAnnotation = useCallback(() => {
     const lastAction = actionHistoryRef.current.pop();
     if (lastAction === 'pencil' && sheetViewerRef.current) {
@@ -966,14 +1050,26 @@ export default function RecheckMarkingView() {
         }
         return prev.slice(0, -1);
       });
+      setTotalActions((prev) => Math.max(0, prev - 1));
+    } else if (lastAction === 'note') {
+      setNotes((prev) => {
+        if (prev.length === 0) {
+          actionHistoryRef.current.push('note');
+          return prev;
+        }
+        return prev.slice(0, -1);
+      });
+      setTotalActions((prev) => Math.max(0, prev - 1));
     }
   }, []);
 
+  // ✅ Updated delete all handler to include notes
   const handleDeleteAnnotations = useCallback(() => {
     if (sheetViewerRef.current) {
       sheetViewerRef.current.clearPencil();
     }
     setAnnotations([]);
+    setNotes([]); // ✅ Clear notes
     setHasPencilMarks(false);
     setTotalActions(0);
     actionHistoryRef.current = [];
@@ -981,6 +1077,7 @@ export default function RecheckMarkingView() {
 
   const handleThumbnailClick = useCallback(
     (page: number) => {
+      setCurrentPage(page);
       scrollToPage(page);
     },
     [scrollToPage],
@@ -1253,6 +1350,18 @@ export default function RecheckMarkingView() {
         height: a.height,
       }));
 
+      // ✅ Added notes data
+      const notesData = notes.map((n) => ({
+        id: n.id,
+        page: n.page,
+        x: n.x,
+        y: n.y,
+        text: n.text,
+        fontSize: n.fontSize,
+        width: n.width,
+        height: n.height,
+      }));
+
       const currentTime = timerSecondsRef.current;
 
       const response = await recheckQueueService.completeRecheck(requestIdNum, {
@@ -1261,6 +1370,7 @@ export default function RecheckMarkingView() {
         marksData,
         annotationsData,
         stampsData,
+        notesData, // ✅ Added
         timeSpent: currentTime,
       });
 
@@ -1280,7 +1390,7 @@ export default function RecheckMarkingView() {
       setToastMessage(error.message || 'Failed to submit recheck');
       setTimeout(() => setToastMessage(null), 3000);
     }
-  }, [requestIdNum, finalMarks, marks, stamps, annotations, navigate]);
+  }, [requestIdNum, finalMarks, marks, stamps, annotations, notes, navigate]);
 
   // ─── ESCALATE CONFIRM ───
 
@@ -1394,7 +1504,7 @@ export default function RecheckMarkingView() {
           )}
           <span className="text-slate-400">
             Page <span className="text-white font-medium">{currentPage}</span>{' '}
-            of {TOTAL_PAGES}
+            of {totalPages}
           </span>
           {minTimeRequired > 0 && (
             <span
@@ -1506,7 +1616,11 @@ export default function RecheckMarkingView() {
               </button>
               <button
                 onClick={handleDeleteAnnotations}
-                disabled={annotations.length === 0 && !hasPencilMarks}
+                disabled={
+                  annotations.length === 0 &&
+                  !hasPencilMarks &&
+                  notes.length === 0
+                } // ✅ Updated condition
                 className="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
                 title="Delete All"
               >
@@ -1525,52 +1639,116 @@ export default function RecheckMarkingView() {
             onThumbnailClick={handleThumbnailClick}
             onBlankToggle={handleBlankToggle}
             onApplyBlank={handleApplyBlank}
-            totalPages={TOTAL_PAGES}
+            totalPages={totalPages}
             pdfPageImages={pdfPageImages}
             pdfPageCount={pdfPageCount}
             isPdfMode={!!sheetData?.file_url}
           />
         )}
 
-        {/* ─── SHEET VIEWER ─── */}
-        <SheetViewer
-          ref={sheetViewerRef}
-          currentPage={currentPage}
-          totalPages={TOTAL_PAGES}
-          blankPages={blankPages}
-          onPageChange={setCurrentPage}
-          zoom={zoom}
-          activeTool={activeTool}
-          annotations={annotations}
-          stamps={sheetViewerStamps}
-          activeMarkId={activeMarkId}
-          placingMarkId={placingMarkId}
-          instructionBanner={instructionBanner}
-          stampColor={STAMP_COLOR}
-          pulseAnimationName={PULSE_ANIM}
-          notes={notes}
-          editingNoteId={editingNoteId}
-          onNoteAdd={handleNoteAdd}
-          onNoteUpdate={handleNoteUpdate}
-          onNoteDelete={handleNoteDelete}
-          onEditingNoteChange={setEditingNoteId}
-          onAnnotationAdd={handleAnnotationAdd}
-          onAnnotationDelete={handleAnnotationDelete}
-          onEraserNoHit={handleEraserNoHit}
-          onPencilStroke={handlePencilStroke}
-          onSheetClickForPlacement={handleSheetClickForPlacement}
-          onStampReposition={handleStampReposition}
-          onDismissBanner={handleDismissBanner}
-          pageRefs={pageRefs}
-          scrollToPage={scrollToPage}
-          pdfUrl={sheetData?.file_url || pdfsData.question_paper || null}
-          onPageRender={(pageNum: number, imageData: string) => {
-            setPdfPageImages((prev) => ({ ...prev, [pageNum]: imageData }));
-          }}
-          onPageCount={(count: number) => {
-            setPdfPageCount(count);
-          }}
-        />
+        {/* ─── SHEET VIEWER WITH PAGINATION ─── */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <SheetViewer
+            ref={sheetViewerRef}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            blankPages={blankPages}
+            onPageChange={setCurrentPage}
+            zoom={zoom}
+            activeTool={activeTool}
+            annotations={annotations}
+            stamps={sheetViewerStamps}
+            activeMarkId={activeMarkId}
+            placingMarkId={placingMarkId}
+            instructionBanner={instructionBanner}
+            stampColor={STAMP_COLOR}
+            pulseAnimationName={PULSE_ANIM}
+            notes={notes}
+            editingNoteId={editingNoteId}
+            onNoteAdd={handleNoteAdd}
+            onNoteUpdate={handleNoteUpdate}
+            onNoteDelete={handleNoteDelete}
+            onEditingNoteChange={setEditingNoteId}
+            onAnnotationAdd={handleAnnotationAdd}
+            onAnnotationDelete={handleAnnotationDelete}
+            onEraserNoHit={handleEraserNoHit}
+            onPencilStroke={handlePencilStroke}
+            onSheetClickForPlacement={handleSheetClickForPlacement}
+            onStampReposition={handleStampReposition}
+            onDismissBanner={handleDismissBanner}
+            pageRefs={pageRefs}
+            scrollToPage={scrollToPage}
+            pdfUrl={sheetData?.file_url || pdfsData.question_paper || null}
+            onPageRender={(pageNum: number, imageData: string) => {
+              setPdfPageImages((prev) => ({ ...prev, [pageNum]: imageData }));
+            }}
+            onPageCount={(count: number) => {
+              setPdfPageCount(count);
+            }}
+          />
+
+          {/* ─── BOTTOM PAGINATION BAR ─── */}
+          <div className="h-[60px] shrink-0 bg-[#1e293b] flex flex-col border-t border-slate-700 select-none z-[40]">
+            <div className="flex-1 flex items-center overflow-x-auto overflow-y-hidden w-full custom-scrollbar">
+              <div className="flex items-center gap-1.5 min-w-max px-3 mx-auto md:justify-center">
+                <button
+                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                  disabled={currentPage <= 1}
+                  className="flex items-center justify-center flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer mr-1"
+                  title="Previous Page"
+                >
+                  <i className="ri-arrow-left-s-line text-lg" />
+                </button>
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                  (page) => {
+                    const isActive = page === currentPage;
+                    const isBlank = blankPages.has(page);
+                    const hasAnnotations = annotations.some(
+                      (ann) => ann.page === page,
+                    );
+                    const hasStamps = stamps.some(
+                      (stamp) => stamp.page === page && stamp.placed,
+                    );
+                    const hasNotes = notes.some((n) => n.page === page); // ✅ Added
+                    const annotated =
+                      isBlank || hasAnnotations || hasStamps || hasNotes; // ✅ Updated
+
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`relative flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-xs sm:text-[13px] font-medium transition-colors cursor-pointer ${
+                          isActive
+                            ? 'bg-violet-500 text-white shadow-sm'
+                            : 'bg-[#334155] text-slate-300 hover:bg-slate-600'
+                        }`}
+                      >
+                        {page}
+                        <span
+                          className={`absolute bottom-1 right-1 w-1.5 h-1.5 sm:w-[5px] sm:h-[5px] rounded-full shadow-sm ${
+                            annotated ? 'bg-emerald-400' : 'bg-amber-500'
+                          }`}
+                        />
+                      </button>
+                    );
+                  },
+                )}
+
+                <button
+                  onClick={() =>
+                    setCurrentPage(Math.min(totalPages, currentPage + 1))
+                  }
+                  disabled={currentPage >= totalPages}
+                  className="flex items-center justify-center flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer ml-1"
+                  title="Next Page"
+                >
+                  <i className="ri-arrow-right-s-line text-lg" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* ─── RIGHT SIDE ─── */}
         <div className="w-[255px] shrink-0 flex flex-col">
