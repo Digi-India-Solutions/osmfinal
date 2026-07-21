@@ -14,6 +14,17 @@ import { checkerApi } from '@/api/checker';
 
 export type RightTab = 'marks' | 'questions' | 'answerSheet';
 
+export interface SheetNote {
+  id: number;
+  page: number;
+  x: number;
+  y: number;
+  text: string;
+  fontSize: number;
+  width: number;
+  height: number;
+}
+
 export interface MarkEntry {
   id: string;
   criterion: string;
@@ -28,7 +39,8 @@ export type AnnotationTool =
   | 'cross'
   | 'pencil'
   | 'highlight'
-  | 'eraser';
+  | 'eraser'
+  | 'textNote'; // ✅ Fixed: semicolon removed, pipe added
 
 export interface Annotation {
   id: number;
@@ -144,6 +156,11 @@ export default function MarkingView() {
   // ─── MINIMUM TIME STATE ─────────────────────────────────────
   const [minTimeRequired, setMinTimeRequired] = useState(0); // minutes
   const [isTimeRequirementMet, setIsTimeRequirementMet] = useState(true);
+
+  // ─── NOTES STATE ──────────────────────────────────────────────
+  const [notes, setNotes] = useState<SheetNote[]>([]);
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+const noteIdCounterRef = useRef(1);
 
   // ─── BUILD MARKS FROM MARK SCHEME ───────────────────────────
   const initialMarks = useMemo(
@@ -922,6 +939,44 @@ export default function MarkingView() {
     [scrollToPage],
   );
 
+ const handleNoteAdd = useCallback((page: number, x: number, y: number) => {
+   noteIdCounterRef.current += 1;
+   const newNote: SheetNote = {
+     id: noteIdCounterRef.current,
+     page,
+     x,
+     y,
+     text: '',
+     fontSize: 12,
+     width: 200,
+     height: 100,
+   };
+   setNotes((prev) => [...prev, newNote]);
+   setEditingNoteId(newNote.id);
+ }, []);
+
+const handleNoteUpdate = useCallback(
+  (id: number, updates: Partial<SheetNote>) => {
+    setNotes((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, ...updates } : n)),
+    );
+  },
+  [],
+);
+ const handleNoteDelete = useCallback(
+   (id: number) => {
+     setNotes((prev) => {
+       const updated = prev.filter((n) => n.id !== id);
+       // If we're editing the deleted note, clear editing state
+       if (editingNoteId === id) {
+         setEditingNoteId(null);
+       }
+       return updated;
+     });
+   },
+   [editingNoteId],
+ );
+
   // ─── Keyboard handler ───
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -962,6 +1017,9 @@ export default function MarkingView() {
         isDraggingRef.current = false;
         setPlacingMarkId(null);
         setInstructionBanner(null);
+        if (editingNoteId !== null) {
+          setEditingNoteId(null);
+        }
       }
     };
     document.addEventListener('keydown', handleKeyDown);
@@ -971,6 +1029,7 @@ export default function MarkingView() {
     selectedAnnotationId,
     handleRemoveStamp,
     handleAnnotationDelete,
+    editingNoteId,
   ]);
 
   // ─── Close context menu on outside click ───
@@ -1163,15 +1222,16 @@ export default function MarkingView() {
     [],
   );
 
-  const handleClearStampValue = useCallback((markId: string) => {
-    setStamps((prev) =>
-      prev.map((s) => (s.markId === markId ? { ...s, value: null } : s)),
-    );
-    setMarks((prev) =>
-      prev.map((m) => (m.id === markId ? { ...m, awarded: 0 } : m)),
-    );
-    manuallySetMarksRef.current.delete(markId);
-  }, []);
+const handleClearStampValue = useCallback((markId: string) => {
+  setStamps((prev) =>
+    prev.map((s) => (s.markId === markId ? { ...s, value: null } : s)),
+  );
+  setMarks((prev) =>
+    prev.map((m) => (m.id === markId ? { ...m, awarded: 0 } : m)),
+  );
+  // ✅ Don't delete from manuallySetMarksRef - keep it as "touched"
+  // manuallySetMarksRef.current.delete(markId); // ❌ Remove this line
+}, []);
 
   const handleRequestAddMark = useCallback(
     (markId: string, value: number) => {
@@ -1220,9 +1280,8 @@ export default function MarkingView() {
 
   const handleMarkUpdate = useCallback((id: string, awarded: number) => {
     setMarks((prev) => prev.map((m) => (m.id === id ? { ...m, awarded } : m)));
-    if (awarded > 0) {
-      manuallySetMarksRef.current.add(id);
-    }
+    // ✅ Mark as complete even if awarded is 0 (user has "touched" this question)
+    manuallySetMarksRef.current.add(id);
   }, []);
 
   const handleRemarkUpdate = useCallback((id: string, remark: string) => {
@@ -1342,6 +1401,7 @@ export default function MarkingView() {
       { tool: 'pencil', icon: 'ri-pencil-line', label: 'Pencil' },
       { tool: 'highlight', icon: 'ri-mark-pen-line', label: 'Highlight' },
       { tool: 'eraser', icon: 'ri-eraser-line', label: 'Eraser' },
+      { tool: 'textNote', icon: 'ri-sticky-note-line', label: 'Note' }, // ✅ Added
     ];
 
   // ─── LOADING ──────────────────────────────────────────────────
@@ -1610,6 +1670,14 @@ export default function MarkingView() {
             selectedAnnotationId={selectedAnnotationId}
             annotationDragId={annotationDragId}
             pdfUrl={sheetData?.file_url || null}
+            // ─── NOTES PROPS ─────────────────────────────────────────────
+            notes={notes}
+            editingNoteId={editingNoteId}
+            onNoteAdd={handleNoteAdd}
+            onNoteUpdate={handleNoteUpdate}
+            onNoteDelete={handleNoteDelete}
+            onEditingNoteChange={setEditingNoteId}
+            // ─── REST OF PROPS ──────────────────────────────────────────
             onAnnotationAdd={handleAnnotationAdd}
             onAnnotationDelete={handleAnnotationDelete}
             onEraserNoHit={handleEraserNoHit}

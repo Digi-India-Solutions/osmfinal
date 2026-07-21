@@ -1256,7 +1256,7 @@ export default function MarkSchemeEditor() {
                 >
                   <i className="ri-play-line mr-1.5"></i> Generate Scheme
                 </button>
-                <button
+                {/* <button
                   onClick={() => {
                     setShowExcelUpload(true);
                     setExcelPreviewVisible(false);
@@ -1271,13 +1271,13 @@ export default function MarkSchemeEditor() {
                 >
                   <i className="ri-upload-cloud-line mr-1.5"></i> Upload Excel
                   instead
-                </button>
-                <button
+                </button> */}
+                {/* <button
                   onClick={() => setShowFormatGuide(true)}
                   className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors duration-150 whitespace-nowrap cursor-pointer"
                 >
                   <i className="ri-file-text-line mr-1.5"></i> Format Guide
-                </button>
+                </button> */}
               </div>
 
               {!canGenerateScheme && (

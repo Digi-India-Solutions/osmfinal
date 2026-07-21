@@ -140,6 +140,7 @@ export const saveDraft = async (req, res) => {
 };
 
 // ─── SUBMIT MARKS ──────────────────────────────────────────────
+// ─── SUBMIT MARKS ──────────────────────────────────────────────
 export const submitMarks = async (req, res) => {
   try {
     const { sheetId } = req.params;
@@ -153,12 +154,13 @@ export const submitMarks = async (req, res) => {
       timeSpent,
     } = req.body;
 
-    // ✅ Check if sheet is assigned to this checker
+    // ✅ FIX: Include both 'assigned' AND 'completed' assignments
     const assignmentCheck = await pool.query(
       `SELECT a.sheet_id, s.exam_id, s.file_url, s.file_name, s.student_name, s.roll_no, s.barcode
        FROM assignments a
        JOIN sheets s ON a.sheet_id = s.id
-       WHERE a.sheet_id = $1 AND a.checker_id = $2 AND a.status = 'assigned'`,
+       WHERE a.sheet_id = $1 AND a.checker_id = $2 
+       AND a.status IN ('assigned', 'completed')`,  // ✅ Add 'completed'
       [sheetId, userId],
     );
 
@@ -172,12 +174,20 @@ export const submitMarks = async (req, res) => {
     const examId = assignmentCheck.rows[0].exam_id;
     const sheetData = assignmentCheck.rows[0];
 
-    // ✅ Check if marking record exists
+    // ✅ Check if already submitted
     const existing = await pool.query(
-      `SELECT id FROM checker_markings 
+      `SELECT id, is_submitted FROM checker_markings 
        WHERE sheet_id = $1 AND checker_id = $2`,
       [sheetId, userId],
     );
+
+    // ✅ If already submitted, don't allow re-submit
+    if (existing.rows.length > 0 && existing.rows[0].is_submitted === true) {
+      return res.status(400).json({
+        success: false,
+        message: 'This sheet has already been submitted',
+      });
+    }
 
     let result;
     const finalTimeSpent = timeSpent || 0;
@@ -232,7 +242,7 @@ export const submitMarks = async (req, res) => {
     }
 
     // ✅ ========================================================
-    // ✅ CHECKED SHEETS FOLDER MEIN FILE SAVE KARO
+    // ✅ CHECKED SHEETS FOLDER MEIN FILE SAVE KARO (SIDHE FOLDER MEIN)
     // ✅ ========================================================
 
     let fileMoved = false;
@@ -240,33 +250,25 @@ export const submitMarks = async (req, res) => {
     let checkedFolder = null;
 
     try {
-      // ✅ Folder name: barcode use karo, agar nahi hai toh sheetId
-      const folderKey =
-        sanitizeForFolderName(sheetData.barcode) || `sheet-${sheetId}`;
+      // ✅ DIRECT FILE NAME: barcode use karo, agar nahi hai toh sheetId
+      const fileNameBase = sanitizeForFolderName(sheetData.barcode) || `sheet-${sheetId}`;
+      const fileExtension = sheetData.file_name ? path.extname(sheetData.file_name) : '.pdf';
+      const fileName = `${fileNameBase}${fileExtension}`;
 
-      // ✅ Folder path: checked-sheets/{examId}/{barcode}/
-      checkedFolder = `checked-sheets/${examId}/${folderKey}`;
-
-      // ✅ File name
-      let fileName = sheetData.file_name;
-      if (!fileName && sheetData.file_url) {
-        fileName = path.basename(sheetData.file_url);
-      }
-      if (!fileName) {
-        fileName = `${folderKey}.pdf`;
-      }
+      // ✅ DIRECT FOLDER: checked-sheets/ (no subfolders)
+      checkedFolder = `checked-sheets`;
 
       // ✅ Source file path (where file currently is)
       let sourcePath = null;
 
       // ✅ Check multiple possible locations for the file
       const possiblePaths = [
-        path.join(UPLOADS_DIR, 'sheets', fileName), // uploads/sheets/BAR055.pdf
-        path.join(UPLOADS_DIR, fileName), // uploads/BAR055.pdf
-        path.join(UPLOADS_DIR, 'uploads', 'sheets', fileName), // uploads/uploads/sheets/BAR055.pdf
+        path.join(UPLOADS_DIR, 'sheets', sheetData.file_name || fileName),
+        path.join(UPLOADS_DIR, sheetData.file_name || fileName),
+        path.join(UPLOADS_DIR, 'uploads', 'sheets', sheetData.file_name || fileName),
       ];
 
-      console.log(`🔍 Looking for file: ${fileName}`);
+      console.log(`🔍 Looking for file: ${sheetData.file_name || fileName}`);
       console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
 
       for (const p of possiblePaths) {
@@ -279,18 +281,15 @@ export const submitMarks = async (req, res) => {
       }
 
       if (sourcePath) {
-        // ✅ Destination path: uploads/checked-sheets/{examId}/{barcode}/{fileName}
         const destPath = path.join(UPLOADS_DIR, checkedFolder, fileName);
         console.log(`📄 Destination: ${destPath}`);
 
-        // ✅ Create directory if not exists
         const dir = path.dirname(destPath);
         if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
           console.log(`📁 Created directory: ${dir}`);
         }
 
-        // ✅ Copy file to checked-sheets folder
         fs.copyFileSync(sourcePath, destPath);
         console.log(`✅ File copied to: ${destPath}`);
 
@@ -300,7 +299,6 @@ export const submitMarks = async (req, res) => {
         console.error(`❌ File not found in any location!`);
         console.error(`   Tried:`, possiblePaths);
 
-        // ✅ Dump what's in sheets folder for debugging
         const sheetsDir = path.join(UPLOADS_DIR, 'sheets');
         if (fs.existsSync(sheetsDir)) {
           const files = fs.readdirSync(sheetsDir);
@@ -328,12 +326,13 @@ export const submitMarks = async (req, res) => {
       [totalMarks || 0, finalTimeSpent, checkedFolder, finalFileUrl, sheetId],
     );
 
-    // ✅ Update assignment status
+    // ✅ Update assignment status to 'completed' if not already
     await pool.query(
       `UPDATE assignments 
        SET status = 'completed',
            updated_at = CURRENT_TIMESTAMP
-       WHERE sheet_id = $1 AND checker_id = $2`,
+       WHERE sheet_id = $1 AND checker_id = $2
+       AND status = 'assigned'`,  // ✅ Only update if status is 'assigned'
       [sheetId, userId],
     );
 
