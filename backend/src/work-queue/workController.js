@@ -785,7 +785,7 @@ export const reassignRecheckRequests = async (req, res) => {
           // ✅ Check if columns exist before using them
           // Simple approach: Update without reassigned_by/reassigned_at if they don't exist
           // Or use COALESCE with NULL
-          
+
           await client.query(
             `UPDATE recheck_requests 
              SET assign_to = $1, 
@@ -904,7 +904,7 @@ export const getCheckedSheetById = async (req, res) => {
        WHERE s.id = $1`,
       [id]
     );
-
+   
     if (sheetCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
