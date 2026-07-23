@@ -74,7 +74,7 @@ export default function CheckedSheetView() {
         const response = await workQueueService.getCheckedSheetById(
           parseInt(sheetId),
         );
-        console.log('📥 Checked sheet response:', response);
+        console.log('📥 Checked sheet response:==>', response);
 
         if (response.success && response.data) {
           const data = response.data;

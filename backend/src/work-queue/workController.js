@@ -894,7 +894,7 @@ export const getCheckedSheetById = async (req, res) => {
     const role = req.user.role;
 
     const isAdmin = role === 'admin' || role === 'super_admin';
-    console.log("isAdmin===>", isAdmin)
+console.log("isAdmin===>" ,isAdmin)
     // ✅ Pehle check karo ki sheet exist karti hai ya nahi
     const sheetCheck = await pool.query(
       `SELECT s.id, s.exam_id, s.status, s.marks, s.checking_time_spent, 
@@ -904,7 +904,7 @@ export const getCheckedSheetById = async (req, res) => {
        WHERE s.id = $1`,
       [id]
     );
-
+   
     if (sheetCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -915,24 +915,24 @@ export const getCheckedSheetById = async (req, res) => {
     const sheet = sheetCheck.rows[0];
 
     // ✅ Agar admin nahi hai toh assignment check karo
-    if (!isAdmin) {
-      const assignmentCheck = await pool.query(
-        `SELECT a.id, a.checker_id, a.status 
-         FROM assignments a
-         WHERE a.sheet_id = $1 
-         AND a.checker_id = $2 
-         AND a.status IN ('assigned', 'completed')
-         LIMIT 1`,
-        [id, userId]
-      );
+    // if (!isAdmin) {
+    //   const assignmentCheck = await pool.query(
+    //     `SELECT a.id, a.checker_id, a.status 
+    //      FROM assignments a
+    //      WHERE a.sheet_id = $1 
+    //      AND a.checker_id = $2 
+    //      AND a.status IN ('assigned', 'completed')
+    //      LIMIT 1`,
+    //     [id, userId]
+    //   );
 
-      if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({
-          success: false,
-          message: 'You do not have access to this sheet',
-        });
-      }
-    }
+    //   if (assignmentCheck.rows.length === 0) {
+    //     return res.status(403).json({
+    //       success: false,
+    //       message: 'You do not have access to this sheet',
+    //     });
+    //   }
+    // }
 
     // ✅ ADMIN: Simple query without assignments join
     // ✅ CHECKER: Query with assignments join
