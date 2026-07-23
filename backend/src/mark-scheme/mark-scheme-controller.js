@@ -7,7 +7,7 @@ import path from 'path';
 // ─── HELPER: Get Base URL ──────────────────────────────────────
 
 const getBaseUrl = () => {
-  return process.env.API_URL || 'http://localhost:7000';
+  return process.env.API_URL || 'https://osmapi.digiindiasolutions.com';
 };
 
 // ─── HELPER: Convert relative path to full URL ────────────────

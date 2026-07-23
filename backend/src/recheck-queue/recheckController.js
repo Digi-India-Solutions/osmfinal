@@ -441,7 +441,7 @@ export const startRecheckMarking = async (req, res) => {
     }
 
     // Build full file URL
-    const baseUrl = process.env.API_URL || 'http://localhost:7000';
+    const baseUrl = process.env.API_URL || 'https://osmapi.digiindiasolutions.com';
     const buildFullUrl = (path) => {
       if (!path) return null;
       if (path.startsWith('http://') || path.startsWith('https://'))
@@ -1296,7 +1296,7 @@ export const getRecheckedSheetById = async (req, res) => {
       }
     }
 
-    const baseUrl = process.env.API_URL || 'http://localhost:7000';
+    const baseUrl = process.env.API_URL || 'https://osmapi.digiindiasolutions.com';
     const buildFullUrl = (path) => {
       if (!path) return null;
       if (path.startsWith('http://') || path.startsWith('https://'))
