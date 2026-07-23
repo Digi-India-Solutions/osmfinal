@@ -1165,7 +1165,7 @@ export const escalateRecheckRequest = async (req, res) => {
 export const getRecheckedSheetById = async (req, res) => {
   try {
     const { id } = req.params;
-
+console.log('isAdmin===>role' ,id)
     let result = await pool.query(
       `SELECT 
         rr.id,
