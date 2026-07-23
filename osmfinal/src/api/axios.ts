@@ -1,7 +1,7 @@
 // api/axios.ts
 import axios from 'axios';
 
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:7000';
+export const API_URL = import.meta.env.VITE_API_URL || 'https://osmapi.digiindiasolutions.com';
 
 const axiosInstance = axios.create({
   baseURL: API_URL,

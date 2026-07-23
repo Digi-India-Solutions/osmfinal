@@ -6,7 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 
-const getBaseUrl = () => process.env.API_URL || 'http://localhost:7000';
+const getBaseUrl = () => process.env.API_URL || 'https://osmapi.digiindiasolutions.com';
 const toFullUrl = (path) => {
   if (!path) return null;
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
