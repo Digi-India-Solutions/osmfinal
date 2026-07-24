@@ -181,7 +181,7 @@ export default function RecheckRightPanel({
     { key: 'notes', icon: 'ri-sticky-note-line', label: 'Notes' },
   ];
 
-  const canSubmit = totalRound2 > 0 && !readOnly;
+  const canSubmit = !readOnly;
 
   return (
     <aside className="flex-1 min-h-0 bg-[#1e293b] flex flex-col border-l border-slate-700">
