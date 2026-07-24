@@ -894,7 +894,7 @@ export const getCheckedSheetById = async (req, res) => {
     const role = req.user.role;
 
     const isAdmin = role === 'admin' || role === 'super_admin';
-console.log("isAdmin===>" ,isAdmin)
+    console.log("isAdmin===>", isAdmin)
     // ✅ Pehle check karo ki sheet exist karti hai ya nahi
     const sheetCheck = await pool.query(
       `SELECT s.id, s.exam_id, s.status, s.marks, s.checking_time_spent, 
@@ -904,7 +904,7 @@ console.log("isAdmin===>" ,isAdmin)
        WHERE s.id = $1`,
       [id]
     );
-   
+
     if (sheetCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
