@@ -111,19 +111,27 @@ class CheckerPerformanceService {
   }
 
   // Get rechecker performance
-  async getRecheckerPerformance(examId?: string): Promise<any> {
-    try {
-      const params = examId ? { examId } : {};
-      const response = await api.get(
-        '/api/v1/checker-performance/recheckers/performance',
-        { params },
-      );
-      return response.data.data;
-    } catch (error: any) {
-      console.error('❌ Get rechecker performance error:', error);
-      return [];
-    }
+  // async getRecheckerPerformance(examId?: string): Promise<any> {
+  //   try {
+  //     const params = examId ? { examId } : {};
+  //     const response = await api.get(
+  //       `/api/v1/checker-performance/recheckers/performance${params}`
+  //     );
+  //     return response.data.data;
+  //   } catch (error: any) {
+  //     console.error('❌ Get rechecker performance error:', error);
+  //     return [];
+  //   }
+  // }
+
+  async getRecheckerPerformance(examId?: string) {
+    const response = await api.get(
+      '/api/v1/checker-performance/recheckers/performance',
+      { params: examId ? { examId } : {} },  // ← axios handle karta hai
+    );
+    return response.data.data || { recheckers: [], stats: {} };
   }
 }
+
 
 export default new CheckerPerformanceService();
