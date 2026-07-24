@@ -47,7 +47,7 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
   'http://192.168.166.80:3001',
   'https://osm.digiindiasolutions.com',
-  'http://localhost:19001',
+  'https://osmapi.digiindiasolutions.com',
 ];
 
 app.use(
