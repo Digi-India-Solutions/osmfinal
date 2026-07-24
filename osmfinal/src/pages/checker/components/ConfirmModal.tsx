@@ -354,14 +354,14 @@ export default function ConfirmModal({
 
         <div className="px-5 py-4 space-y-3">
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <div>
+            {/* <div>
               <span className="text-slate-500">Student Name</span>
               <p className="font-semibold text-slate-800 mt-0.5">Priya Singh</p>
             </div>
             <div>
               <span className="text-slate-500">Roll Number</span>
               <p className="font-semibold text-slate-800 mt-0.5">102</p>
-            </div>
+            </div> */}
             <div>
               <span className="text-slate-500">Exam</span>
               <p className="font-semibold text-slate-800 mt-0.5">Mathematics Mid-Term</p>
