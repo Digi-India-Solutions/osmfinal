@@ -358,6 +358,7 @@ export default function MarkingView() {
   // ─── INCOMPLETE SUBMISSION WARNING ───
   const [incompleteWarning, setIncompleteWarning] = useState<{
     questions: string[];
+    unannotatedPages: number[];
     pendingType: 'submitContinue' | 'submitExit';
   } | null>(null);
 
@@ -1332,6 +1333,18 @@ export default function MarkingView() {
       .map((m) => m.criterion);
   }, [marks]);
 
+  // ─── PAGE ANNOTATION STATUS ───────────────────────────────────
+  const isPageAnnotated = useCallback(
+    (page: number) => {
+      if (blankPages.has(page)) return true;
+      if (annotations.some((ann) => ann.page === page)) return true;
+      if (stamps.some((stamp) => stamp.page === page && stamp.placed))
+        return true;
+      return false;
+    },
+    [blankPages, annotations, stamps],
+  );
+
   // ─── SUBMIT: min-time check → incomplete check → confirm modal ───
   const handleSubmitClick = useCallback(
     (type: 'submitContinue' | 'submitExit') => {
@@ -1346,14 +1359,29 @@ export default function MarkingView() {
         return;
       }
 
-      const incomplete = checkIncomplete();
-      if (incomplete.length > 0) {
-        setIncompleteWarning({ questions: incomplete, pendingType: type });
+      // 1. Find unannotated pages (pages without tick, cross, stamp, or annotation)
+      const unannotatedPages = Array.from(
+        { length: totalPages },
+        (_, i) => i + 1,
+      ).filter((page) => !isPageAnnotated(page));
+
+      // 2. Find unmarked questions (questions with awarded === 0)
+      const unmarkedQuestions = marks
+        .filter((m) => m.awarded === 0)
+        .map((m) => m.criterion);
+
+      if (unannotatedPages.length > 0 || unmarkedQuestions.length > 0) {
+        setIncompleteWarning({
+          questions: unmarkedQuestions,
+          unannotatedPages,
+          pendingType: type,
+        });
         return;
       }
+
       setModalType(type);
     },
-    [checkIncomplete, minTimeRequired],
+    [minTimeRequired, totalPages, isPageAnnotated, marks],
   );
 
   const handleEscalateClick = useCallback(() => {
@@ -1451,14 +1479,6 @@ export default function MarkingView() {
     );
   }
 
-  // ─── PAGE ANNOTATION STATUS ───────────────────────────────────
-  const isPageAnnotated = (page: number) => {
-    if (blankPages.has(page)) return true;
-    if (annotations.some((ann) => ann.page === page)) return true;
-    if (stamps.some((stamp) => stamp.page === page && stamp.placed))
-      return true;
-    return false;
-  };
 
   const annotatedPagesCount = Array.from(
     { length: totalPages },
@@ -1809,7 +1829,7 @@ export default function MarkingView() {
         </div>
 
         {/* ─── RIGHT SIDE: Resume banner + Mark Panel ─── */}
-        <div className="w-[255px] shrink-0 flex flex-col">
+        <div className="w-[275px] shrink-0 flex flex-col">
           {resumeBanner && (
             <div className="shrink-0 bg-amber-500/15 border-b border-amber-500/30 px-3 py-2.5">
               <p className="text-[11px] text-amber-300 leading-relaxed mb-2">
@@ -2072,36 +2092,106 @@ export default function MarkingView() {
         </div>
       )}
 
-      {/* ─── INCOMPLETE WARNING MODAL ─── */}
+      {/* ─── REVIEW BEFORE SUBMITTING MODAL ─── */}
       {incompleteWarning && (
-        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center">
-          <div className="bg-[#1e293b] border border-slate-600 rounded-xl shadow-2xl w-[400px] max-w-[95vw] overflow-hidden">
-            <div className="px-5 py-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
-                  <i className="ri-error-warning-line text-amber-400 text-lg"></i>
-                </div>
-                <h3 className="text-base font-semibold text-white">
-                  Incomplete evaluation
-                </h3>
-              </div>
-              <p className="text-sm text-slate-300 mb-3">
-                You have not entered marks for all questions. Questions without
-                marks:
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="bg-[#1c2638] border border-slate-700/80 rounded-2xl shadow-2xl w-[500px] max-w-[95vw] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="px-6 pt-5 pb-3 border-b border-slate-800 bg-[#161f30]">
+              <h3 className="text-lg font-bold text-white tracking-wide">
+                Review Before Submitting
+              </h3>
+              <p className="text-xs font-semibold text-amber-400 mt-1">
+                Please check the items below before submitting
               </p>
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mb-4">
-                <p className="text-sm text-amber-300 font-mono">
-                  {incompleteWarning.questions.join(', ')}
-                </p>
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button
-                  onClick={handleIncompleteGoBack}
-                  className="px-5 py-2 rounded-lg text-sm font-semibold bg-sky-600 text-white hover:bg-sky-500 cursor-pointer transition-colors whitespace-nowrap"
-                >
-                  Go back and complete
-                </button>
-              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="px-6 py-4 space-y-5 max-h-[60vh] overflow-y-auto">
+              {/* Section 1: Pages without any annotation */}
+              {incompleteWarning.unannotatedPages.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                      <i className="ri-error-warning-fill text-amber-400 text-xs"></i>
+                    </div>
+                    <h4 className="text-xs font-bold text-amber-400">
+                      Pages without any annotation
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mb-2.5 leading-relaxed">
+                    The following pages have no tick, cross, or mark stamp. Did you check these pages?
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {incompleteWarning.unannotatedPages.map((page) => (
+                      <button
+                        key={page}
+                        onClick={() => {
+                          setCurrentPage(page);
+                          setIncompleteWarning(null);
+                        }}
+                        title={`Go to Page ${page}`}
+                        className="bg-[#282723] hover:bg-[#36342b] text-amber-300 border border-amber-500/30 hover:border-amber-400/60 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer"
+                      >
+                        Page {page}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Section 2: Questions without marks entered */}
+              {incompleteWarning.questions.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center shrink-0">
+                      <i className="ri-error-warning-fill text-rose-400 text-xs"></i>
+                    </div>
+                    <h4 className="text-xs font-bold text-rose-400">
+                      Questions without marks entered
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mb-2.5 leading-relaxed">
+                    The following questions have no marks awarded.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {incompleteWarning.questions.map((q) => {
+                      const targetMark = marks.find((m) => m.criterion === q);
+                      return (
+                        <button
+                          key={q}
+                          onClick={() => {
+                            if (targetMark) {
+                              handleActiveMarkChange(targetMark.id);
+                            }
+                            setIncompleteWarning(null);
+                          }}
+                          title={`Select question ${q}`}
+                          className="bg-[#2c1d24] hover:bg-[#3d2734] text-rose-300 border border-rose-500/30 hover:border-rose-400/60 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer"
+                        >
+                          {q}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="px-6 py-4 bg-[#141b29] border-t border-slate-800 flex items-center justify-end gap-3">
+              <button
+                onClick={handleIncompleteGoBack}
+                className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white transition-colors cursor-pointer text-center shadow-md"
+              >
+                Go back and fix
+              </button>
+              {/* <button
+                onClick={handleIncompleteSubmitAnyway}
+                className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold bg-rose-950/40 hover:bg-rose-600 text-rose-300 hover:text-white border-2 border-rose-500/80 transition-colors cursor-pointer text-center shadow-md"
+              >
+                Submit anyway
+              </button> */}
             </div>
           </div>
         </div>

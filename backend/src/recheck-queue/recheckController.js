@@ -441,7 +441,7 @@ export const startRecheckMarking = async (req, res) => {
     }
 
     // Build full file URL
-    const baseUrl = process.env.API_URL || 'https://osmapi.digiindiasolutions.com';
+    const baseUrl = process.env.API_URL || 'http://localhost:19001';
     const buildFullUrl = (path) => {
       if (!path) return null;
       if (path.startsWith('http://') || path.startsWith('https://'))
@@ -1165,7 +1165,7 @@ export const escalateRecheckRequest = async (req, res) => {
 export const getRecheckedSheetById = async (req, res) => {
   try {
     const { id } = req.params;
-console.log('isAdmin===>role' ,id)
+    console.log('isAdmin===>role', id)
     let result = await pool.query(
       `SELECT 
         rr.id,
@@ -1296,7 +1296,7 @@ console.log('isAdmin===>role' ,id)
       }
     }
 
-    const baseUrl = process.env.API_URL || 'https://osmapi.digiindiasolutions.com';
+    const baseUrl = process.env.API_URL || 'http://localhost:19001';
     const buildFullUrl = (path) => {
       if (!path) return null;
       if (path.startsWith('http://') || path.startsWith('https://'))

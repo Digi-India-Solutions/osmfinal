@@ -1,7 +1,15 @@
 // src/pages/checker/components/RightMarkPanel.tsx
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { MarkEntry, RightTab } from '../MarkingView';
+
+function getQuestionGroupKey(criterion: string): string {
+  const match = criterion.match(/^(?:Q|Qn)?(\d+)/i);
+  if (match) {
+    return match[1];
+  }
+  return criterion || '1';
+}
 
 interface RightMarkPanelProps {
   marks: MarkEntry[];
@@ -30,7 +38,6 @@ interface RightMarkPanelProps {
   onSubmitExit: () => void;
 }
 
-const QUESTIONS_PER_PAGE = 4;
 
 export default function RightMarkPanel({
   marks,
@@ -84,17 +91,64 @@ export default function RightMarkPanel({
   const allMarksComplete =
     marks.length > 0 && marks.every((m) => m.awarded > 0);
 
-  // Derived from real data, not hardcoded — was previously locked to 23
   const totalQuestions = marks.length;
-  const totalQuestionPages = Math.max(
-    1,
-    Math.ceil(totalQuestions / QUESTIONS_PER_PAGE),
-  );
 
-  const startIdx = questionPage * QUESTIONS_PER_PAGE;
-  const visibleMarks = marks.slice(startIdx, startIdx + QUESTIONS_PER_PAGE);
-  const displayStart = totalQuestions === 0 ? 0 : startIdx + 1;
-  const displayEnd = Math.min(startIdx + QUESTIONS_PER_PAGE, totalQuestions);
+  // Group marks by main question number (e.g. 1i, 1ii => Question 1)
+  const questionGroups = useMemo(() => {
+    const map = new Map<string, MarkEntry[]>();
+    marks.forEach((m) => {
+      const key = getQuestionGroupKey(m.criterion);
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key)!.push(m);
+    });
+    return map;
+  }, [marks]);
+
+  const groupKeys = useMemo(() => Array.from(questionGroups.keys()), [questionGroups]);
+
+  const [selectedGroupIndex, setSelectedGroupIndex] = useState(0);
+
+  // Sync selectedGroupIndex when activeMarkId changes
+  useEffect(() => {
+    if (activeMarkId && marks.length > 0) {
+      const activeMark = marks.find((m) => m.id === activeMarkId);
+      if (activeMark) {
+        const activeGroupKey = getQuestionGroupKey(activeMark.criterion);
+        const idx = groupKeys.indexOf(activeGroupKey);
+        if (idx !== -1 && idx !== selectedGroupIndex) {
+          setSelectedGroupIndex(idx);
+        }
+      }
+    }
+  }, [activeMarkId, groupKeys, marks]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const safeGroupIndex = Math.min(
+    Math.max(0, selectedGroupIndex),
+    Math.max(0, groupKeys.length - 1),
+  );
+  const currentGroupKey = groupKeys[safeGroupIndex] || '';
+  const currentQuestionMarks = questionGroups.get(currentGroupKey) || [];
+
+  // Handle manual question group switching (via Left / Right arrows)
+  const handleGroupChange = useCallback(
+    (newIndex: number) => {
+      const clampedIndex = Math.min(
+        Math.max(0, newIndex),
+        Math.max(0, groupKeys.length - 1),
+      );
+      setSelectedGroupIndex(clampedIndex);
+      const targetGroupKey = groupKeys[clampedIndex];
+      if (targetGroupKey) {
+        const firstMark = questionGroups.get(targetGroupKey)?.[0];
+        if (firstMark && !readOnly) {
+          onActiveMarkChange(firstMark.id);
+        }
+      }
+    },
+    [groupKeys, questionGroups, readOnly, onActiveMarkChange],
+  );
 
   const displayNumeric =
     displayValue === '' ? 0 : parseFloat(displayValue) || 0;
@@ -165,7 +219,7 @@ export default function RightMarkPanel({
       ? Math.round((completedCount / totalQuestions) * 100)
       : 0;
 
-  const submitDisabled = readOnly || !isTimeRequirementMet;
+  const submitDisabled = readOnly;
 
   // ─── Open preview modal ───
   const openPreview = (type: 'questions' | 'answers', url: string) => {
@@ -195,7 +249,7 @@ export default function RightMarkPanel({
   }, [previewModal]);
 
   return (
-    <aside className="flex-1 min-h-0 w-[255px] shrink-0 bg-[#1e293b] flex flex-col border-l border-slate-700">
+    <aside className="flex-1 min-h-0 w-full shrink-0 bg-[#1e293b] flex flex-col border-l border-slate-700">
       {/* ─── THREE TABS ─── */}
       <div className="flex border-b border-slate-700 shrink-0">
         {tabs.map((tab) => {
@@ -278,17 +332,17 @@ export default function RightMarkPanel({
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {/* ─── MARKS TAB ─── */}
         {rightTab === 'marks' && (
-          <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
             {/* Progress bar */}
             {totalQuestions > 0 && (
               <div className="px-2.5 pt-2 pb-1 shrink-0">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[9px] text-slate-500">Progress</span>
-                  <span className="text-[9px] text-slate-400 tabular-nums">
+                  <span className="text-[9px] text-slate-400 font-medium">Progress</span>
+                  <span className="text-[9px] text-slate-300 tabular-nums font-semibold">
                     {completedCount}/{totalQuestions}
                   </span>
                 </div>
-                <div className="h-1 bg-slate-700 rounded-full overflow-hidden">
+                <div className="h-1.5 bg-slate-700/80 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-emerald-500 rounded-full transition-all duration-300"
                     style={{ width: `${progressPct}%` }}
@@ -297,53 +351,59 @@ export default function RightMarkPanel({
               </div>
             )}
 
-            {/* Question nav */}
-            <div className="flex items-center justify-between px-2.5 py-2 border-b border-slate-700/50 shrink-0">
+            {/* Question Group Nav Header */}
+            <div className="flex items-center justify-between px-2.5 py-2 border-b border-slate-700/50 shrink-0 bg-slate-800/50">
               <button
-                onClick={() =>
-                  onQuestionPageChange(Math.max(0, questionPage - 1))
-                }
-                disabled={questionPage === 0}
-                className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                onClick={() => handleGroupChange(safeGroupIndex - 1)}
+                disabled={safeGroupIndex === 0}
+                className="w-6 h-6 rounded flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Previous Question"
               >
-                <i className="ri-arrow-left-s-line text-xs"></i>
+                <i className="ri-arrow-left-s-line text-sm"></i>
               </button>
-              <span className="text-[11px] text-slate-400 tabular-nums">
-                {totalQuestions === 0
-                  ? 'No questions'
-                  : `${displayStart}–${displayEnd} of ${totalQuestions}`}
-              </span>
+
+              <div className="text-center min-w-0 flex-1 px-1">
+                <span className="text-[11px] font-bold text-white tracking-wide block truncate">
+                  {groupKeys.length === 0
+                    ? 'No questions'
+                    : `Question ${currentGroupKey}`}
+                </span>
+                {groupKeys.length > 0 && (
+                  <span className="text-[9px] text-slate-400 block font-normal leading-none mt-0.5">
+                    {safeGroupIndex + 1} of {groupKeys.length} 
+                    {/* ({currentQuestionMarks.length} part{currentQuestionMarks.length === 1 ? '' : 's'}) */}
+                  </span>
+                )}
+              </div>
+
               <button
-                onClick={() =>
-                  onQuestionPageChange(
-                    Math.min(totalQuestionPages - 1, questionPage + 1),
-                  )
-                }
-                disabled={questionPage >= totalQuestionPages - 1}
-                className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                onClick={() => handleGroupChange(safeGroupIndex + 1)}
+                disabled={safeGroupIndex >= groupKeys.length - 1}
+                className="w-6 h-6 rounded flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Next Question"
               >
-                <i className="ri-arrow-right-s-line text-xs"></i>
+                <i className="ri-arrow-right-s-line text-sm"></i>
               </button>
             </div>
 
             {/* Marks table header */}
-            <div className="grid grid-cols-[38px_24px_34px_1fr] border-b border-slate-700/50 text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-2 py-1.5 shrink-0">
-              <span>Criterion</span>
-              <span className="text-center">Max</span>
-              <span className="text-center">Award</span>
-              <span>Remark</span>
+            <div className="grid grid-cols-[55px_32px_44px_1fr] gap-1 border-b border-slate-700/50 text-[10px] font-semibold text-slate-400 uppercase tracking-normal px-2.5 py-1.5 shrink-0 bg-slate-800/60">
+              <span className="truncate">Criterion</span>
+              <span className="text-center truncate">Max</span>
+              <span className="text-center truncate">Award</span>
+              <span className="truncate">Remark</span>
             </div>
 
-            {/* Marks table rows */}
-            <div className="flex-1 overflow-y-auto">
-              {visibleMarks.length === 0 ? (
+            {/* Marks table rows for current question */}
+            <div className="shrink-0">
+              {currentQuestionMarks.length === 0 ? (
                 <div className="flex items-center justify-center h-full p-4">
                   <p className="text-[11px] text-slate-500 text-center">
                     No mark scheme loaded yet
                   </p>
                 </div>
               ) : (
-                visibleMarks.map((m) => {
+                currentQuestionMarks.map((m) => {
                   const isActive = activeMarkId === m.id;
                   const awardedStr = m.awarded === 0 ? '—' : String(m.awarded);
 
@@ -351,7 +411,7 @@ export default function RightMarkPanel({
                     <div
                       key={m.id}
                       onClick={() => !readOnly && onActiveMarkChange(m.id)}
-                      className={`px-1.5 py-1.5 border-b border-slate-700/30 transition-colors ${
+                      className={`px-2.5 py-1.5 border-b border-slate-700/30 transition-colors ${
                         readOnly ? 'cursor-default' : 'cursor-pointer'
                       } ${
                         isActive
@@ -359,16 +419,16 @@ export default function RightMarkPanel({
                           : 'border-l-[3px] border-l-transparent hover:bg-white/[0.03]'
                       }`}
                     >
-                      <div className="grid grid-cols-[38px_24px_34px_1fr] items-center gap-0.5 text-[11px]">
-                        <span className="text-slate-300 font-medium truncate">
+                      <div className="grid grid-cols-[55px_32px_44px_1fr] items-center gap-1 text-[11px]">
+                        <span className="text-slate-300 font-medium truncate" title={m.criterion}>
                           {m.criterion}
                         </span>
-                        <span className="text-center text-slate-500">
+                        <span className="text-center text-slate-400 font-mono">
                           {m.max}
                         </span>
                         <span
-                          className={`text-center font-mono tabular-nums text-[12px] ${
-                            m.awarded > 0 ? 'text-emerald-400' : 'text-white'
+                          className={`text-center font-mono tabular-nums text-[12px] font-semibold ${
+                            m.awarded > 0 ? 'text-emerald-400' : 'text-slate-300'
                           }`}
                         >
                           {awardedStr}
@@ -380,7 +440,7 @@ export default function RightMarkPanel({
                           onChange={(e) => onRemarkUpdate(m.id, e.target.value)}
                           placeholder="—"
                           disabled={readOnly}
-                          className="w-full h-5 px-1 text-[10px] rounded border border-slate-600 bg-slate-800 text-slate-300 outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 placeholder:text-slate-600 disabled:opacity-60 disabled:cursor-default"
+                          className="w-full h-5 px-1.5 text-[10px] rounded border border-slate-600 bg-slate-800 text-slate-300 outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 placeholder:text-slate-600 disabled:opacity-60 disabled:cursor-default"
                         />
                       </div>
                     </div>
@@ -451,14 +511,14 @@ export default function RightMarkPanel({
                 </button>
               </div>
 
-              <button
+              {/* <button
                 onClick={() => !readOnly && handleBackspace()}
                 disabled={readOnly || isEmpty}
                 className="w-full h-7 rounded bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-medium cursor-pointer transition-colors disabled:opacity-25 disabled:cursor-not-allowed whitespace-nowrap flex items-center justify-center gap-1 mb-1.5 active:bg-slate-500"
               >
                 <i className="ri-delete-back-2-line text-[11px]"></i>
                 backspace
-              </button>
+              </button> */}
 
               <div className="grid grid-cols-2 gap-1">
                 <button
@@ -649,16 +709,14 @@ export default function RightMarkPanel({
               Escalate
             </button>
 
-            {/* Submit Continue - clickable when any mark is given */}
+            {/* Submit Continue - Always enabled */}
             <button
               onClick={onSubmitContinue}
-              disabled={submitDisabled || !hasAnyMarks}
+              disabled={submitDisabled}
               title={
                 !isTimeRequirementMet
                   ? `Minimum ${minTimeRequired} minute(s) required`
-                  : !hasAnyMarks
-                    ? 'Add at least one mark to continue'
-                    : undefined
+                  : undefined
               }
               className="w-full py-2 text-xs font-semibold rounded bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -666,16 +724,14 @@ export default function RightMarkPanel({
               Submit and Continue
             </button>
 
-            {/* Submit Exit - clickable only when all marks are given */}
+            {/* Submit Exit - Always enabled */}
             <button
               onClick={onSubmitExit}
-              disabled={submitDisabled || !allMarksComplete}
+              disabled={submitDisabled}
               title={
                 !isTimeRequirementMet
                   ? `Minimum ${minTimeRequired} minute(s) required`
-                  : !allMarksComplete
-                    ? 'Complete all questions to exit'
-                    : undefined
+                  : undefined
               }
               className="w-full py-2 text-xs font-semibold rounded bg-rose-600 text-white hover:bg-rose-500 cursor-pointer transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
             >

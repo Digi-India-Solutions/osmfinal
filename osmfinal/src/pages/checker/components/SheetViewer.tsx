@@ -791,7 +791,9 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
         const { x, y } = getCanvasCoords(e);
         isDrawingRef.current = true;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#1E40AF';
+        ctx.fillStyle = '#1E40AF';
+        ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
@@ -827,6 +829,11 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
 
         if (activeTool !== 'pencil' || placingMarkId) return;
         const { x, y } = getCanvasCoords(e);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = '#1E40AF';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.lineTo(x, y);
         ctx.stroke();
       },
@@ -844,7 +851,8 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
       }
       if (ctxRef.current) {
         ctxRef.current.globalCompositeOperation = 'source-over';
-        ctxRef.current.lineWidth = 2;
+        ctxRef.current.strokeStyle = '#1E40AF';
+        ctxRef.current.lineWidth = 2.5;
       }
     }, []);
 
@@ -1486,7 +1494,7 @@ const SheetViewer = forwardRef<SheetViewerHandle, SheetViewerProps>(
                   />
                   <canvas
                     ref={canvasRef}
-                    className="absolute inset-0 w-full h-full z-10"
+                    className="absolute inset-0 w-full h-full z-30"
                     style={{
                       pointerEvents:
                         (isPencilActive || activeTool === 'eraser') &&

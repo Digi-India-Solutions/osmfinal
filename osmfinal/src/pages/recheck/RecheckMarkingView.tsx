@@ -507,6 +507,10 @@ export default function RecheckMarkingView() {
   const [zoom, setZoom] = useState(100);
 
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [selectedStampId, setSelectedStampId] = useState<string | null>(null);
+  const [dragStampId, setDragStampId] = useState<string | null>(null);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
+  const [annotationDragId, setAnnotationDragId] = useState<number | null>(null);
 
   const actionHistoryRef = useRef<ActionType[]>([]);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -531,6 +535,7 @@ export default function RecheckMarkingView() {
   // ─── INCOMPLETE SUBMISSION WARNING ───
   const [incompleteWarning, setIncompleteWarning] = useState<{
     questions: string[];
+    unannotatedPages: number[];
   } | null>(null);
 
   // ─── Computed values ───
@@ -1117,14 +1122,8 @@ export default function RecheckMarkingView() {
         return;
       }
 
-      const stamp = stampsRef.current.find((s) => s.markId === id);
-      if (stamp && !stamp.placed) {
-        setPlacingMarkId(id);
-        setInstructionBanner(`Click on sheet to place mark position for ${id}`);
-      } else {
-        setPlacingMarkId(null);
-        setInstructionBanner(null);
-      }
+      setPlacingMarkId(id);
+      setInstructionBanner(`Click on sheet to place mark position for ${id}`);
     },
     [requestData?.isReadOnly],
   );
@@ -1143,13 +1142,10 @@ export default function RecheckMarkingView() {
                 x: xPercent,
                 y: yPercent,
                 page,
-                value: null,
               }
             : s,
         ),
       );
-      setPlacingMarkId(null);
-      setInstructionBanner(null);
     },
     [placingMarkId, requestData?.isReadOnly],
   );
@@ -1171,6 +1167,95 @@ export default function RecheckMarkingView() {
       );
     },
     [requestData?.isReadOnly],
+  );
+
+  // ─── Stamp & Annotation interaction handlers ───
+  const handleSelectStamp = useCallback((stampId: string) => {
+    setSelectedStampId(stampId);
+    setSelectedAnnotationId(null);
+  }, []);
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedStampId(null);
+    setSelectedAnnotationId(null);
+    setDragStampId(null);
+  }, []);
+
+  const handleEnterDragMode = useCallback((stampId: string) => {
+    setDragStampId(stampId);
+    setSelectedStampId(stampId);
+  }, []);
+
+  const handleStampDragStart = useCallback((_stampId: string) => {}, []);
+
+  const handleStampDragEnd = useCallback((_stampId: string) => {
+    setDragStampId(null);
+    setToastMessage('Mark position updated');
+    setTimeout(() => setToastMessage(null), 2500);
+  }, []);
+
+  const handleStampContextMenu = useCallback(
+    (stampId: string, _clientX: number, _clientY: number) => {
+      setSelectedStampId(stampId);
+    },
+    [],
+  );
+
+  const handleRemoveStamp = useCallback(
+    (id: string) => {
+      if (requestData?.isReadOnly) return;
+      setStamps((prev) =>
+        prev.map((s) =>
+          s.markId === id
+            ? { ...s, placed: false, x: 0, y: 0, page: 0, value: null }
+            : s,
+        ),
+      );
+      setMarks((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, round2: null } : m)),
+      );
+      manuallySetMarksRef.current.delete(id);
+      setSelectedStampId(null);
+      setToastMessage('Mark removed — click on sheet to reposition');
+      setTimeout(() => setToastMessage(null), 2500);
+    },
+    [requestData?.isReadOnly],
+  );
+
+  // ─── Annotation interaction handlers ───
+  const handleAnnotationSelect = useCallback((id: number) => {
+    setSelectedAnnotationId(id);
+    setSelectedStampId(null);
+  }, []);
+
+  const handleAnnotationDeselect = useCallback(() => {
+    setSelectedAnnotationId(null);
+  }, []);
+
+  const handleAnnotationDragStart = useCallback((_id: number) => {}, []);
+
+  const handleAnnotationDragEnd = useCallback((_id: number) => {
+    setAnnotationDragId(null);
+    setToastMessage('Annotation moved');
+    setTimeout(() => setToastMessage(null), 2500);
+  }, []);
+
+  const handleAnnotationReposition = useCallback(
+    (id: number, page: number, x: number, y: number) => {
+      if (requestData?.isReadOnly) return;
+      setAnnotations((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, page, x, y } : a)),
+      );
+    },
+    [requestData?.isReadOnly],
+  );
+
+  const handleAnnotationContextMenu = useCallback(
+    (annotationId: number, _clientX: number, _clientY: number) => {
+      setSelectedAnnotationId(annotationId);
+      setSelectedStampId(null);
+    },
+    [],
   );
 
   // ─── Clear stamp value ───
@@ -1257,6 +1342,19 @@ export default function RecheckMarkingView() {
     [requestData?.isReadOnly],
   );
 
+  // ─── PAGE ANNOTATION STATUS ───
+  const isPageAnnotated = useCallback(
+    (page: number) => {
+      if (blankPages.has(page)) return true;
+      if (annotations.some((ann) => ann.page === page)) return true;
+      if (stamps.some((stamp) => stamp.page === page && stamp.placed))
+        return true;
+      if (notes.some((note) => note.page === page)) return true;
+      return false;
+    },
+    [blankPages, annotations, stamps, notes],
+  );
+
   // ─── INCOMPLETE CHECK ───
 
   const checkIncomplete = useCallback((): string[] => {
@@ -1283,13 +1381,22 @@ export default function RecheckMarkingView() {
       return;
     }
 
-    const incomplete = checkIncomplete();
-    if (incomplete.length > 0) {
-      setIncompleteWarning({ questions: incomplete });
+    const unannotatedPages = Array.from(
+      { length: totalPages },
+      (_, i) => i + 1,
+    ).filter((page) => !isPageAnnotated(page));
+
+    const incompleteQuestions = checkIncomplete();
+
+    if (unannotatedPages.length > 0 || incompleteQuestions.length > 0) {
+      setIncompleteWarning({
+        questions: incompleteQuestions,
+        unannotatedPages,
+      });
       return;
     }
     setModalType('submit');
-  }, [checkIncomplete, requestData?.isReadOnly, minTimeRequired]);
+  }, [checkIncomplete, totalPages, isPageAnnotated, requestData?.isReadOnly, minTimeRequired]);
 
   // ─── ESCALATE FURTHER WITH TIME CHECK ───
 
@@ -1429,8 +1536,26 @@ export default function RecheckMarkingView() {
 
   const hasModelAnswer = !!pdfsData.model_answer;
 
+  // ─── Keyboard handler ───
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = document.activeElement?.tagName;
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA';
+
+      if (e.key === 'h' && !isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setActiveTool('handSelect');
+        setToastMessage('Hand Select — click to select, drag to move');
+        setTimeout(() => setToastMessage(null), 2000);
+        return;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const toolbarTools: { tool: AnnotationTool; icon: string; label: string }[] =
     [
+      { tool: 'handSelect', icon: 'ri-hand', label: 'Select & Move (H)' },
       { tool: 'tick', icon: 'ri-check-line', label: 'Tick' },
       { tool: 'cross', icon: 'ri-close-line', label: 'Cross' },
       { tool: 'pencil', icon: 'ri-pencil-line', label: 'Pencil' },
@@ -1663,6 +1788,10 @@ export default function RecheckMarkingView() {
             instructionBanner={instructionBanner}
             stampColor={STAMP_COLOR}
             pulseAnimationName={PULSE_ANIM}
+            selectedStampId={selectedStampId}
+            dragStampId={dragStampId}
+            selectedAnnotationId={selectedAnnotationId}
+            annotationDragId={annotationDragId}
             notes={notes}
             editingNoteId={editingNoteId}
             onNoteAdd={handleNoteAdd}
@@ -1676,6 +1805,21 @@ export default function RecheckMarkingView() {
             onSheetClickForPlacement={handleSheetClickForPlacement}
             onStampReposition={handleStampReposition}
             onDismissBanner={handleDismissBanner}
+            onStampSelect={handleSelectStamp}
+            onStampDeselect={handleDeselectAll}
+            onStampDoubleClick={handleEnterDragMode}
+            onStampRemove={handleRemoveStamp}
+            onStampDragStart={handleStampDragStart}
+            onStampDragEnd={handleStampDragEnd}
+            onSheetBackgroundClick={handleDeselectAll}
+            onStampContextMenu={handleStampContextMenu}
+            onAnnotationSelect={handleAnnotationSelect}
+            onAnnotationDeselect={handleAnnotationDeselect}
+            onAnnotationReposition={handleAnnotationReposition}
+            onAnnotationDragStart={handleAnnotationDragStart}
+            onAnnotationDragEnd={handleAnnotationDragEnd}
+            onAnnotationContextMenu={handleAnnotationContextMenu}
+            onAnnotationDeleteRequest={handleAnnotationDelete}
             pageRefs={pageRefs}
             scrollToPage={scrollToPage}
             pdfUrl={sheetData?.file_url || pdfsData.question_paper || null}
@@ -1815,38 +1959,109 @@ export default function RecheckMarkingView() {
         </div>
       )}
 
-      {/* ─── INCOMPLETE WARNING MODAL ─── */}
+      {/* ─── REVIEW BEFORE SUBMITTING MODAL ─── */}
       {incompleteWarning && (
-        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center">
-          <div className="bg-[#1e293b] border border-slate-600 rounded-xl shadow-2xl w-[400px] max-w-[95vw] overflow-hidden">
-            <div className="px-5 py-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
-                  <i className="ri-error-warning-line text-amber-400 text-lg"></i>
+        <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#1c1b18] border border-amber-500/40 rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden text-slate-100 font-sans">
+            <div className="p-6">
+              <div className="flex items-center justify-between pb-4 mb-4 border-b border-amber-500/20">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                    <i className="ri-error-warning-fill text-amber-400 text-lg"></i>
+                  </div>
+                  <h3 className="text-base font-bold text-amber-400">
+                    Review Before Submitting
+                  </h3>
                 </div>
-                <h3 className="text-base font-semibold text-white">
-                  Incomplete recheck evaluation
-                </h3>
+                <button
+                  onClick={() => setIncompleteWarning(null)}
+                  className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <i className="ri-close-line text-xl"></i>
+                </button>
               </div>
-              <p className="text-sm text-slate-300 mb-3">
-                You have not entered marks for all questions. Questions without
-                marks:
-              </p>
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mb-4">
-                <p className="text-sm text-amber-300 font-mono">
-                  {incompleteWarning.questions.join(', ')}
-                </p>
-              </div>
-              <div className="flex gap-3 justify-end">
+
+              {/* Section 1: Pages without any annotation */}
+              {incompleteWarning.unannotatedPages &&
+                incompleteWarning.unannotatedPages.length > 0 && (
+                  <div className="mb-5">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                        <i className="ri-file-warning-line text-amber-400 text-xs"></i>
+                      </div>
+                      <h4 className="text-xs font-bold text-amber-300">
+                        Pages without any annotation
+                      </h4>
+                    </div>
+                    <p className="text-[11px] text-slate-300 mb-2.5 leading-relaxed">
+                      The following pages have no ticks, crosses, stamps, or drawings. Please review each page.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {incompleteWarning.unannotatedPages.map((page) => (
+                        <button
+                          key={page}
+                          onClick={() => {
+                            setCurrentPage(page);
+                            scrollToPage(page);
+                            setIncompleteWarning(null);
+                          }}
+                          title={`Go to Page ${page}`}
+                          className="bg-[#282723] hover:bg-[#36342b] text-amber-300 border border-amber-500/30 hover:border-amber-400/60 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer"
+                        >
+                          Page {page}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+              {/* Section 2: Questions without marks entered */}
+              {incompleteWarning.questions.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center shrink-0">
+                      <i className="ri-error-warning-fill text-rose-400 text-xs"></i>
+                    </div>
+                    <h4 className="text-xs font-bold text-rose-400">
+                      Questions without marks entered
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mb-2.5 leading-relaxed">
+                    The following questions have no marks awarded.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {incompleteWarning.questions.map((q) => {
+                      const targetMark = marks.find((m) => m.criterion === q);
+                      return (
+                        <button
+                          key={q}
+                          onClick={() => {
+                            if (targetMark) {
+                              handleActiveMarkChange(targetMark.id);
+                              setIncompleteWarning(null);
+                            }
+                          }}
+                          title={`Go to ${q}`}
+                          className="bg-[#2a1b1e] hover:bg-[#3a2025] text-rose-300 border border-rose-500/30 hover:border-rose-400/60 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer"
+                        >
+                          {q}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 pt-5 mt-5 border-t border-slate-700/60">
                 <button
                   onClick={handleIncompleteGoBack}
-                  className="px-5 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-500 cursor-pointer transition-colors whitespace-nowrap"
+                  className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white transition-colors cursor-pointer text-center shadow-md"
                 >
-                  Go back and complete
+                  Go back and fix
                 </button>
                 <button
                   onClick={handleIncompleteSubmitAnyway}
-                  className="px-5 py-2 rounded-lg text-sm font-semibold border-2 border-rose-500 text-rose-400 hover:bg-rose-500/10 cursor-pointer transition-colors whitespace-nowrap"
+                  className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold bg-rose-950/40 hover:bg-rose-600 text-rose-300 hover:text-white border-2 border-rose-500/80 transition-colors cursor-pointer text-center shadow-md"
                 >
                   Submit anyway
                 </button>
