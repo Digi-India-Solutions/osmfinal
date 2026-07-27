@@ -95,6 +95,7 @@ export default function WorkQueue() {
     currentBatch: number;
     totalBatches: number;
     totalCount: number;
+    downloadedSheets: number;
     progressText: string;
     cancelRequested: boolean;
   }>({
@@ -103,6 +104,7 @@ export default function WorkQueue() {
     currentBatch: 0,
     totalBatches: 0,
     totalCount: 0,
+    downloadedSheets: 0,
     progressText: '',
     cancelRequested: false,
   });
@@ -776,13 +778,16 @@ export default function WorkQueue() {
         currentBatch: 1,
         totalBatches,
         totalCount: total,
+        downloadedSheets: 0,
         progressText: `Preparing to download ${total} sheets in ${totalBatches} batch(es)...`,
         cancelRequested: false,
       });
 
       for (let b = 1; b <= totalBatches; b++) {
-        // Check if user requested cancellation
         let cancelState = false;
+        const startNum = (b - 1) * BATCH_SIZE + 1;
+        const endNum = Math.min(b * BATCH_SIZE, total);
+
         setDownloadModal((prev) => {
           if (prev.cancelRequested) {
             cancelState = true;
@@ -790,7 +795,7 @@ export default function WorkQueue() {
           return {
             ...prev,
             currentBatch: b,
-            progressText: `Downloading Batch ${b} of ${totalBatches} (Sheets ${(b - 1) * BATCH_SIZE + 1} to ${Math.min(b * BATCH_SIZE, total)} of ${total})...`,
+            progressText: `Downloading Batch ${b} of ${totalBatches} (Sheets ${startNum} - ${endNum} of ${total})...`,
           };
         });
 
@@ -817,6 +822,13 @@ export default function WorkQueue() {
         a.remove();
         window.URL.revokeObjectURL(url);
 
+        // Update exact sheet count downloaded
+        setDownloadModal((prev) => ({
+          ...prev,
+          downloadedSheets: endNum,
+          progressText: `Downloaded ${endNum} of ${total} sheets (Batch ${b} of ${totalBatches} complete)`,
+        }));
+
         // Pause 1.5 seconds between batches to avoid browser/server overload
         if (b < totalBatches) {
           await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -829,12 +841,13 @@ export default function WorkQueue() {
         currentBatch: 0,
         totalBatches: 0,
         totalCount: 0,
+        downloadedSheets: 0,
         progressText: '',
         cancelRequested: false,
       });
 
       showToast(
-        `Successfully finished downloading ${total} sheets in batches!`,
+        `Successfully finished downloading all ${total} sheets in batches!`,
         'success',
       );
     } catch (err: any) {
@@ -846,6 +859,7 @@ export default function WorkQueue() {
         currentBatch: 0,
         totalBatches: 0,
         totalCount: 0,
+        downloadedSheets: 0,
         progressText: '',
         cancelRequested: false,
       });
@@ -1777,54 +1791,71 @@ export default function WorkQueue() {
       {/* ─── DOWNLOAD PROGRESS MODAL ─── */}
       {downloadModal.open && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-semibold text-lg">
-                <i className="ri-download-cloud-line text-xl animate-bounce"></i>
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-semibold text-xl flex-shrink-0">
+                <i className="ri-download-cloud-line text-2xl animate-bounce"></i>
               </div>
               <div>
                 <h4 className="text-base font-semibold text-gray-900">
                   Downloading Completed Sheets
                 </h4>
                 <p className="text-xs text-gray-500">
-                  Batch download (100 PDFs per batch for speed & reliability)
+                  Batch size: 100 PDFs per chunk
                 </p>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs font-medium text-gray-600">
+            <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-100">
+              <div className="flex items-center justify-between text-xs font-semibold text-gray-800">
+                <span>Sheets Downloaded</span>
+                <span className="text-emerald-600 font-bold text-sm">
+                  {downloadModal.downloadedSheets} / {downloadModal.totalCount}
+                </span>
+              </div>
+
+              <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden shadow-inner">
+                <div
+                  className="bg-emerald-600 h-3 rounded-full transition-all duration-500 ease-out flex items-center justify-end pr-1"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.max(
+                        3,
+                        Math.round(
+                          (downloadModal.downloadedSheets /
+                            (downloadModal.totalCount || 1)) *
+                            100,
+                        ),
+                      ),
+                    )}%`,
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-gray-500 font-medium pt-0.5">
                 <span>
                   Batch {downloadModal.currentBatch} of {downloadModal.totalBatches}
                 </span>
                 <span>
                   {Math.round(
-                    (downloadModal.currentBatch / downloadModal.totalBatches) *
+                    (downloadModal.downloadedSheets /
+                      (downloadModal.totalCount || 1)) *
                       100,
                   )}
-                  %
+                  % Complete
                 </span>
               </div>
 
-              <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
-                  style={{
-                    width: `${
-                      (downloadModal.currentBatch /
-                        downloadModal.totalBatches) *
-                      100
-                    }%`,
-                  }}
-                ></div>
-              </div>
-
-              <p className="text-xs text-gray-600 italic mt-2">
-                {downloadModal.progressText}
+              <p className="text-xs text-gray-600 font-medium italic pt-1.5 border-t border-gray-200/60 mt-1 flex items-center gap-1.5">
+                <i className="ri-loader-4-line text-emerald-600 animate-spin text-sm flex-shrink-0"></i>
+                <span className="truncate">{downloadModal.progressText}</span>
               </p>
             </div>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end pt-1">
               <button
                 type="button"
                 onClick={() =>
@@ -1833,7 +1864,7 @@ export default function WorkQueue() {
                     cancelRequested: true,
                   }))
                 }
-                className="px-4 py-2 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                className="px-4 py-2 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer border border-red-200"
               >
                 Cancel Download
               </button>
