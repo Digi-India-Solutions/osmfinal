@@ -1110,6 +1110,27 @@ export default function SheetUpload() {
   const [selectedSheetIds, setSelectedSheetIds] = useState<Set<number>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Chunked Upload Progress State (100 files per chunk)
+  const [uploadProgressModal, setUploadProgressModal] = useState<{
+    open: boolean;
+    isUploading: boolean;
+    currentChunk: number;
+    totalChunks: number;
+    totalFiles: number;
+    uploadedCount: number;
+    progressText: string;
+    cancelRequested: boolean;
+  }>({
+    open: false,
+    isUploading: false,
+    currentChunk: 0,
+    totalChunks: 0,
+    totalFiles: 0,
+    uploadedCount: 0,
+    progressText: '',
+    cancelRequested: false,
+  });
+
   const [toastMsg, setToastMsg] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -1223,66 +1244,157 @@ export default function SheetUpload() {
     e.target.value = '';
   };
 
-  // ─── AUTO-LINK ────────────────────────────────────────────────
+  // ─── AUTO-LINK & CHUNKED UPLOAD (100 SHEETS PER CHUNK) ───────
 
   const handleAutoLink = async () => {
     if (!selectedExam || uploadedFiles.length === 0) return;
     setIsLinking(true);
     setSubjectMismatch([]);
 
+    const allFiles = uploadedFiles.map((f) => f.file!).filter(Boolean);
+    const CHUNK_SIZE = 100;
+    const totalFiles = allFiles.length;
+    const totalChunks = Math.ceil(totalFiles / CHUNK_SIZE);
+
+    setUploadProgressModal({
+      open: true,
+      isUploading: true,
+      currentChunk: 1,
+      totalChunks,
+      totalFiles,
+      uploadedCount: 0,
+      progressText: `Preparing to upload ${totalFiles} sheets in ${totalChunks} chunk(s)...`,
+      cancelRequested: false,
+    });
+
+    const allResults: LinkingResult[] = [];
+    const allMismatches: SubjectMismatch[] = [];
+
     try {
-      const files = uploadedFiles.map((f) => f.file!).filter(Boolean);
-      const uploadResponse = await sheetService.uploadSheets(selectedExam, files);
-      if (!uploadResponse.success) {
-        showToast(uploadResponse.message || 'Failed to upload files', 'error');
-        return;
-      }
+      for (let c = 0; c < totalChunks; c++) {
+        let cancelState = false;
+        const startIdx = c * CHUNK_SIZE;
+        const chunkFiles = allFiles.slice(startIdx, startIdx + CHUNK_SIZE);
+        const endNum = Math.min((c + 1) * CHUNK_SIZE, totalFiles);
 
-      const uploadedSheets = uploadResponse.data.sheets || [];
-      const duplicates: any[] = uploadResponse.data.duplicates || [];
-      const invalidFiles: any[] = uploadResponse.data.invalidFiles || [];
-      const mismatchFiles: SubjectMismatch[] = uploadResponse.data.subjectMismatch || [];
+        setUploadProgressModal((prev) => {
+          if (prev.cancelRequested) cancelState = true;
+          return {
+            ...prev,
+            currentChunk: c + 1,
+            progressText: `Uploading Chunk ${c + 1} of ${totalChunks} (Sheets ${startIdx + 1} - ${endNum} of ${totalFiles})...`,
+          };
+        });
 
-      if (mismatchFiles.length > 0) setSubjectMismatch(mismatchFiles);
+        if (cancelState) {
+          showToast('Upload cancelled by user', 'error');
+          break;
+        }
 
-      const allResults: LinkingResult[] = [];
+        const uploadResponse = await sheetService.uploadSheets(selectedExam, chunkFiles);
 
-      invalidFiles.forEach((f: any) => {
-        allResults.push({ fileName: f.filename, barcode: null, studentName: null, studentRoll: null, linked: false, failureReason: 'invalid_barcode' });
-      });
+        if (!uploadResponse.success) {
+          showToast(`Chunk ${c + 1} failed: ${uploadResponse.message || 'Failed to upload'}`, 'error');
+          continue;
+        }
 
-      duplicates.forEach((f: any) => {
-        allResults.push({ fileName: f.filename, barcode: f.barcode || null, studentName: f.student_name || null, studentRoll: f.roll_no || null, linked: false, alreadyLinked: true, failureReason: 'duplicate_upload' });
-      });
+        const uploadedSheets = uploadResponse.data.sheets || [];
+        const duplicates: any[] = uploadResponse.data.duplicates || [];
+        const invalidFiles: any[] = uploadResponse.data.invalidFiles || [];
+        const mismatchFiles: SubjectMismatch[] = uploadResponse.data.subjectMismatch || [];
 
-      mismatchFiles.forEach((f) => {
-        allResults.push({ fileName: f.filename, barcode: f.barcode, studentName: f.student_name, studentRoll: f.roll_no, linked: false, failureReason: 'subject_mismatch', studentSubject: f.student_subject, examSubject: f.exam_subject });
-      });
+        if (mismatchFiles.length > 0) {
+          allMismatches.push(...mismatchFiles);
+        }
 
-      if (uploadedSheets.length > 0) {
-        const sheetIds = uploadedSheets.map((s: any) => s.id);
-        const linkResponse = await sheetService.autoLinkSheets(selectedExam, sheetIds);
-
-        if (linkResponse.success) {
-          const results = linkResponse.data.results || [];
-          uploadedSheets.forEach((sheet: any) => {
-            const matchedFile = uploadedFiles.find((f) => f.barcode === sheet.barcode);
-            const result = results.find((r: any) => r.barcode === sheet.barcode);
-            if (result?.matched) {
-              allResults.push({ fileName: matchedFile?.name || sheet.file_name, barcode: sheet.barcode, studentName: result.student?.student_name || null, studentRoll: result.student?.roll_no || null, linked: true, sheetId: sheet.id });
-            } else {
-              allResults.push({ fileName: matchedFile?.name || sheet.file_name, barcode: sheet.barcode, studentName: null, studentRoll: null, linked: false, sheetId: sheet.id, failureReason: 'barcode_not_found' });
-            }
+        invalidFiles.forEach((f: any) => {
+          allResults.push({
+            fileName: f.filename,
+            barcode: null,
+            studentName: null,
+            studentRoll: null,
+            linked: false,
+            failureReason: 'invalid_barcode',
           });
+        });
+
+        duplicates.forEach((f: any) => {
+          allResults.push({
+            fileName: f.filename,
+            barcode: f.barcode || null,
+            studentName: f.student_name || null,
+            studentRoll: f.roll_no || null,
+            linked: false,
+            alreadyLinked: true,
+            failureReason: 'duplicate_upload',
+          });
+        });
+
+        mismatchFiles.forEach((f) => {
+          allResults.push({
+            fileName: f.filename,
+            barcode: f.barcode,
+            studentName: f.student_name,
+            studentRoll: f.roll_no,
+            linked: false,
+            failureReason: 'subject_mismatch',
+            studentSubject: f.student_subject,
+            examSubject: f.exam_subject,
+          });
+        });
+
+        if (uploadedSheets.length > 0) {
+          const sheetIds = uploadedSheets.map((s: any) => s.id);
+          const linkResponse = await sheetService.autoLinkSheets(selectedExam, sheetIds);
+
+          if (linkResponse.success) {
+            const results = linkResponse.data.results || [];
+            uploadedSheets.forEach((sheet: any) => {
+              const matchedFile = uploadedFiles.find((f) => f.barcode === sheet.barcode);
+              const result = results.find((r: any) => r.barcode === sheet.barcode);
+              if (result?.matched) {
+                allResults.push({
+                  fileName: matchedFile?.name || sheet.file_name,
+                  barcode: sheet.barcode,
+                  studentName: result.student?.student_name || null,
+                  studentRoll: result.student?.roll_no || null,
+                  linked: true,
+                  sheetId: sheet.id,
+                });
+              } else {
+                allResults.push({
+                  fileName: matchedFile?.name || sheet.file_name,
+                  barcode: sheet.barcode,
+                  studentName: null,
+                  studentRoll: null,
+                  linked: false,
+                  sheetId: sheet.id,
+                  failureReason: 'barcode_not_found',
+                });
+              }
+            });
+          }
+        }
+
+        // Update progress state after chunk finishes
+        setUploadProgressModal((prev) => ({
+          ...prev,
+          uploadedCount: endNum,
+          progressText: `Uploaded ${endNum} of ${totalFiles} sheets (Chunk ${c + 1} of ${totalChunks} complete)`,
+        }));
+
+        if (c < totalChunks - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
       }
 
+      if (allMismatches.length > 0) setSubjectMismatch(allMismatches);
       setLinkingResults(allResults);
 
       const lc = allResults.filter((r) => r.linked).length;
       const fc = allResults.filter((r) => !r.linked).length;
 
-      if (lc > 0 && fc === 0) showToast(`✅ All ${lc} sheet(s) linked successfully`, 'success');
+      if (lc > 0 && fc === 0) showToast(`✅ All ${lc} sheet(s) uploaded & linked successfully`, 'success');
       else if (lc > 0) showToast(`${lc} linked, ${fc} failed — see results below`, 'success');
       else showToast('No sheets linked — check errors below', 'error');
 
@@ -1294,9 +1406,19 @@ export default function SheetUpload() {
       await fetchUnlinkedSheets(selectedExam);
     } catch (error: any) {
       console.error('Auto-link error:', error);
-      showToast(error.message || 'Failed to auto-link sheets', 'error');
+      showToast(error.message || 'Failed to process sheet upload', 'error');
     } finally {
       setIsLinking(false);
+      setUploadProgressModal({
+        open: false,
+        isUploading: false,
+        currentChunk: 0,
+        totalChunks: 0,
+        totalFiles: 0,
+        uploadedCount: 0,
+        progressText: '',
+        cancelRequested: false,
+      });
     }
   };
 
@@ -1886,6 +2008,91 @@ export default function SheetUpload() {
             </div>
           </div>
         </>
+      )}
+
+      {/* ─── UPLOAD PROGRESS MODAL (CHUNKS OF 100) ─── */}
+      {uploadProgressModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-semibold text-xl flex-shrink-0">
+                <i className="ri-upload-cloud-2-line text-2xl animate-bounce"></i>
+              </div>
+              <div>
+                <h4 className="text-base font-semibold text-gray-900">
+                  Uploading Answer Sheets
+                </h4>
+                <p className="text-xs text-gray-500">
+                  Chunk size: 100 sheets per batch
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-100">
+              <div className="flex items-center justify-between text-xs font-semibold text-gray-800">
+                <span>Sheets Uploaded</span>
+                <span className="text-blue-600 font-bold text-sm">
+                  {uploadProgressModal.uploadedCount} / {uploadProgressModal.totalFiles}
+                </span>
+              </div>
+
+              <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden shadow-inner">
+                <div
+                  className="bg-blue-600 h-3 rounded-full transition-all duration-500 ease-out flex items-center justify-end pr-1"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.max(
+                        3,
+                        Math.round(
+                          (uploadProgressModal.uploadedCount /
+                            (uploadProgressModal.totalFiles || 1)) *
+                            100,
+                        ),
+                      ),
+                    )}%`,
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-gray-500 font-medium pt-0.5">
+                <span>
+                  Chunk {uploadProgressModal.currentChunk} of {uploadProgressModal.totalChunks}
+                </span>
+                <span>
+                  {Math.round(
+                    (uploadProgressModal.uploadedCount /
+                      (uploadProgressModal.totalFiles || 1)) *
+                      100,
+                  )}
+                  % Complete
+                </span>
+              </div>
+
+              <p className="text-xs text-gray-600 font-medium italic pt-1.5 border-t border-gray-200/60 mt-1 flex items-center gap-1.5">
+                <i className="ri-loader-4-line text-blue-600 animate-spin text-sm flex-shrink-0"></i>
+                <span className="truncate">{uploadProgressModal.progressText}</span>
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setUploadProgressModal((prev) => ({
+                    ...prev,
+                    cancelRequested: true,
+                  }))
+                }
+                className="px-4 py-2 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer border border-red-200"
+              >
+                Cancel Upload
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
