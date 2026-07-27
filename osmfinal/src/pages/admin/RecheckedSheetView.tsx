@@ -112,6 +112,19 @@ export default function RecheckedSheetView() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [closedNoteIds, setClosedNoteIds] = useState<Set<number | string>>(new Set());
+
+  const toggleNote = (id: number | string) => {
+    setClosedNoteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -398,7 +411,6 @@ export default function RecheckedSheetView() {
   };
 
   // ─── Render notes ───
-  // ─── Render notes ───
   const renderNotes = () => {
     const notes = getNotesForPage(currentPage);
     if (notes.length === 0) return null;
@@ -408,6 +420,8 @@ export default function RecheckedSheetView() {
       const hasText = note.text && note.text.trim().length > 0;
       const accentColor = isRecheck ? '#F97316' : '#F59E0B'; // orange-500 / amber-500
       const borderColor = isRecheck ? '#FDBA74' : '#FCD34D'; // orange-300 / amber-300
+      const noteKey = note.id ?? idx;
+      const isClosed = closedNoteIds.has(noteKey);
 
       return (
         <div
@@ -421,55 +435,78 @@ export default function RecheckedSheetView() {
             pointerEvents: 'auto',
           }}
         >
-          {/* ─── PIN (always visible, small) ─── */}
+          {/* ─── PIN ─── */}
           <div
-            className="w-6 h-6 rounded-full flex items-center justify-center shadow-md cursor-default transition-transform duration-150 group-hover:scale-125"
+            className="w-6 h-6 rounded-full flex items-center justify-center shadow-md cursor-pointer transition-transform duration-150 hover:scale-125 select-none"
             style={{
               backgroundColor: accentColor,
               border: '2px solid white',
               boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
             }}
-            title={hasText ? note.text : 'Empty note'}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleNote(noteKey);
+            }}
+            title={hasText ? `${note.text} (Click to toggle)` : 'Empty note (Click to toggle)'}
           >
             <i className="ri-sticky-note-fill text-white text-[10px]" />
           </div>
 
-          {/* ─── POPOVER (shows on hover) ─── */}
-          <div
-            className="absolute hidden group-hover:block left-1/2 bottom-full mb-2 -translate-x-1/2 w-60"
-            style={{ zIndex: 50 }}
-          >
+          {/* ─── POPOVER ─── */}
+          {!isClosed && (
             <div
-              className="rounded-lg overflow-hidden shadow-2xl"
-              style={{ border: `1px solid ${borderColor}` }}
+              className="absolute block left-1/2 bottom-full mb-2 -translate-x-1/2 w-60"
+              style={{ zIndex: 50 }}
             >
-              {/* Header */}
               <div
-                className="px-2.5 py-1.5 flex items-center gap-1.5"
-                style={{ backgroundColor: accentColor }}
+                className="rounded-lg overflow-hidden shadow-2xl"
+                style={{ border: `1px solid ${borderColor}` }}
               >
-                <i className="ri-sticky-note-line text-white text-[11px]" />
-                <span className="text-white text-[10px] font-semibold uppercase tracking-wide">
-                  {isRecheck ? 'Recheck Note' : 'Original Note'}
-                </span>
+                {/* Header */}
+                <div
+                  className="px-2.5 py-1.5 flex items-center justify-between gap-1.5 cursor-pointer select-none"
+                  style={{ backgroundColor: accentColor }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleNote(noteKey);
+                  }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <i className="ri-sticky-note-line text-white text-[11px]" />
+                    <span className="text-white text-[10px] font-semibold uppercase tracking-wide">
+                      {isRecheck ? 'Recheck Note' : 'Original Note'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-white/80 hover:text-white text-xs font-bold leading-none p-0.5 rounded hover:bg-black/20 transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleNote(noteKey);
+                    }}
+                    title="Close note"
+                  >
+                    <i className="ri-close-line text-xs" />
+                  </button>
+                </div>
+                {/* Body */}
+                <div className="bg-white px-2.5 py-2 max-h-32 overflow-y-auto">
+                  {hasText ? (
+                    <p className="text-slate-700 text-xs leading-relaxed break-words whitespace-pre-wrap">
+                      {note.text}
+                    </p>
+                  ) : (
+                    <p className="text-slate-400 text-xs italic">Empty note</p>
+                  )}
+                </div>
               </div>
-              {/* Body */}
-              <div className="bg-white px-2.5 py-2 max-h-32 overflow-y-auto">
-                {hasText ? (
-                  <p className="text-slate-700 text-xs leading-relaxed break-words whitespace-pre-wrap">
-                    {note.text}
-                  </p>
-                ) : (
-                  <p className="text-slate-400 text-xs italic">Empty note</p>
-                )}
-              </div>
+              {/* Arrow pointing down to pin */}
+              <div
+                className="w-2.5 h-2.5 rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2"
+                style={{ backgroundColor: accentColor }}
+              />
             </div>
-            {/* Arrow pointing down to pin */}
-            <div
-              className="w-2.5 h-2.5 rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2"
-              style={{ backgroundColor: accentColor }}
-            />
-          </div>
+          )}
         </div>
       );
     });
