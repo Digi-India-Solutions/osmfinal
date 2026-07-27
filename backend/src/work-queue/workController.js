@@ -1,6 +1,8 @@
-// src/work-queue/workController.js
-
 import pool from '../pool.js';
+import JSZip from 'jszip';
+import fs from 'fs';
+import path from 'path';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 
 // ─── GET ALL SHEETS ─────────────────────────────────────────────
 
@@ -1221,6 +1223,364 @@ export const getEscalatedSheets = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get escalated sheets',
+      error: error.message,
+    });
+  }
+};
+
+// ─── BATCH DOWNLOAD COMPLETED SHEETS (PDFs) ────────────────────
+
+export const getCompletedSheetsCount = async (req, res) => {
+  try {
+    const { examId } = req.query;
+    let query = `SELECT COUNT(*)::int AS total FROM sheets WHERE status IN ('checked', 'rechecked')`;
+    const params = [];
+    if (examId) {
+      query += ` AND exam_id = $1`;
+      params.push(examId);
+    }
+    const result = await pool.query(query, params);
+    const total = result.rows[0]?.total || 0;
+    return res.status(200).json({
+      success: true,
+      total,
+    });
+  } catch (error) {
+    console.error('getCompletedSheetsCount error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get count',
+      error: error.message,
+    });
+  }
+};
+
+// ─── HELPER: EMBED STAMPS, ANNOTATIONS & NOTES INTO PDF ───────
+
+async function embedAnnotationsInPdf(pdfBuffer, stampsData = [], annotationsData = [], notesData = []) {
+  try {
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
+    const pages = pdfDoc.getPages();
+    if (pages.length === 0) return pdfBuffer;
+
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    // 1. Process Stamps (Given Marks)
+    if (Array.isArray(stampsData)) {
+      for (const stamp of stampsData) {
+        if (stamp.placed === false) continue;
+        const pageNum = stamp.page || 1;
+        const pIndex = pageNum - 1;
+        if (pIndex < 0 || pIndex >= pages.length) continue;
+
+        const pageObj = pages[pIndex];
+        const { width, height } = pageObj.getSize();
+
+        const cx = (stamp.x / 100) * width;
+        const cy = height - (stamp.y / 100) * height;
+        const val = stamp.value ?? 0;
+
+        let bgRgb = rgb(0.23, 0.51, 0.96); // blue-500
+        if (val === 0) bgRgb = rgb(0.93, 0.27, 0.27); // red-500
+        else if (val >= 2) bgRgb = rgb(0.13, 0.77, 0.36); // green-500
+
+        // Stamp background circle
+        pageObj.drawCircle({
+          x: cx,
+          y: cy,
+          size: 14,
+          color: bgRgb,
+          borderColor: rgb(1, 1, 1),
+          borderWidth: 2,
+        });
+
+        // Value text
+        const valStr = String(val);
+        const textWidth = fontBold.widthOfTextAtSize(valStr, 11);
+        pageObj.drawText(valStr, {
+          x: cx - textWidth / 2,
+          y: cy - 3.5,
+          size: 11,
+          font: fontBold,
+          color: rgb(1, 1, 1),
+        });
+      }
+    }
+
+    // 2. Process Annotations (tick, cross, highlight)
+    if (Array.isArray(annotationsData)) {
+      for (const ann of annotationsData) {
+        const pageNum = ann.page || 1;
+        const pIndex = pageNum - 1;
+        if (pIndex < 0 || pIndex >= pages.length) continue;
+
+        const pageObj = pages[pIndex];
+        const { width, height } = pageObj.getSize();
+
+        const cx = (ann.x / 100) * width;
+        const cy = height - (ann.y / 100) * height;
+
+        if (ann.tool === 'tick') {
+          // Green circle with V tick
+          pageObj.drawCircle({
+            x: cx,
+            y: cy,
+            size: 13,
+            color: rgb(0.13, 0.77, 0.36),
+            borderColor: rgb(1, 1, 1),
+            borderWidth: 2,
+          });
+          const txtW = fontBold.widthOfTextAtSize('V', 10);
+          pageObj.drawText('V', {
+            x: cx - txtW / 2,
+            y: cy - 3.5,
+            size: 10,
+            font: fontBold,
+            color: rgb(1, 1, 1),
+          });
+        } else if (ann.tool === 'cross') {
+          // Red circle with X cross
+          pageObj.drawCircle({
+            x: cx,
+            y: cy,
+            size: 13,
+            color: rgb(0.93, 0.27, 0.27),
+            borderColor: rgb(1, 1, 1),
+            borderWidth: 2,
+          });
+          const txtW = fontBold.widthOfTextAtSize('X', 10);
+          pageObj.drawText('X', {
+            x: cx - txtW / 2,
+            y: cy - 3.5,
+            size: 10,
+            font: fontBold,
+            color: rgb(1, 1, 1),
+          });
+        } else if (ann.tool === 'highlight') {
+          const wPx = ann.width ? (ann.width / 100) * width : 80;
+          const hPx = ann.height ? (ann.height / 100) * height : 18;
+          pageObj.drawRectangle({
+            x: cx - wPx / 2,
+            y: cy - hPx / 2,
+            width: wPx,
+            height: hPx,
+            color: rgb(0.98, 0.75, 0.14),
+            opacity: 0.35,
+          });
+        }
+      }
+    }
+
+    // 3. Process Notes
+    if (Array.isArray(notesData)) {
+      for (const note of notesData) {
+        const pageNum = note.page || 1;
+        const pIndex = pageNum - 1;
+        if (pIndex < 0 || pIndex >= pages.length) continue;
+
+        const pageObj = pages[pIndex];
+        const { width, height } = pageObj.getSize();
+
+        const cx = (note.x / 100) * width;
+        const cy = height - (note.y / 100) * height;
+
+        // Pin circle
+        pageObj.drawCircle({
+          x: cx,
+          y: cy,
+          size: 10,
+          color: rgb(0.96, 0.62, 0.07),
+          borderColor: rgb(1, 1, 1),
+          borderWidth: 1.5,
+        });
+
+        if (note.text && note.text.trim().length > 0) {
+          const cardWidth = 140;
+          const cardHeight = 45;
+          const cardX = Math.min(Math.max(cx - cardWidth / 2, 5), width - cardWidth - 5);
+          const cardY = cy > height / 2 ? cy - cardHeight - 12 : cy + 12;
+
+          pageObj.drawRectangle({
+            x: cardX,
+            y: cardY,
+            width: cardWidth,
+            height: cardHeight,
+            color: rgb(1, 1, 1),
+            borderColor: rgb(0.96, 0.62, 0.07),
+            borderWidth: 1,
+          });
+
+          pageObj.drawRectangle({
+            x: cardX,
+            y: cardY + cardHeight - 14,
+            width: cardWidth,
+            height: 14,
+            color: rgb(0.96, 0.62, 0.07),
+          });
+
+          pageObj.drawText('CHECKER NOTE', {
+            x: cardX + 6,
+            y: cardY + cardHeight - 10,
+            size: 7,
+            font: fontBold,
+            color: rgb(1, 1, 1),
+          });
+
+          const cleanText = note.text.replace(/\r?\n|\r/g, ' ').substring(0, 80);
+          pageObj.drawText(cleanText, {
+            x: cardX + 6,
+            y: cardY + cardHeight - 26,
+            size: 8,
+            font: font,
+            color: rgb(0.2, 0.2, 0.2),
+          });
+        }
+      }
+    }
+
+    const modifiedPdfBytes = await pdfDoc.save();
+    return Buffer.from(modifiedPdfBytes);
+  } catch (err) {
+    console.error('Error embedding annotations in PDF:', err);
+    return pdfBuffer;
+  }
+}
+
+export const downloadCompletedSheetsBatch = async (req, res) => {
+  try {
+    const { examId, offset = 0, limit = 100, batch = 1 } = req.query;
+    const limitNum = Math.min(parseInt(limit) || 100, 200);
+    const offsetNum = parseInt(offset) || 0;
+
+    let query = `
+      SELECT 
+        s.id,
+        s.file_url,
+        s.file_name,
+        s.student_name,
+        s.roll_no,
+        s.barcode,
+        s.status,
+        cm.stamps_data,
+        cm.annotations_data,
+        cm.notes_data
+      FROM sheets s
+      LEFT JOIN exams e ON s.exam_id = e.id
+      LEFT JOIN checker_markings cm ON cm.sheet_id = s.id AND cm.is_submitted = true
+      WHERE s.status IN ('checked', 'rechecked')
+    `;
+    const params = [];
+    let paramCount = 1;
+
+    if (examId) {
+      query += ` AND s.exam_id = $${paramCount}`;
+      params.push(examId);
+      paramCount++;
+    }
+
+    query += ` ORDER BY s.checked_at DESC NULLS LAST, s.id DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    params.push(limitNum, offsetNum);
+
+    const result = await pool.query(query, params);
+    const sheets = result.rows;
+
+    if (sheets.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No completed sheets found for this batch',
+      });
+    }
+
+    const zip = new JSZip();
+    const folderName = `Completed_Sheets_Batch_${batch}`;
+    const folder = zip.folder(folderName);
+
+    const fetchImpl = globalThis.fetch || (await import('node-fetch')).default;
+
+    for (let i = 0; i < sheets.length; i++) {
+      const s = sheets[i];
+      const rollNo = s.roll_no ? String(s.roll_no).replace(/[^a-zA-Z0-9_-]/g, '_') : 'unknown';
+      const studentName = s.student_name ? String(s.student_name).replace(/[^a-zA-Z0-9_-]/g, '_') : 'student';
+      const statusStr = s.status || 'checked';
+      const filename = `${offsetNum + i + 1}_${rollNo}_${studentName}_${statusStr}.pdf`;
+
+      // Parse JSON data
+      let stampsData = [];
+      let annotationsData = [];
+      let notesData = [];
+
+      try {
+        if (s.stamps_data) {
+          stampsData = typeof s.stamps_data === 'string' ? JSON.parse(s.stamps_data) : s.stamps_data;
+        }
+        if (s.annotations_data) {
+          annotationsData = typeof s.annotations_data === 'string' ? JSON.parse(s.annotations_data) : s.annotations_data;
+        }
+        if (s.notes_data) {
+          notesData = typeof s.notes_data === 'string' ? JSON.parse(s.notes_data) : s.notes_data;
+        }
+      } catch (e) {
+        console.error('Error parsing sheet annotations JSON:', e);
+      }
+
+      if (s.file_url) {
+        try {
+          let rawPdfBuffer = null;
+          if (s.file_url.startsWith('http://') || s.file_url.startsWith('https://')) {
+            const resp = await fetchImpl(s.file_url);
+            if (resp.ok) {
+              const arrayBuffer = await resp.arrayBuffer();
+              rawPdfBuffer = Buffer.from(arrayBuffer);
+            }
+          } else {
+            let relativePath = s.file_url;
+            if (relativePath.startsWith('/')) {
+              relativePath = relativePath.substring(1);
+            }
+            const absolutePath = path.resolve(process.cwd(), relativePath);
+            if (fs.existsSync(absolutePath)) {
+              rawPdfBuffer = fs.readFileSync(absolutePath);
+            } else {
+              const altPath = path.resolve(process.cwd(), 'uploads', relativePath);
+              if (fs.existsSync(altPath)) {
+                rawPdfBuffer = fs.readFileSync(altPath);
+              }
+            }
+          }
+
+          if (rawPdfBuffer) {
+            // Embed stamps, annotations, notes onto the PDF pages
+            const finalPdfBuffer = await embedAnnotationsInPdf(
+              rawPdfBuffer,
+              stampsData,
+              annotationsData,
+              notesData
+            );
+            folder.file(filename, finalPdfBuffer);
+          }
+        } catch (err) {
+          console.error(`Error processing PDF for sheet ${s.id}:`, err);
+        }
+      }
+    }
+
+    const zipBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+
+    const zipName = `Completed_Sheets_Batch_${batch}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+    res.setHeader('Content-Length', zipBuffer.length);
+    return res.status(200).send(zipBuffer);
+  } catch (error) {
+    console.error('downloadCompletedSheetsBatch error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate batch zip',
       error: error.message,
     });
   }

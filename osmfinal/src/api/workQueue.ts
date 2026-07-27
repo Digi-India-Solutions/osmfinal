@@ -522,6 +522,43 @@ class WorkQueueService {
       };
     }
   }
+
+  // Get completed sheets count (checked + rechecked)
+  async getCompletedSheetsCount(examId?: string): Promise<{
+    success: boolean;
+    total: number;
+  }> {
+    try {
+      const params = new URLSearchParams();
+      if (examId) params.append('examId', examId);
+      const response = await api.get(`/api/v1/work-queue/completed-sheets/count?${params.toString()}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('getCompletedSheetsCount error:', error);
+      return { success: false, total: 0 };
+    }
+  }
+
+  // Download batch of completed sheets as zip blob
+  async downloadCompletedBatch(
+    offset: number,
+    limit: number = 100,
+    batchNum: number = 1,
+    examId?: string
+  ): Promise<Blob> {
+    const params = new URLSearchParams({
+      offset: String(offset),
+      limit: String(limit),
+      batch: String(batchNum),
+    });
+    if (examId) params.append('examId', examId);
+
+    const response = await api.get(
+      `/api/v1/work-queue/completed-sheets/download-batch?${params.toString()}`,
+      { responseType: 'blob' }
+    );
+    return response.data;
+  }
 }
 
 export default new WorkQueueService();

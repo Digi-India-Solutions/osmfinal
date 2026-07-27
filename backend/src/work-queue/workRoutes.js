@@ -16,6 +16,8 @@ import {
   getCheckedSheetById, // ✅ Add this
   getCheckedSheets, // ✅ Add this
   getEscalatedSheets, // ✅ Add this
+  getCompletedSheetsCount,
+  downloadCompletedSheetsBatch,
 } from './workController.js';
 import { verifyToken } from '../../middlewares/verifyToken.middleware.js';
 
@@ -42,6 +44,12 @@ router.post('/sheets/:id/assign', verifyToken, assignSheet);
 
 // ✅ Get all checked sheets
 router.get('/checked-sheets', verifyToken, getCheckedSheets);
+
+// ✅ Get completed sheets count (checked + rechecked)
+router.get('/completed-sheets/count', verifyToken, getCompletedSheetsCount);
+
+// ✅ Download batch of completed sheets as zip
+router.get('/completed-sheets/download-batch', verifyToken, downloadCompletedSheetsBatch);
 
 // ✅ Get checked sheet by ID
 router.get('/checked-sheets/:id', verifyToken, getCheckedSheetById);
