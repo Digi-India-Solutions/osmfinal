@@ -88,6 +88,25 @@ export default function WorkQueue() {
     type: 'success' | 'error';
   } | null>(null);
 
+  // State for Download All (batches of 100)
+  const [downloadModal, setDownloadModal] = useState<{
+    open: boolean;
+    isDownloading: boolean;
+    currentBatch: number;
+    totalBatches: number;
+    totalCount: number;
+    progressText: string;
+    cancelRequested: boolean;
+  }>({
+    open: false,
+    isDownloading: false,
+    currentBatch: 0,
+    totalBatches: 0,
+    totalCount: 0,
+    progressText: '',
+    cancelRequested: false,
+  });
+
   // States for reassign
   const [reassignModal, setReassignModal] = useState<{
     open: boolean;
@@ -733,6 +752,106 @@ export default function WorkQueue() {
     }
   };
 
+  // ─── ✅ HANDLE DOWNLOAD ALL (BATCHES OF 100) ─────────────────
+
+  const handleDownloadAll = async () => {
+    try {
+      showToast('Fetching sheet count for batch download...', 'success');
+      const countRes = await workQueueService.getCompletedSheetsCount(
+        filterExam || undefined,
+      );
+      const total = countRes.total || 0;
+
+      if (total === 0) {
+        showToast('No checked/rechecked sheets available to download.', 'error');
+        return;
+      }
+
+      const BATCH_SIZE = 100;
+      const totalBatches = Math.ceil(total / BATCH_SIZE);
+
+      setDownloadModal({
+        open: true,
+        isDownloading: true,
+        currentBatch: 1,
+        totalBatches,
+        totalCount: total,
+        progressText: `Preparing to download ${total} sheets in ${totalBatches} batch(es)...`,
+        cancelRequested: false,
+      });
+
+      for (let b = 1; b <= totalBatches; b++) {
+        // Check if user requested cancellation
+        let cancelState = false;
+        setDownloadModal((prev) => {
+          if (prev.cancelRequested) {
+            cancelState = true;
+          }
+          return {
+            ...prev,
+            currentBatch: b,
+            progressText: `Downloading Batch ${b} of ${totalBatches} (Sheets ${(b - 1) * BATCH_SIZE + 1} to ${Math.min(b * BATCH_SIZE, total)} of ${total})...`,
+          };
+        });
+
+        if (cancelState) {
+          showToast('Download cancelled by user.', 'error');
+          break;
+        }
+
+        const offset = (b - 1) * BATCH_SIZE;
+        const blob = await workQueueService.downloadCompletedBatch(
+          offset,
+          BATCH_SIZE,
+          b,
+          filterExam || undefined,
+        );
+
+        // Trigger browser download of ZIP file
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Completed_Sheets_Batch_${b}_of_${totalBatches}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+        // Pause 1.5 seconds between batches to avoid browser/server overload
+        if (b < totalBatches) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      }
+
+      setDownloadModal({
+        open: false,
+        isDownloading: false,
+        currentBatch: 0,
+        totalBatches: 0,
+        totalCount: 0,
+        progressText: '',
+        cancelRequested: false,
+      });
+
+      showToast(
+        `Successfully finished downloading ${total} sheets in batches!`,
+        'success',
+      );
+    } catch (err: any) {
+      console.error('Download all error:', err);
+      showToast('Failed to download batch files. Please try again.', 'error');
+      setDownloadModal({
+        open: false,
+        isDownloading: false,
+        currentBatch: 0,
+        totalBatches: 0,
+        totalCount: 0,
+        progressText: '',
+        cancelRequested: false,
+      });
+    }
+  };
+
   // ─── CALCULATE PERCENTAGE ───────────────────────────────────
 
   const calculatePercentage = (
@@ -791,8 +910,8 @@ export default function WorkQueue() {
       </div>
 
       <div className="bg-white rounded-2xl p-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          <div className="flex items-center gap-2 bg-gray-100 rounded-xl p-1">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-1.5 bg-gray-100 rounded-xl p-1 overflow-x-auto max-w-full">
             {tabs.map((tab) => (
               <button
                 key={tab.key}
@@ -800,7 +919,7 @@ export default function WorkQueue() {
                   setActiveTab(tab.key);
                   setSelectedSheetIds([]);
                 }}
-                className={`relative px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                className={`relative px-3.5 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   activeTab === tab.key
                     ? 'bg-white text-gray-900 shadow-sm'
                     : 'text-gray-500 hover:text-gray-700'
@@ -814,7 +933,7 @@ export default function WorkQueue() {
             ))}
           </div>
 
-          <div className="flex items-center gap-3 flex-1 justify-end">
+          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-start lg:justify-end">
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 flex items-center justify-center text-gray-400">
                 <i className="ri-search-line text-xs"></i>
@@ -824,7 +943,7 @@ export default function WorkQueue() {
                 value={searchName}
                 onChange={(e) => setSearchName(e.target.value)}
                 placeholder="Search student..."
-                className="pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent w-48 placeholder:text-gray-400"
+                className="pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent w-44 placeholder:text-gray-400"
               />
             </div>
             <select
@@ -840,6 +959,17 @@ export default function WorkQueue() {
                 </option>
               ))}
             </select>
+
+            <button
+              type="button"
+              onClick={handleDownloadAll}
+              disabled={downloadModal.isDownloading}
+              className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-sm font-medium shadow-sm transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              title="Download all checked and rechecked answer sheets"
+            >
+              <i className="ri-download-cloud-2-line text-base"></i>
+              <span>Download All</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1638,6 +1768,74 @@ export default function WorkQueue() {
                     Confirm Reassign
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── DOWNLOAD PROGRESS MODAL ─── */}
+      {downloadModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-semibold text-lg">
+                <i className="ri-download-cloud-line text-xl animate-bounce"></i>
+              </div>
+              <div>
+                <h4 className="text-base font-semibold text-gray-900">
+                  Downloading Completed Sheets
+                </h4>
+                <p className="text-xs text-gray-500">
+                  Batch download (100 PDFs per batch for speed & reliability)
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-medium text-gray-600">
+                <span>
+                  Batch {downloadModal.currentBatch} of {downloadModal.totalBatches}
+                </span>
+                <span>
+                  {Math.round(
+                    (downloadModal.currentBatch / downloadModal.totalBatches) *
+                      100,
+                  )}
+                  %
+                </span>
+              </div>
+
+              <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
+                  style={{
+                    width: `${
+                      (downloadModal.currentBatch /
+                        downloadModal.totalBatches) *
+                      100
+                    }%`,
+                  }}
+                ></div>
+              </div>
+
+              <p className="text-xs text-gray-600 italic mt-2">
+                {downloadModal.progressText}
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setDownloadModal((prev) => ({
+                    ...prev,
+                    cancelRequested: true,
+                  }))
+                }
+                className="px-4 py-2 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel Download
               </button>
             </div>
           </div>
